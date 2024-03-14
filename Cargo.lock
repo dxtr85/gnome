@@ -439,6 +439,7 @@ dependencies = [
  "async-std",
  "bytes",
  "futures",
+ "swarm-consensus",
 ]
 
 [[package]]
@@ -646,6 +647,10 @@ dependencies = [
  "libc",
  "winapi",
 ]
+
+[[package]]
+name = "swarm-consensus"
+version = "0.1.0"
 
 [[package]]
 name = "syn"
