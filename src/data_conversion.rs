@@ -1,17 +1,15 @@
 use std::fmt;
 
+use std::error::Error;
 use swarm_consensus::BlockID;
 use swarm_consensus::Data;
 use swarm_consensus::Header;
 use swarm_consensus::Message;
 use swarm_consensus::NeighborRequest;
-// use swarm_consensus::;
-use std::error::Error;
 use swarm_consensus::Neighborhood;
 use swarm_consensus::Payload;
 use swarm_consensus::SwarmTime;
 
-// use bytes::Buf;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
@@ -29,7 +27,7 @@ use bytes::BytesMut;
 //         SS... = SwarmTime value
 
 pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
-    println!("Bytes to message: {:?}", bytes);
+    // println!("Bytes to message: {:?}", bytes);
     let swarm_time: SwarmTime = SwarmTime(as_u32_be(&[bytes[1], bytes[2], bytes[3], bytes[4]]));
     let neighborhood: Neighborhood = Neighborhood(bytes[0] & 0b0001_1111);
     let header = if bytes[0] & 0b1000_0000 > 0 {
@@ -71,7 +69,7 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
                 bytes[4 * i + 8],
                 bytes[4 * i + 9],
             ]);
-            data[i as usize] = BlockID(bid);
+            data[i] = BlockID(bid);
         }
         Payload::Listing(count, data)
     } else {
@@ -89,25 +87,26 @@ fn as_u32_be(array: &[u8; 4]) -> u32 {
     ((array[0] as u32) << 24)
         + ((array[1] as u32) << 16)
         + ((array[2] as u32) << 8)
-        + ((array[3] as u32) << 0)
+        + (array[3] as u32)
 }
 
 #[derive(Debug)]
-pub enum ConversionError {
-    Failed,
-}
+pub struct ConversionError;
+//     Failed,
+// }
 impl fmt::Display for ConversionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ConversionError::Failed => write!(f, "ConversionError: Failed"),
-        }
+        // match self {
+        //     ConversionError::Failed => write!(f, "ConversionError: Failed"),
+        // }
+        write!(f, "ConversionError")
     }
 }
 
 impl Error for ConversionError {}
 
 pub fn message_to_bytes(msg: Message) -> Bytes {
-    println!("Message to bytes: {:?}", msg);
+    // println!("Message to bytes: {:?}", msg);
     let mut bytes = BytesMut::with_capacity(1033);
     let nhood = msg.neighborhood.0;
     if nhood > 63 {
@@ -127,7 +126,7 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
         Payload::Block(block_id, data) => {
             if !block_id_inserted {
                 bytes.put_u32(block_id.0);
-                block_id_inserted = true;
+                // block_id_inserted = true;
             };
             bytes.put_u32(data.0);
             0b0100_0000

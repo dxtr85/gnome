@@ -1,10 +1,9 @@
 use async_std::net::UdpSocket;
-use async_std::task::sleep;
+use async_std::task::{self, sleep, spawn};
 use bytes::{BufMut, Bytes, BytesMut};
 use core::panic;
-use futures::channel::mpsc;
 use futures::join;
-use futures::StreamExt;
+// use futures::StreamExt;
 use futures::{
     future::FutureExt, // for `.fuse()`
     pin_mut,
@@ -12,6 +11,8 @@ use futures::{
 };
 use std::error::Error;
 use std::fmt;
+use std::sync::mpsc::{channel, Receiver, Sender};
+use swarm_consensus::Message;
 
 #[derive(Debug)]
 enum ConnError {
@@ -31,11 +32,14 @@ impl Error for ConnError {}
 
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
+
+use crate::data_conversion::bytes_to_message;
+use crate::data_conversion::message_to_bytes;
 pub async fn run_networking_tasks(
     host_ip: IpAddr,
     broadcast_ip: IpAddr,
     server_port: u16,
-    sender: mpsc::Sender<(mpsc::Sender<Bytes>, mpsc::Receiver<Bytes>)>,
+    sender: Sender<(Sender<Message>, Receiver<Message>)>,
 ) {
     let server_addr: SocketAddr = SocketAddr::new(host_ip, server_port);
     let bind_result = UdpSocket::bind(server_addr).await;
@@ -62,7 +66,7 @@ pub async fn run_networking_tasks(
 async fn run_server(
     host_ip: IpAddr,
     socket: UdpSocket,
-    mut sender: mpsc::Sender<(mpsc::Sender<Bytes>, mpsc::Receiver<Bytes>)>,
+    sender: Sender<(Sender<Message>, Receiver<Message>)>,
 ) {
     println!("--------------------------------------");
     println!("- - - - - - - - SERVER - - - - - - - -");
@@ -92,12 +96,14 @@ async fn run_server(
                 let conn_result = dedicated_socket.connect(remote_addr).await;
                 if let Ok(()) = conn_result {
                     println!("SKT Connected to client");
-                    let (s1, r1) = mpsc::channel(16);
-                    let (s2, r2) = mpsc::channel(16);
-                    let send_result = sender.try_send((s1, r2));
-                    // println!("send result: {:?}", send_result);
+                    let (s1, r1) = channel();
+                    let (s2, r2) = channel();
+                    let send_result = sender.send((s1, r2));
+                    if send_result.is_err() {
+                        println!("send result: {:?}", send_result);
+                    }
                     if send_result.is_ok() {
-                        serve_socket(dedicated_socket, s2, r1).await;
+                        spawn(serve_socket(dedicated_socket, s2, r1));
                     }
                     println!("--------------------------------------");
                 }
@@ -109,10 +115,9 @@ async fn run_server(
 async fn run_client(
     server_addr: SocketAddr,
     socket: UdpSocket,
-    mut sender: mpsc::Sender<(mpsc::Sender<Bytes>, mpsc::Receiver<Bytes>)>,
+    sender: Sender<(Sender<Message>, Receiver<Message>)>,
 ) {
     println!("SKT CLIENT");
-    // let (mut sender, mut receiver) = sender;
     let mut buf = BytesMut::new();
     let local_addr = socket.local_addr().unwrap().to_string();
     buf.put(local_addr.as_bytes());
@@ -130,13 +135,11 @@ async fn run_client(
             .await;
         if conn_result.is_ok() {
             println!("SKT Connected to server");
-            // TODO: change following with new sender
-            let (s1, r1) = mpsc::channel(16);
-            let (s2, r2) = mpsc::channel(16);
-            let send_result = sender.try_send((s1, r2));
-            // println!("send result: {:?}", send_result);
+            let (s1, r1) = channel();
+            let (s2, r2) = channel();
+            let send_result = sender.send((s1, r2));
             if send_result.is_ok() {
-                serve_socket(socket, s2, r1).await;
+                spawn(serve_socket(socket, s2, r1));
             }
         } else {
             println!("SKT Failed to connect");
@@ -151,7 +154,7 @@ async fn establish_connections_to_lan_servers(
     host_ip: IpAddr,
     broadcast_ip: IpAddr,
     server_port: u16,
-    sender: mpsc::Sender<(mpsc::Sender<Bytes>, mpsc::Receiver<Bytes>)>,
+    sender: Sender<(Sender<Message>, Receiver<Message>)>,
 ) {
     //TODO: extend to send a broadcast dgram to local network
     // and create a dedicated connection for each response
@@ -184,10 +187,11 @@ async fn establish_connections_to_lan_servers(
 }
 
 async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<Bytes, ConnError> {
+    // println!("read_bytes_from_socket");
     let mut buf = BytesMut::zeroed(1024);
     let recv_result = socket.peek(&mut buf[..]).await;
     if let Ok(count) = recv_result {
-        println!("<<<<< {:?}", String::from_utf8_lossy(&buf[..count]));
+        // println!("<<<<< {:?}", String::from_utf8_lossy(&buf[..count]));
         Ok(Bytes::from(Vec::from(&buf[..count])))
     } else {
         println!("SKT {:?}", recv_result);
@@ -196,58 +200,77 @@ async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<Bytes, ConnError> 
 }
 
 async fn read_bytes_from_local_stream(
-    receiver: &mut mpsc::Receiver<Bytes>,
+    receiver: &mut Receiver<Message>,
 ) -> Result<Bytes, ConnError> {
-    let next_option = receiver.next().await;
-    if let Some(bytes) = next_option {
-        println!(">>>>> {:?}", bytes);
-        Ok(bytes)
-    } else {
-        Err(ConnError::LocalStreamClosed)
+    // println!("read_bytes_from_local_stream");
+    loop {
+        let next_option = receiver.try_recv();
+        if let Ok(message) = next_option {
+            let bytes = message_to_bytes(message);
+            // println!(">>>>> {:?}", bytes);
+            return Ok(bytes);
+        } else {
+            task::yield_now().await;
+        }
     }
+    // Err(ConnError::LocalStreamClosed)
 }
 
 async fn race_tasks(
     socket: &UdpSocket,
-    sender: &mut mpsc::Sender<Bytes>,
-    receiver: &mut mpsc::Receiver<Bytes>,
+    sender: &mut Sender<Message>,
+    receiver: &mut Receiver<Message>,
 ) {
     let mut buf = BytesMut::zeroed(1024);
-    let t1 = read_bytes_from_socket(socket).fuse();
-    let t2 = read_bytes_from_local_stream(receiver).fuse();
+    loop {
+        let t1 = read_bytes_from_socket(socket).fuse();
+        let t2 = read_bytes_from_local_stream(receiver).fuse();
 
-    pin_mut!(t1, t2);
+        pin_mut!(t1, t2);
 
-    let (from_socket, result) = select! {
-        result1 = t1 =>  (true, result1),
-        result2 = t2 => (false, result2),
-    };
-    if let Err(err) = result {
-        println!("SRCV Error received: {:?}", err);
-        // TODO: should end serving this socket
-    } else if let Ok(bytes) = result {
-        if from_socket {
-            let read_result = socket.recv(&mut buf).await;
-            if let Ok(count) = read_result {
-                if bytes.len() == count {
-                    let _send_result = sender.try_send(bytes);
+        let (from_socket, result) = select! {
+            result1 = t1 => {print!(""); (true, result1)},
+            result2 = t2 => {print!("");(false, result2)},
+        };
+        if let Err(_err) = result {
+            // println!("SRVC Error received: {:?}", _err);
+            // TODO: should end serving this socket
+        } else if let Ok(bytes) = result {
+            if from_socket {
+                // println!("From soket");
+                let read_result = socket.recv(&mut buf).await;
+                if let Ok(count) = read_result {
+                    // println!("Read {} bytes", count);
+                    if bytes.len() == count {
+                        // println!("Count match");
+                        if let Ok(message) = bytes_to_message(&bytes) {
+                            // println!("decode OK");
+                            let _send_result = sender.send(message);
+                            if _send_result.is_err() {
+                                println!("send result2: {:?}", _send_result);
+                            }
+                        } else {
+                            println!("Failed to decode incoming stream");
+                        }
+                    } else {
+                        println!("SRCV Peeked != recv");
+                    }
                 } else {
-                    println!("SRCV Peeked != recv");
+                    println!("SRCV Unable to recv supposedly ready data");
                 }
             } else {
-                println!("SRCV Unable to recv supposedly ready data");
+                let _send_result = socket.send(&bytes).await;
             }
-        } else {
-            let _send_result = socket.send(&bytes).await;
         }
     }
 }
 
 async fn serve_socket(
     socket: UdpSocket,
-    mut sender: mpsc::Sender<Bytes>,
-    mut receiver: mpsc::Receiver<Bytes>,
+    mut sender: Sender<Message>,
+    mut receiver: Receiver<Message>,
 ) {
-    println!("SRCV Racing tasks");
+    println!("SRVC Racing tasks");
     race_tasks(&socket, &mut sender, &mut receiver).await;
+    println!("SRVC Racing tasks over");
 }
