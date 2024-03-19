@@ -194,7 +194,7 @@ async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<Bytes, ConnError> 
         // println!("<<<<< {:?}", String::from_utf8_lossy(&buf[..count]));
         Ok(Bytes::from(Vec::from(&buf[..count])))
     } else {
-        println!("SKT {:?}", recv_result);
+        println!("SKTd{:?}", recv_result);
         Err(ConnError::Disconnected)
     }
 }
@@ -233,8 +233,10 @@ async fn race_tasks(
             result2 = t2 => {print!("");(false, result2)},
         };
         if let Err(_err) = result {
-            // println!("SRVC Error received: {:?}", _err);
+            println!("SRVC Error received: {:?}", _err);
             // TODO: should end serving this socket
+            let _send_result = sender.send(Message::bye());
+            break;
         } else if let Ok(bytes) = result {
             if from_socket {
                 // println!("From soket");

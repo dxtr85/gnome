@@ -1,7 +1,7 @@
 use async_std::task::spawn_blocking;
-use async_std::task::{sleep, spawn};
+// use async_std::task::{sleep, spawn};
 use std::net::IpAddr;
-use std::time::Duration;
+// use std::time::Duration;
 use swarm_consensus::start;
 use swarm_consensus::GnomeId;
 use swarm_consensus::Message;
@@ -12,10 +12,12 @@ mod networking;
 use networking::run_networking_tasks;
 use std::sync::mpsc::{channel, Receiver, Sender};
 
+pub fn gnome_start(ip: IpAddr, broadcast: IpAddr, port: u16, swarm: String) {}
+
 #[async_std::main]
 async fn main() {
-    let server_ip: IpAddr = "192.168.0.106".parse().unwrap();
-    let broadcast_ip: IpAddr = "192.168.0.255".parse().unwrap();
+    let server_ip: IpAddr = "192.168.1.23".parse().unwrap();
+    let broadcast_ip: IpAddr = "192.168.1.255".parse().unwrap();
     let server_port: u16 = 1026;
     let (sender, receiver) = channel();
     spawn_blocking(move || run_service(receiver));
