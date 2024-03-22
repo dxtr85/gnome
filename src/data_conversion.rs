@@ -29,17 +29,19 @@ use bytes::BytesMut;
 
 pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
     // println!("Bytes to message: {:?}", bytes);
+    // println!("decoding: {:#08b} {:?}", bytes[0], bytes);
     let swarm_time: SwarmTime = SwarmTime(as_u32_be(&[bytes[1], bytes[2], bytes[3], bytes[4]]));
     let neighborhood: Neighborhood = Neighborhood(bytes[0] & 0b0_000_1111);
     let header = if bytes[0] & 0b1_000_0000 > 0 {
-        let block_id: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
+        let block_id: u32 = as_u32_be(&[bytes[5], bytes[6], bytes[7], bytes[8]]);
         Header::Block(BlockID(block_id))
     } else {
         Header::Sync
     };
-    let payload: Payload = if bytes[0] & 0b0_111_0000 > 0 {
+    let payload: Payload = if bytes[0] & 0b0_111_0000 == 112 {
+        println!("bytes[0]: {:#b}", bytes[0]);
         Payload::Bye
-    } else if bytes[0] & 0b0_001_0000 > 0 {
+    } else if bytes[0] & 0b0_001_0000 == 16 {
         let count: u8 = bytes[5];
         let nr = if count == 0 {
             let st_value: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
@@ -48,29 +50,31 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
             let mut data = [BlockID(0); 128];
             for i in 0..count as usize {
                 let bid = as_u32_be(&[
+                    bytes[4 * i + 5],
                     bytes[4 * i + 6],
                     bytes[4 * i + 7],
                     bytes[4 * i + 8],
-                    bytes[4 * i + 9],
                 ]);
                 data[i as usize] = BlockID(bid);
             }
             NeighborRequest::PayloadRequest(count, data)
         };
         Payload::Request(nr)
-    } else if bytes[0] & 0b0_100_0000 > 0 {
-        let bid: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
-        let data = Data(as_u32_be(&[bytes[10], bytes[11], bytes[12], bytes[13]]));
+    } else if bytes[0] & 0b0_100_0000 == 64 {
+        // let bid: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
+        // let data = Data(as_u32_be(&[bytes[10], bytes[11], bytes[12], bytes[13]]));
+        let bid: u32 = as_u32_be(&[bytes[9], bytes[6], bytes[7], bytes[8]]);
+        let data = Data(as_u32_be(&[bytes[9], bytes[10], bytes[11], bytes[12]]));
         Payload::Block(BlockID(bid), data)
-    } else if bytes[0] & 0b0_010_0000 > 0 {
+    } else if bytes[0] & 0b0_010_0000 == 32 {
         let count = bytes[5];
         let mut data = [BlockID(0); 128];
         for i in 0..count as usize {
             let bid: u32 = as_u32_be(&[
+                bytes[4 * i + 5],
                 bytes[4 * i + 6],
                 bytes[4 * i + 7],
                 bytes[4 * i + 8],
-                bytes[4 * i + 9],
             ]);
             data[i] = BlockID(bid);
         }
@@ -158,5 +162,6 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
             0b0_001_0000
         }
     };
+    // println!("encoded: {:#08b} {:?}", bytes[0], bytes);
     bytes.split().into()
 }

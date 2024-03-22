@@ -40,7 +40,7 @@ pub async fn run_networking_tasks(
     host_ip: IpAddr,
     _broadcast_ip: IpAddr,
     server_port: u16,
-    _sender: Sender<(Sender<Message>, Receiver<Message>)>,
+    // _sender: Sender<(Sender<Message>, Receiver<Message>)>,
     notification_receiver: Receiver<(String, Sender<Request>)>,
 ) {
     let server_addr: SocketAddr = SocketAddr::new(host_ip, server_port);
@@ -92,7 +92,7 @@ async fn run_server(
     let mut bytes = buf.split();
     // let mut swarms: HashMap<String, Sender<Request>> = HashMap::with_capacity(10);
     loop {
-        println!("loopa");
+        // println!("loopa");
         // if let Ok((swarm_name, sender)) = subscription_receiver.try_recv() {
         // swarms.insert(swarm_name, sender);
         // TODO: inform existing sockets about new subscription
@@ -115,7 +115,7 @@ async fn run_server(
             // }
             let mut common_names = vec![];
             // let recv_str = String::from_utf8(Vec::from(&bytes[..count])).unwrap();
-            println!("his: {:?}", names);
+            // println!("his: {:?}", names);
             // let remote_addr: SocketAddr = recv_str.parse().unwrap();
             let dedicated_socket = UdpSocket::bind(SocketAddr::new(host_ip, 0)).await.unwrap();
             // TODO: send swarm names we subscribe and match remote interests
@@ -130,7 +130,7 @@ async fn run_server(
                     vec![]
                 }
             };
-            println!("my: {:?}", swarm_names);
+            // println!("my: {:?}", swarm_names);
             // if let Ok(Subscription::List(swarms)) = sub_receiver.recv() {
             // } else {
             //     println!("did not recv subscription list");
@@ -143,7 +143,7 @@ async fn run_server(
                     .as_bytes(),
             );
             let bytes_to_send = buf.split();
-            println!("sending: {:?}", bytes_to_send);
+            // println!("sending: {:?}", bytes_to_send);
             let send_result = socket.send_to(&bytes_to_send, remote_addr).await;
             if let Ok(count) = send_result {
                 println!("SKT Sent {} bytes: {:?}", count, bytes_to_send);
@@ -270,20 +270,27 @@ async fn run_client(
     let mut buf = BytesMut::with_capacity(128);
     // let local_addr = socket.local_addr().unwrap().to_string();
     // TODO: send a list of swarms we are subscribed to
-    let _ = sender.send(Subscription::ProvideList);
-    let _recv_result = receiver.recv();
-    println!("res: {:?}", _recv_result);
-    let recv_result = receiver.recv();
-    println!("res: {:?}", recv_result);
-    let names = match recv_result {
-        Ok(Subscription::Added(name)) => vec![name],
-        Ok(Subscription::List(names)) => names,
-        Ok(_) => vec![],
-        Err(e) => {
-            println!("Error: {:?}", e);
-            vec![]
+    let mut names = vec![];
+    loop {
+        let _ = sender.send(Subscription::ProvideList);
+        let _recv_result = receiver.recv();
+        println!("res: {:?}", _recv_result);
+        let recv_result = receiver.recv();
+        println!("res: {:?}", recv_result);
+        match recv_result {
+            Ok(Subscription::Added(ref name)) => names = vec![name.to_owned()],
+            Ok(Subscription::List(ref nnames)) => names = nnames.to_owned(),
+            Ok(_) => names = vec![],
+            Err(e) => {
+                println!("Error: {:?}", e);
+                // vec![]
+            }
+        };
+        if names.len() > 0 {
+            break;
         }
-    };
+        yield_now();
+    }
     // let names = if let Ok(Subscription::List(swarms)) = recv_result {
     //     println!("Sub list: {:?}", swarms);
     //     swarms
@@ -339,7 +346,7 @@ async fn run_client(
                 let _ = sender.send(Subscription::IncludeNeighbor(name, neighbor));
                 ch_pairs.push((s2, r1));
             }
-            spawn(serve_socket(socket, ch_pairs));
+            spawn(serve_socket(socket, ch_pairs)).await;
         } else {
             println!("SKT Failed to connect");
         }
@@ -395,13 +402,17 @@ async fn establish_connections_to_lan_servers(
     }
 }
 
-async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<Bytes, ConnError> {
+async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<(u8, Bytes), ConnError> {
     // println!("read_bytes_from_socket");
     let mut buf = BytesMut::zeroed(1024);
     let recv_result = socket.peek(&mut buf[..]).await;
     if let Ok(count) = recv_result {
         // println!("<<<<< {:?}", String::from_utf8_lossy(&buf[..count]));
-        Ok(Bytes::from(Vec::from(&buf[..count])))
+        if buf[0] & 0b1_111_0000 == 240 {
+            Ok((buf[1], Bytes::from(Vec::from(&buf[2..count - 2]))))
+        } else {
+            Ok((0, Bytes::from(Vec::from(&buf[..count]))))
+        }
     } else {
         println!("SKTd{:?}", recv_result);
         Err(ConnError::Disconnected)
@@ -409,18 +420,28 @@ async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<Bytes, ConnError> 
 }
 
 async fn read_bytes_from_local_stream(
-    receiver: &mut Receiver<Message>,
-) -> Result<Bytes, ConnError> {
+    receivers: &mut HashMap<u8, Receiver<Message>>,
+) -> Result<(u8, Bytes), ConnError> {
     // println!("read_bytes_from_local_stream");
     loop {
-        let next_option = receiver.try_recv();
-        if let Ok(message) = next_option {
-            let bytes = message_to_bytes(message);
-            // println!(">>>>> {:?}", bytes);
-            return Ok(bytes);
-        } else {
-            task::yield_now().await;
+        for (id, receiver) in receivers.iter_mut() {
+            let next_option = receiver.try_recv();
+            if let Ok(message) = next_option {
+                let bytes = message_to_bytes(message);
+                // println!(">>>>> {:?}", bytes);
+
+                if *id == 0 {
+                    return Ok((*id, bytes));
+                } else {
+                    let mut extended_bytes = BytesMut::with_capacity(bytes.len() + 2);
+                    extended_bytes.put_u8(240);
+                    extended_bytes.put_u8(*id);
+                    extended_bytes.put(bytes);
+                    return Ok((*id, Bytes::from(extended_bytes)));
+                }
+            }
         }
+        task::yield_now().await;
     }
     // Err(ConnError::LocalStreamClosed)
 }
@@ -432,56 +453,71 @@ async fn race_tasks(
     // mut receiver: Receiver<Message>,
     // , subscription_receiver: Receiver<(bool, String, Option<(Sender<Message>, Receiver<Message>)>),
 ) {
-    println!("racing: {:?}", send_recv_pairs);
+    let mut senders: HashMap<u8, Sender<Message>> = HashMap::new();
+    let mut receivers: HashMap<u8, Receiver<Message>> = HashMap::new();
+    // println!("racing: {:?}", send_recv_pairs);
+    for (i, (sender, receiver)) in send_recv_pairs.into_iter().enumerate() {
+        senders.insert(i as u8, sender);
+        receivers.insert(i as u8, receiver);
+    }
     let mut buf = BytesMut::zeroed(1024);
-    if let Some((sender, mut receiver)) = send_recv_pairs.pop() {
-        loop {
-            let t1 = read_bytes_from_socket(&socket).fuse();
-            // TODO: serv pairs of sender-receiver
-            let t2 = read_bytes_from_local_stream(&mut receiver).fuse();
+    // if let Some((sender, mut receiver)) = send_recv_pairs.pop() {
+    loop {
+        let t1 = read_bytes_from_socket(&socket).fuse();
+        // TODO: serv pairs of sender-receiver
+        let t2 = read_bytes_from_local_stream(&mut receivers).fuse();
 
-            pin_mut!(t1, t2);
+        pin_mut!(t1, t2);
 
-            let (from_socket, result) = select! {
-                result1 = t1 => {print!(""); (true, result1)},
-                result2 = t2 => {print!("");(false, result2)},
-            };
-            if let Err(_err) = result {
-                println!("SRVC Error received: {:?}", _err);
-                // TODO: should end serving this socket
+        let (from_socket, result) = select! {
+            result1 = t1 => {print!(""); (true, result1)},
+            result2 = t2 => {print!("");(false, result2)},
+        };
+        if let Err(_err) = result {
+            println!("SRVC Error received: {:?}", _err);
+            // TODO: should end serving this socket
+            for sender in senders.values() {
                 let _send_result = sender.send(Message::bye());
-                break;
-            } else if let Ok(bytes) = result {
-                if from_socket {
-                    // println!("From soket");
-                    let read_result = socket.recv(&mut buf).await;
-                    if let Ok(count) = read_result {
-                        // println!("Read {} bytes", count);
-                        if bytes.len() == count {
-                            // println!("Count match");
-                            if count > 0 {
-                                if let Ok(message) = bytes_to_message(&bytes) {
-                                    // println!("decode OK");
+            }
+            break;
+        } else if let Ok((id, bytes)) = result {
+            if from_socket {
+                // println!("From soket");
+                let read_result = socket.recv(&mut buf).await;
+                if let Ok(count) = read_result {
+                    // println!("Read {} bytes", count);
+                    if bytes.len() <= count {
+                        // println!("Count match");
+                        if count > 0 {
+                            if let Ok(message) = bytes_to_message(&bytes) {
+                                // println!("decode OK");
+                                if let Some(sender) = senders.get(&id) {
+                                    // if message.is_bye() {
+                                    //     println!("Sending: {:?}", message);
+                                    // }
                                     let _send_result = sender.send(message);
                                     if _send_result.is_err() {
-                                        println!("send result2: {:?}", _send_result);
+                                        println!("{:?} send result2: {:?}", message, _send_result);
                                     }
                                 } else {
-                                    println!("Failed to decode incoming stream");
+                                    println!("Did not find sender for {}", id);
                                 }
+                            } else {
+                                println!("Failed to decode incoming stream");
                             }
-                        } else {
-                            println!("SRCV Peeked != recv");
                         }
                     } else {
-                        println!("SRCV Unable to recv supposedly ready data");
+                        println!("SRCV Peeked != recv");
                     }
                 } else {
-                    let _send_result = socket.send(&bytes).await;
+                    println!("SRCV Unable to recv supposedly ready data");
                 }
+            } else {
+                let _send_result = socket.send(&bytes).await;
             }
         }
     }
+    // }
 }
 
 async fn serve_socket(
