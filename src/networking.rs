@@ -223,13 +223,21 @@ async fn subscriber(
     let mut names: Vec<String> = Vec::with_capacity(10);
     println!("Subscriber service started");
     loop {
-        if let Ok((swarm_name, sender)) = notification_receiver.try_recv() {
-            swarms.insert(swarm_name.clone(), sender);
-            names.push(swarm_name.clone());
-            // TODO: inform existing sockets about new subscription
-            println!("Added swarm: {}", swarm_name);
-            let _ = sub_sender.send(Subscription::Added(swarm_name));
-            // TODO: sockets should be able to respond if they want to join
+        let recv_result = notification_receiver.try_recv();
+        match recv_result {
+            Ok((swarm_name, sender)) => {
+                swarms.insert(swarm_name.clone(), sender);
+                names.push(swarm_name.clone());
+                // TODO: inform existing sockets about new subscription
+                println!("Added swarm: {}", swarm_name);
+                let _ = sub_sender.send(Subscription::Added(swarm_name));
+                // TODO: sockets should be able to respond if they want to join
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                println!("subscriber disconnected from Manager");
+                break;
+            }
+            Err(_) => {}
         }
         if let Ok(sub) = sub_receiver.try_recv() {
             match sub {
