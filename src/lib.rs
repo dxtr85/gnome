@@ -18,6 +18,7 @@ use std::sync::mpsc::{channel, Sender};
 pub mod prelude {
     pub use async_std::task::spawn;
     pub use swarm_consensus::Data;
+    pub use swarm_consensus::GnomeId;
     pub use swarm_consensus::Manager as GManager;
     pub use swarm_consensus::Request;
 }

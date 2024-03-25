@@ -2,6 +2,7 @@ use std::fmt;
 
 use std::error::Error;
 use swarm_consensus::BlockID;
+use swarm_consensus::CastID;
 use swarm_consensus::Data;
 use swarm_consensus::Header;
 use swarm_consensus::Message;
@@ -23,6 +24,9 @@ use bytes::BytesMut;
 //                    100 - Block
 //                    010 - Listing
 //                    001 - NeighborRequest
+//                    101 - Unicast   TODO
+//                    110 - Multicast TODO
+//                    011 - Broadcast TODO
 //                    111 - Bye
 //     NNNN = Neighborhood value
 //         SS... = SwarmTime value
@@ -30,6 +34,7 @@ use bytes::BytesMut;
 pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
     // println!("Bytes to message: {:?}", bytes);
     // println!("decoding: {:#08b} {:?}", bytes[0], bytes);
+    let bytes_len = bytes.len();
     let swarm_time: SwarmTime = SwarmTime(as_u32_be(&[bytes[1], bytes[2], bytes[3], bytes[4]]));
     let neighborhood: Neighborhood = Neighborhood(bytes[0] & 0b0_000_1111);
     let header = if bytes[0] & 0b1_000_0000 > 0 {
@@ -43,9 +48,11 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
         Payload::Bye
     } else if bytes[0] & 0b0_001_0000 == 16 {
         let count: u8 = bytes[5];
-        let nr = if count == 0 {
+        let nr = if bytes_len == 10 && count == 0 {
             let st_value: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
             NeighborRequest::ListingRequest(SwarmTime(st_value))
+        } else if bytes_len == 6 {
+            NeighborRequest::UnicastRequest(CastID(count))
         } else {
             let mut data = [BlockID(0); 128];
             for i in 0..count as usize {
@@ -79,6 +86,10 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
             data[i] = BlockID(bid);
         }
         Payload::Listing(count, data)
+    } else if bytes[0] & 0b0_101_0000 == 80 {
+        println!("UNICAST!!");
+        let data: u32 = as_u32_be(&[bytes[5], bytes[6], bytes[7], bytes[8]]);
+        Payload::Unicast(Data(data))
     } else {
         Payload::KeepAlive
     };
@@ -130,6 +141,12 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
     }
     bytes[0] |= match msg.payload {
         Payload::KeepAlive => 0b0_000_0000,
+        Payload::Unicast(data) => {
+            bytes.put_u32(data.0);
+            0b0_101_0000
+        }
+        Payload::Multicast(_) => 0b0_110_0000,
+        Payload::Broadcast(_) => 0b0_011_0000,
         Payload::Bye => 0b0_111_0000,
         Payload::Block(block_id, data) => {
             if !block_id_inserted {
@@ -157,6 +174,9 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
                     for chunk in data {
                         bytes.put_u32(chunk.0);
                     }
+                }
+                NeighborRequest::UnicastRequest(cast_id) => {
+                    bytes.put_u8(cast_id.0);
                 }
             }
             0b0_001_0000

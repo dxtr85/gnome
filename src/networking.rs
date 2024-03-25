@@ -257,7 +257,7 @@ async fn subscriber(
                 }
             }
         }
-        yield_now();
+        yield_now().await;
     }
 }
 
@@ -297,7 +297,7 @@ async fn run_client(
         if names.len() > 0 {
             break;
         }
-        yield_now();
+        yield_now().await;
     }
     // let names = if let Ok(Subscription::List(swarms)) = recv_result {
     //     println!("Sub list: {:?}", swarms);
@@ -456,7 +456,7 @@ async fn read_bytes_from_local_stream(
 
 async fn race_tasks(
     socket: UdpSocket,
-    mut send_recv_pairs: Vec<(Sender<Message>, Receiver<Message>)>,
+    send_recv_pairs: Vec<(Sender<Message>, Receiver<Message>)>,
     // sender: Sender<Message>,
     // mut receiver: Receiver<Message>,
     // , subscription_receiver: Receiver<(bool, String, Option<(Sender<Message>, Receiver<Message>)>),
