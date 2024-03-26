@@ -46,7 +46,13 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
     let payload: Payload = if bytes[0] & 0b0_111_0000 == 112 {
         println!("bytes[0]: {:#b}", bytes[0]);
         Payload::Bye
+    } else if bytes[0] & 0b0_101_0000 == 80 {
+        // println!("UNICAST!!");
+        let cid: CastID = CastID(bytes[5]);
+        let data: Data = Data(as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]));
+        Payload::Unicast(cid, data)
     } else if bytes[0] & 0b0_001_0000 == 16 {
+        println!("len: {}", bytes_len);
         let count: u8 = bytes[5];
         let nr = if bytes_len == 10 && count == 0 {
             let st_value: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
@@ -86,10 +92,6 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
             data[i] = BlockID(bid);
         }
         Payload::Listing(count, data)
-    } else if bytes[0] & 0b0_101_0000 == 80 {
-        println!("UNICAST!!");
-        let data: u32 = as_u32_be(&[bytes[5], bytes[6], bytes[7], bytes[8]]);
-        Payload::Unicast(Data(data))
     } else {
         Payload::KeepAlive
     };
@@ -141,12 +143,14 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
     }
     bytes[0] |= match msg.payload {
         Payload::KeepAlive => 0b0_000_0000,
-        Payload::Unicast(data) => {
+        Payload::Unicast(cid, data) => {
+            println!("Unicast into bytes");
+            bytes.put_u8(cid.0);
             bytes.put_u32(data.0);
             0b0_101_0000
         }
-        Payload::Multicast(_) => 0b0_110_0000,
-        Payload::Broadcast(_) => 0b0_011_0000,
+        Payload::Multicast(mid, data) => 0b0_110_0000,
+        Payload::Broadcast(bid, data) => 0b0_011_0000,
         Payload::Bye => 0b0_111_0000,
         Payload::Block(block_id, data) => {
             if !block_id_inserted {

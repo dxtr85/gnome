@@ -1,6 +1,7 @@
 // use async_std::task::spawn_blocking;
 // use async_std::task::spawn;
 pub use std::net::IpAddr;
+use swarm_consensus::GnomeId;
 use swarm_consensus::Request;
 // use std::time::Duration;
 use swarm_consensus::start;
@@ -30,12 +31,13 @@ pub fn create_manager_and_receiver() -> (Manager, Receiver<(String, Sender<Reque
 }
 
 pub async fn activate_gnome(
+    gnome_id: GnomeId,
     ip: IpAddr,
     broadcast: IpAddr,
     port: u16,
     receiver: Receiver<(String, Sender<Request>)>,
 ) {
-    run_networking_tasks(ip, broadcast, port, receiver).await;
+    run_networking_tasks(gnome_id, ip, broadcast, port, receiver).await;
 }
 
 // #[async_std::main]

@@ -37,6 +37,7 @@ use std::time::Duration;
 use crate::data_conversion::bytes_to_message;
 use crate::data_conversion::message_to_bytes;
 pub async fn run_networking_tasks(
+    gnome_id: GnomeId,
     host_ip: IpAddr,
     _broadcast_ip: IpAddr,
     server_port: u16,
@@ -53,7 +54,7 @@ pub async fn run_networking_tasks(
         notification_receiver,
     ));
     if let Ok(socket) = bind_result {
-        run_server(host_ip, socket, sub_send_two, sub_recv_one).await;
+        run_server(gnome_id, host_ip, socket, sub_send_two, sub_recv_one).await;
     } else {
         // if let Ok((swarm_name, req_sender)) = subscription_receiver.try_recv() {
         //     let futu_one = establish_connections_to_lan_servers(
@@ -69,7 +70,7 @@ pub async fn run_networking_tasks(
         let socket = UdpSocket::bind(SocketAddr::new(host_ip, 0))
             .await
             .expect("SKT couldn't bind to address");
-        run_client(server_addr, socket, sub_recv_one, sub_send_two).await;
+        run_client(gnome_id, server_addr, socket, sub_recv_one, sub_send_two).await;
         //     };
         //     join!(futu_one, futu_two);
         // }
@@ -77,10 +78,9 @@ pub async fn run_networking_tasks(
 }
 
 async fn run_server(
+    gnome_id: GnomeId,
     host_ip: IpAddr,
     socket: UdpSocket,
-    // sender: Sender<(Sender<Message>, Receiver<Message>)>,
-    // subscription_receiver: Receiver<(String, Sender<Request>)>,
     sub_sender: Sender<Subscription>,
     sub_receiver: Receiver<Subscription>,
 ) {
@@ -90,7 +90,6 @@ async fn run_server(
     println!("--------------------------------------");
     let mut buf = BytesMut::zeroed(128);
     let mut bytes = buf.split();
-    // let mut swarms: HashMap<String, Sender<Request>> = HashMap::with_capacity(10);
     loop {
         // println!("loopa");
         // if let Ok((swarm_name, sender)) = subscription_receiver.try_recv() {
@@ -159,6 +158,29 @@ async fn run_server(
                     }
                     let to_send = buf.split();
                     let _ = dedicated_socket.send(&to_send).await;
+                    // Here we send our GnomeId
+                    let _send_result = dedicated_socket.send(&gnome_id.0.to_be_bytes()).await;
+                    println!("Send result: {:?}", _send_result);
+                    let mut rbuf = BytesMut::zeroed(4);
+                    let recv_result = dedicated_socket.recv(&mut rbuf).await;
+                    println!("Recv result: {:?}", recv_result);
+                    println!("{:?}", rbuf);
+                    let mut neighbor_id = GnomeId(0);
+                    if let Ok(size) = recv_result {
+                        if size == 4 {
+                            // TODO: fix this
+                            // let num: u32 = u32::from_be(rbuf.a);
+                            // println!("r3: {}", rbuf[3]);
+                            // let num: u32 = (rbuf[0] as u32)
+                            //     << 24 + (rbuf[1] as u32)
+                            //     << 16 + (rbuf[2] as u32)
+                            //     << 8 + rbuf[3];
+                            let num: u32 = rbuf[3] as u32;
+                            neighbor_id = GnomeId(num);
+                            println!("NeighborId updated: {}", num);
+                        }
+                    }
+                    println!("Neighbor: {}", neighbor_id);
                     // TODO: for each element we sent create a Neighbor
                     // and send it down the pipe
                     // let (s1, r1) = channel();
@@ -175,20 +197,18 @@ async fn run_server(
                     // TODO: how to update a socket about changed list of
                     // subscribed swarms? (Probably with channels ;)
                     // TODO: same as above goes to run_client
-                    let mut num = 1;
                     let mut ch_pairs = vec![];
                     for name in common_names {
                         let (s1, r1) = channel();
                         let (s2, r2) = channel();
                         let neighbor = Neighbor::from_id_channel_time(
-                            GnomeId(num),
+                            neighbor_id,
                             r2,
                             s1,
                             SwarmTime(0),
                             SwarmTime(7),
                         );
                         let _ = sub_sender.send(Subscription::IncludeNeighbor(name, neighbor));
-                        num += 1;
                         ch_pairs.push((s2, r1));
                     }
                     if send_result.is_err() {
@@ -262,7 +282,7 @@ async fn subscriber(
 }
 
 async fn run_client(
-    // _swarm_name: String,
+    gnome_id: GnomeId,
     server_addr: SocketAddr,
     socket: UdpSocket,
     receiver: Receiver<Subscription>,
@@ -344,13 +364,33 @@ async fn run_client(
                     common_names.push(name.to_owned());
                 }
             }
+            let _send_result = socket.send(&gnome_id.0.to_be_bytes()).await;
+            println!("client Send result: {:?}", _send_result);
+            let recv_result = socket.recv(&mut recv_buf).await;
+            println!("Recv result: {:?}", recv_result);
+            let mut neighbor_id = GnomeId(0);
+            if let Ok(size) = recv_result {
+                println!("ok");
+                if size == 4 {
+                    println!("size = 4");
+                    // TODO: fix this
+                    // let num: u32 = (buf[0] as u32)
+                    //     << 24 + (buf[1] as u32)
+                    //     << 16 + (buf[2] as u32)
+                    //     << 8 + buf[3];
+                    println!("b[3]: {}", recv_buf[3]);
+                    let num: u32 = recv_buf[3] as u32;
+                    neighbor_id = GnomeId(num);
+                }
+            }
+            println!("Neighbor: {}", neighbor_id);
             let mut ch_pairs = vec![];
-            println!("komon names: {:?}", common_names);
+            // println!("komon names: {:?}", common_names);
             for name in common_names {
                 let (s1, r1) = channel();
                 let (s2, r2) = channel();
                 let neighbor =
-                    Neighbor::from_id_channel_time(GnomeId(1), r2, s1, SwarmTime(0), SwarmTime(7));
+                    Neighbor::from_id_channel_time(neighbor_id, r2, s1, SwarmTime(0), SwarmTime(7));
                 let _ = sender.send(Subscription::IncludeNeighbor(name, neighbor));
                 ch_pairs.push((s2, r1));
             }
