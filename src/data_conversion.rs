@@ -7,8 +7,10 @@ use swarm_consensus::Data;
 use swarm_consensus::Header;
 use swarm_consensus::Message;
 use swarm_consensus::NeighborRequest;
+use swarm_consensus::NeighborResponse;
 use swarm_consensus::Neighborhood;
 use swarm_consensus::Payload;
+use swarm_consensus::SwarmID;
 use swarm_consensus::SwarmTime;
 
 use bytes::BufMut;
@@ -53,24 +55,41 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
         Payload::Unicast(cid, data)
     } else if bytes[0] & 0b0_001_0000 == 16 {
         println!("len: {}", bytes_len);
-        let count: u8 = bytes[5];
-        let nr = if bytes_len == 10 && count == 0 {
-            let st_value: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
-            NeighborRequest::ListingRequest(SwarmTime(st_value))
-        } else if bytes_len == 6 {
-            NeighborRequest::UnicastRequest(CastID(count))
-        } else {
-            let mut data = [BlockID(0); 128];
-            for i in 0..count as usize {
-                let bid = as_u32_be(&[
-                    bytes[4 * i + 5],
-                    bytes[4 * i + 6],
-                    bytes[4 * i + 7],
-                    bytes[4 * i + 8],
-                ]);
-                data[i as usize] = BlockID(bid);
+        let request_type: u8 = bytes[5];
+        let nr = match request_type {
+            255 => {
+                let st_value: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
+                NeighborRequest::ListingRequest(SwarmTime(st_value))
             }
-            NeighborRequest::PayloadRequest(count, data)
+            254 => {
+                let swarm_id = SwarmID(bytes[6]);
+                let mut cast_ids = [CastID(0); 256];
+                let mut inserted = 0;
+                for c_id in &bytes[7..bytes_len] {
+                    cast_ids[inserted] = CastID(*c_id);
+                    inserted += 1;
+                }
+                NeighborRequest::UnicastRequest(swarm_id, cast_ids)
+            }
+            253 => {
+                let count = bytes[7];
+                let mut data = [BlockID(0); 128];
+                for i in 0..count as usize {
+                    let bid = as_u32_be(&[
+                        bytes[4 * i + 7],
+                        bytes[4 * i + 8],
+                        bytes[4 * i + 9],
+                        bytes[4 * i + 10],
+                    ]);
+                    data[i as usize] = BlockID(bid);
+                }
+                NeighborRequest::PayloadRequest(count, data)
+            }
+            other => {
+                // TODO
+                let data: u32 = as_u32_be(&[bytes[7], bytes[8], bytes[9], bytes[10]]);
+                NeighborRequest::CustomRequest(other, Data(data))
+            }
         };
         Payload::Request(nr)
     } else if bytes[0] & 0b0_100_0000 == 64 {
@@ -80,18 +99,35 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
         let data = Data(as_u32_be(&[bytes[9], bytes[10], bytes[11], bytes[12]]));
         Payload::Block(BlockID(bid), data)
     } else if bytes[0] & 0b0_010_0000 == 32 {
-        let count = bytes[5];
-        let mut data = [BlockID(0); 128];
-        for i in 0..count as usize {
-            let bid: u32 = as_u32_be(&[
-                bytes[4 * i + 5],
-                bytes[4 * i + 6],
-                bytes[4 * i + 7],
-                bytes[4 * i + 8],
-            ]);
-            data[i] = BlockID(bid);
-        }
-        Payload::Listing(count, data)
+        let response_type = bytes[5];
+        let nr = match response_type {
+            255 => {
+                let count = bytes[6];
+                let mut data = [BlockID(0); 128];
+                for i in 0..count as usize {
+                    let bid: u32 = as_u32_be(&[
+                        bytes[4 * i + 5],
+                        bytes[4 * i + 6],
+                        bytes[4 * i + 7],
+                        bytes[4 * i + 8],
+                    ]);
+                    data[i] = BlockID(bid);
+                }
+                NeighborResponse::Listing(count, data)
+            }
+            254 => NeighborResponse::Unicast(SwarmID(bytes[6]), CastID(bytes[7])),
+            253 => {
+                let b_id: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
+
+                let data: u32 = as_u32_be(&[bytes[10], bytes[11], bytes[12], bytes[13]]);
+                NeighborResponse::Block(BlockID(b_id), Data(data))
+            }
+            other => {
+                // TODO
+                NeighborResponse::CustomResponse(bytes[6], Data(0))
+            }
+        };
+        Payload::Response(nr)
     } else {
         Payload::KeepAlive
     };
@@ -160,27 +196,55 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
             bytes.put_u32(data.0);
             0b0_100_0000
         }
-        Payload::Listing(count, listing) => {
-            bytes.put_u8(count);
-            for chunk in listing {
-                bytes.put_u32(chunk.0);
+        Payload::Response(neighbor_response) => {
+            match neighbor_response {
+                NeighborResponse::Listing(count, data) => {
+                    bytes.put_u8(255);
+                    bytes.put_u8(count);
+                    for chunk in data {
+                        bytes.put_u32(chunk.0);
+                    }
+                }
+                NeighborResponse::Unicast(swarm_id, cast_id) => {
+                    bytes.put_u8(254);
+                    bytes.put_u8(swarm_id.0);
+                    bytes.put_u8(cast_id.0);
+                }
+                NeighborResponse::Block(b_id, data) => {
+                    bytes.put_u8(253);
+                    bytes.put_u32(b_id.0);
+                    bytes.put_u32(data.0);
+                }
+                NeighborResponse::CustomResponse(id, data) => {
+                    bytes.put_u8(id);
+                    bytes.put_u32(data.0);
+                }
             }
             0b0_010_0000
         }
         Payload::Request(nr) => {
             match nr {
                 NeighborRequest::ListingRequest(st) => {
-                    bytes.put_u8(0u8);
+                    bytes.put_u8(255);
                     bytes.put_u32(st.0);
                 }
+                NeighborRequest::UnicastRequest(swarm_id, cast_ids) => {
+                    bytes.put_u8(254);
+                    bytes.put_u8(swarm_id.0);
+                    for c_id in cast_ids {
+                        bytes.put_u8(c_id.0);
+                    }
+                }
                 NeighborRequest::PayloadRequest(count, data) => {
+                    bytes.put_u8(253);
                     bytes.put_u8(count);
                     for chunk in data {
                         bytes.put_u32(chunk.0);
                     }
                 }
-                NeighborRequest::UnicastRequest(cast_id) => {
-                    bytes.put_u8(cast_id.0);
+                NeighborRequest::CustomRequest(id, data) => {
+                    bytes.put_u8(id);
+                    bytes.put_u32(data.0);
                 }
             }
             0b0_001_0000
