@@ -3,7 +3,7 @@ use async_std::task::{self, sleep, spawn, yield_now};
 use bytes::{BufMut, Bytes, BytesMut};
 use core::panic;
 // use futures::join;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 // use futures::StreamExt;
 use futures::{
     future::FutureExt, // for `.fuse()`
@@ -41,20 +41,43 @@ pub async fn run_networking_tasks(
     host_ip: IpAddr,
     _broadcast_ip: IpAddr,
     server_port: u16,
-    // _sender: Sender<(Sender<Message>, Receiver<Message>)>,
-    notification_receiver: Receiver<(String, Sender<Request>)>,
+    buffer_size_bytes: u32,
+    uplink_bandwith_bytes_sec: u32,
+    notification_receiver: Receiver<(String, Sender<Request>, Sender<u32>)>,
 ) {
     let server_addr: SocketAddr = SocketAddr::new(host_ip, server_port);
     let bind_result = UdpSocket::bind(server_addr).await;
     let (sub_send_one, sub_recv_one) = channel();
     let (sub_send_two, sub_recv_two) = channel();
+    let (token_dispenser_send, token_dispenser_recv) = channel();
     spawn(subscriber(
         sub_send_one,
         sub_recv_two,
         notification_receiver,
+        token_dispenser_send,
     ));
+    let (token_pipes_sender, token_pipes_receiver) = channel();
+    // let (token_msg_sender_two, token_msg_receiver_two) = channel();
+    spawn(token_dispenser(
+        buffer_size_bytes,
+        uplink_bandwith_bytes_sec,
+        // token_msg_sender,
+        token_pipes_receiver,
+        token_dispenser_recv,
+    ));
+
+    //TODO: make use of token_msg_sender_two, token_msg_receiver
+
     if let Ok(socket) = bind_result {
-        run_server(gnome_id, host_ip, socket, sub_send_two, sub_recv_one).await;
+        run_server(
+            gnome_id,
+            host_ip,
+            socket,
+            sub_send_two,
+            sub_recv_one,
+            token_pipes_sender,
+        )
+        .await;
     } else {
         // if let Ok((swarm_name, req_sender)) = subscription_receiver.try_recv() {
         //     let futu_one = establish_connections_to_lan_servers(
@@ -70,7 +93,19 @@ pub async fn run_networking_tasks(
         let socket = UdpSocket::bind(SocketAddr::new(host_ip, 0))
             .await
             .expect("SKT couldn't bind to address");
-        run_client(gnome_id, server_addr, socket, sub_recv_one, sub_send_two).await;
+        let (token_send, token_recv) = channel();
+        let (token_send_two, token_recv_two) = channel();
+        token_pipes_sender.send((token_send, token_recv_two));
+        run_client(
+            gnome_id,
+            server_addr,
+            socket,
+            sub_recv_one,
+            sub_send_two,
+            token_send_two,
+            token_recv,
+        )
+        .await;
         //     };
         //     join!(futu_one, futu_two);
         // }
@@ -83,6 +118,7 @@ async fn run_server(
     socket: UdpSocket,
     sub_sender: Sender<Subscription>,
     sub_receiver: Receiver<Subscription>,
+    token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
 ) {
     println!("--------------------------------------");
     println!("- - - - - - - - SERVER - - - - - - - -");
@@ -215,7 +251,15 @@ async fn run_server(
                         println!("send result: {:?}", send_result);
                     }
                     if send_result.is_ok() {
-                        spawn(serve_socket(dedicated_socket, ch_pairs));
+                        let (token_send, token_recv) = channel();
+                        let (token_send_two, token_recv_two) = channel();
+                        token_pipes_sender.send((token_send, token_recv_two));
+                        spawn(serve_socket(
+                            dedicated_socket,
+                            ch_pairs,
+                            token_send_two,
+                            token_recv,
+                        ));
                         // spawn(serve_socket(dedicated_socket, networking_receiver));
                     }
                     println!("--------------------------------------");
@@ -234,10 +278,201 @@ enum Subscription {
     IncludeNeighbor(String, Neighbor),
 }
 
+#[derive(Debug)]
+enum TokenMessage {
+    Add((Sender<Token>, Receiver<Token>)),
+    AvailBandwith(u32),
+    SlowDown,
+}
+
+#[derive(Debug)]
+enum Token {
+    Provision(u32),
+    Unused(u32),
+    Request(u32),
+}
+
+async fn token_dispenser(
+    buffer_size_bytes: u32,
+    bandwith_bytes_sec: u32,
+    // sender: Sender<TokenMessage>,
+    reciever: Receiver<(Sender<Token>, Receiver<Token>)>,
+    band_reciever: Receiver<Sender<u32>>,
+) {
+    let mut available_buffer = buffer_size_bytes;
+    let bytes_per_msec: u32 = bandwith_bytes_sec / 1000;
+    let mut socket_pipes: VecDeque<(Sender<Token>, Receiver<Token>, u32, bool)> = VecDeque::new();
+    let mut bandwith_notification_senders: VecDeque<Sender<u32>> = VecDeque::new();
+    // let dur = Duration::from_micros(1000);
+    let dur = Duration::from_millis(1000);
+    let (timer_sender, timer_reciever) = channel();
+
+    async fn timer(duration: Duration, sender: Sender<()>) {
+        loop {
+            task::sleep(duration).await;
+            let res = sender.send(());
+            if res.is_err() {
+                break;
+            }
+        }
+    }
+    task::spawn(timer(dur, timer_sender));
+
+    let mut sent_avail_bandwith: u32 = bandwith_bytes_sec;
+    let mut token_size = 2048;
+    let min_token_size = 256;
+    let min_overhead = 4;
+    let max_overhead = 64;
+    let mut overhead = 16;
+    let mut used_bandwith_msec: u32 = 0;
+    let mut used_bandwith: VecDeque<u32> = VecDeque::from(vec![0; 100]);
+    let mut used_bandwith_ring: VecDeque<(bool, u32)> = VecDeque::from(vec![(false, 0); 9]);
+    used_bandwith_ring.push_back((true, 0));
+    let mut additional_request_received = false;
+
+    loop {
+        let mut send_tokens = false;
+
+        while let Ok(sender) = band_reciever.try_recv() {
+            let res = sender.send(sent_avail_bandwith);
+            if res.is_ok() {
+                bandwith_notification_senders.push_back(sender);
+            }
+        }
+        if let Ok((s, r)) = reciever.try_recv() {
+            // match tm {
+            //     TokenMessage::Add((s, r)) => {
+            socket_pipes.push_back((s, r, token_size, false));
+            //     }
+            //     TokenMessage::AvailBandwith(_) => {
+            //         let _ = sender.send(TokenMessage::AvailBandwith(std::cmp::max(
+            //             bandwith_bytes_sec - used_bandwith.iter().sum::<u32>(),
+            //             0,
+            //         )));
+            //     }
+            //     TokenMessage::SlowDown => {
+            //         //TODO: better algo
+            //         token_size = std::cmp::max(min_token_size, token_size >> 1);
+            //     }
+            // }
+        }
+        if let Ok(_) = timer_reciever.try_recv() {
+            available_buffer = std::cmp::min(buffer_size_bytes, available_buffer + bytes_per_msec);
+            send_tokens = true;
+
+            if let Some((push, value)) = used_bandwith_ring.pop_front() {
+                used_bandwith_ring.push_back((push, used_bandwith_msec));
+                used_bandwith_msec = 0;
+                if push {
+                    let sum = used_bandwith_ring
+                        .iter()
+                        .fold(value, |acc, (_i, val)| acc + val);
+                    let _ = used_bandwith.pop_front();
+                    used_bandwith.push_back(sum);
+                    let used_bandwith_one_sec = used_bandwith.iter().sum::<u32>();
+                    let new_avail_bandwith = bandwith_bytes_sec
+                        .checked_sub(used_bandwith_one_sec)
+                        .unwrap_or(0);
+                    if sent_avail_bandwith.abs_diff(new_avail_bandwith) * 10 > sent_avail_bandwith {
+                        let how_many = bandwith_notification_senders.len();
+                        for _i in [0..how_many] {
+                            if let Some(sender) = bandwith_notification_senders.pop_front() {
+                                let res = sender.send(new_avail_bandwith);
+                                if res.is_ok() {
+                                    bandwith_notification_senders.push_back(sender);
+                                }
+                            };
+                        }
+                        sent_avail_bandwith = new_avail_bandwith;
+                    }
+                }
+            }
+
+            // TODO: some better algo, maybe individual overhead per socket?
+            if additional_request_received {
+                overhead = std::cmp::min(max_overhead, overhead + 32);
+            } else {
+                overhead = std::cmp::max(min_overhead, overhead - 1);
+            }
+            additional_request_received = false;
+        }
+
+        for _i in 0..socket_pipes.len() {
+            if let Some((s, r, prev_size, additional_request)) = socket_pipes.pop_front() {
+                let mut token_sent = false;
+                let mut broken_pipe = false;
+                let mut req_size = 0;
+                let mut unused_size = 0;
+                let mut new_size: u32 = prev_size;
+                let mut new_add_req = additional_request;
+                while let Ok(request) = r.try_recv() {
+                    match request {
+                        Token::Request(size) => {
+                            req_size += size;
+                            new_add_req = true;
+                            additional_request_received = true;
+                        }
+                        Token::Unused(size) => unused_size += size,
+                        _ => (),
+                    }
+                }
+                if req_size > 0 {
+                    if available_buffer >= req_size {
+                        let res = s.send(Token::Provision(req_size));
+                        if res.is_err() {
+                            broken_pipe = true;
+                        }
+                        available_buffer -= req_size;
+                        used_bandwith_msec += req_size;
+                        new_size += req_size;
+                        token_sent = true;
+                    } else {
+                        let res = s.send(Token::Provision(available_buffer));
+                        if res.is_err() {
+                            broken_pipe = true;
+                        }
+                        used_bandwith_msec += available_buffer;
+                        new_size += available_buffer;
+                        available_buffer = 0;
+                        token_sent = true;
+                    }
+                }
+                // println!("unused: {}, req: {}", unused_size, req_size);
+                if unused_size > 0 && req_size == 0 {
+                    // println!("unused>0");
+                    available_buffer += unused_size;
+                    used_bandwith_msec.checked_sub(unused_size).unwrap_or(0);
+                    // print!(
+                    //     "max(min:{}, prev:{} - unused:{} + overhead:{}) ",
+                    //     min_token_size, new_size, unused_size, overhead
+                    // );
+                    new_size = std::cmp::max(
+                        min_token_size,
+                        new_size.checked_sub(unused_size).unwrap_or(0) + overhead,
+                    );
+                    // println!("computed: {}", new_size);
+                }
+                if send_tokens && !token_sent {
+                    // println!("sending:{}", new_size);
+                    let res = s.send(Token::Provision(new_size));
+                    if res.is_err() {
+                        broken_pipe = true;
+                    }
+                    available_buffer -= new_size;
+                    used_bandwith_msec += new_size;
+                }
+                if !broken_pipe {
+                    socket_pipes.push_back((s, r, new_size, new_add_req));
+                }
+            }
+        }
+    }
+}
 async fn subscriber(
     sub_sender: Sender<Subscription>,
     sub_receiver: Receiver<Subscription>,
-    notification_receiver: Receiver<(String, Sender<Request>)>,
+    notification_receiver: Receiver<(String, Sender<Request>, Sender<u32>)>,
+    token_dispenser_send: Sender<Sender<u32>>,
 ) {
     let mut swarms: HashMap<String, Sender<Request>> = HashMap::with_capacity(10);
     let mut names: Vec<String> = Vec::with_capacity(10);
@@ -245,12 +480,13 @@ async fn subscriber(
     loop {
         let recv_result = notification_receiver.try_recv();
         match recv_result {
-            Ok((swarm_name, sender)) => {
+            Ok((swarm_name, sender, band_sender)) => {
                 swarms.insert(swarm_name.clone(), sender);
                 names.push(swarm_name.clone());
                 // TODO: inform existing sockets about new subscription
                 println!("Added swarm: {}", swarm_name);
                 let _ = sub_sender.send(Subscription::Added(swarm_name));
+                let _ = token_dispenser_send.send(band_sender);
                 // TODO: sockets should be able to respond if they want to join
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -287,6 +523,9 @@ async fn run_client(
     socket: UdpSocket,
     receiver: Receiver<Subscription>,
     sender: Sender<Subscription>,
+    token_send: Sender<Token>,
+    token_recv: Receiver<Token>,
+    // token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
 ) {
     // TODO: we should be able to use given socket with multiple swarms
     // when subscriptions change
@@ -394,7 +633,7 @@ async fn run_client(
                 let _ = sender.send(Subscription::IncludeNeighbor(name, neighbor));
                 ch_pairs.push((s2, r1));
             }
-            spawn(serve_socket(socket, ch_pairs)).await;
+            spawn(serve_socket(socket, ch_pairs, token_send, token_recv)).await;
         } else {
             println!("SKT Failed to connect");
         }
@@ -452,10 +691,12 @@ async fn establish_connections_to_lan_servers(
 
 async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<(u8, Bytes), ConnError> {
     // println!("read_bytes_from_socket");
+    // TODO: increase size of buffer everywhere
     let mut buf = BytesMut::zeroed(1024);
     let recv_result = socket.peek(&mut buf[..]).await;
     if let Ok(count) = recv_result {
         // println!("<<<<< {:?}", String::from_utf8_lossy(&buf[..count]));
+        // When first byte starts with 1_111, next byte identifies swarm
         if buf[0] & 0b1_111_0000 == 240 {
             Ok((buf[1], Bytes::from(Vec::from(&buf[2..count - 2]))))
         } else {
@@ -497,12 +738,13 @@ async fn read_bytes_from_local_stream(
 async fn race_tasks(
     socket: UdpSocket,
     send_recv_pairs: Vec<(Sender<Message>, Receiver<Message>)>,
-    // sender: Sender<Message>,
-    // mut receiver: Receiver<Message>,
-    // , subscription_receiver: Receiver<(bool, String, Option<(Sender<Message>, Receiver<Message>)>),
+    token_sender: Sender<Token>,
+    token_reciever: Receiver<Token>,
 ) {
     let mut senders: HashMap<u8, Sender<Message>> = HashMap::new();
     let mut receivers: HashMap<u8, Receiver<Message>> = HashMap::new();
+    let min_tokens_threshold: u32 = 128;
+    let mut available_tokens: u32 = min_tokens_threshold;
     // println!("racing: {:?}", send_recv_pairs);
     for (i, (sender, receiver)) in send_recv_pairs.into_iter().enumerate() {
         senders.insert(i as u8, sender);
@@ -511,6 +753,22 @@ async fn race_tasks(
     let mut buf = BytesMut::zeroed(1024);
     // if let Some((sender, mut receiver)) = send_recv_pairs.pop() {
     loop {
+        if let Ok(token_msg) = token_reciever.try_recv() {
+            match token_msg {
+                Token::Provision(count) => {
+                    let _ = token_sender.send(Token::Unused(available_tokens));
+                    // println!("{} unused, more tokens: {}", available_tokens, count);
+                    available_tokens = count;
+                }
+                other => {
+                    println!("Unexpected Token message: {:?}", other);
+                }
+            }
+        }
+        if available_tokens < min_tokens_threshold {
+            println!("Requesting more tokens");
+            let _ = token_sender.send(Token::Request(2 * min_tokens_threshold));
+        }
         let t1 = read_bytes_from_socket(&socket).fuse();
         // TODO: serv pairs of sender-receiver
         let t2 = read_bytes_from_local_stream(&mut receivers).fuse();
@@ -518,8 +776,8 @@ async fn race_tasks(
         pin_mut!(t1, t2);
 
         let (from_socket, result) = select! {
-            result1 = t1 => {print!(""); (true, result1)},
-            result2 = t2 => {print!("");(false, result2)},
+            result1 = t1 =>  (true, result1),
+            result2 = t2 => (false, result2),
         };
         if let Err(_err) = result {
             println!("SRVC Error received: {:?}", _err);
@@ -561,7 +819,26 @@ async fn race_tasks(
                     println!("SRCV Unable to recv supposedly ready data");
                 }
             } else {
-                let _send_result = socket.send(&bytes).await;
+                let len = 42 + bytes.len() as u32;
+                if len <= available_tokens {
+                    let _send_result = socket.send(&bytes).await;
+                    available_tokens -= len;
+                } else {
+                    println!("Waiting for tokens...");
+                    let _ = token_sender.send(Token::Request(2 * len));
+                    let res = token_reciever.recv();
+                    match res {
+                        Ok(Token::Provision(amount)) => {
+                            available_tokens += amount;
+                            let _send_result = socket.send(&bytes).await;
+                            available_tokens -= len;
+                        }
+                        Ok(other) => println!("Received unexpected Token: {:?}", other),
+                        Err(e) => {
+                            panic!("Error while waiting for Tokens: {:?}", e);
+                        }
+                    }
+                }
             }
         }
     }
@@ -571,9 +848,10 @@ async fn race_tasks(
 async fn serve_socket(
     socket: UdpSocket,
     send_recv_pairs: Vec<(Sender<Message>, Receiver<Message>)>,
-    // subscription_receiver: Receiver<(bool, String, Option<(Sender<Message>, Receiver<Message>)>)
+    token_sender: Sender<Token>,
+    token_reciever: Receiver<Token>,
 ) {
     println!("SRVC Racing tasks");
-    race_tasks(socket, send_recv_pairs).await;
+    race_tasks(socket, send_recv_pairs, token_sender, token_reciever).await;
     println!("SRVC Racing tasks over");
 }

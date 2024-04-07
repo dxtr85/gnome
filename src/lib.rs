@@ -24,7 +24,8 @@ pub mod prelude {
     pub use swarm_consensus::Request;
 }
 
-pub fn create_manager_and_receiver() -> (Manager, Receiver<(String, Sender<Request>)>) {
+pub fn create_manager_and_receiver() -> (Manager, Receiver<(String, Sender<Request>, Sender<u32>)>)
+{
     let (networking_sender, networking_receiver) = channel();
     let mgr = start(networking_sender);
     (mgr, networking_receiver)
@@ -35,9 +36,20 @@ pub async fn activate_gnome(
     ip: IpAddr,
     broadcast: IpAddr,
     port: u16,
-    receiver: Receiver<(String, Sender<Request>)>,
+    buffer_size_bytes: u32,
+    uplink_bandwith_bytes_sec: u32,
+    receiver: Receiver<(String, Sender<Request>, Sender<u32>)>,
 ) {
-    run_networking_tasks(gnome_id, ip, broadcast, port, receiver).await;
+    run_networking_tasks(
+        gnome_id,
+        ip,
+        broadcast,
+        port,
+        buffer_size_bytes,
+        uplink_bandwith_bytes_sec,
+        receiver,
+    )
+    .await;
 }
 
 // #[async_std::main]
