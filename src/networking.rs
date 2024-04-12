@@ -244,6 +244,8 @@ async fn run_server(
                             SwarmTime(0),
                             SwarmTime(7),
                         );
+                        println!("Request include neighbor");
+
                         let _ = sub_sender.send(Subscription::IncludeNeighbor(name, neighbor));
                         ch_pairs.push((s2, r1));
                     }
@@ -548,10 +550,13 @@ async fn run_client(
     let mut names = vec![];
     loop {
         let _ = sender.send(Subscription::ProvideList);
-        let _recv_result = receiver.recv();
-        println!("res: {:?}", _recv_result);
-        let recv_result = receiver.recv();
+        let mut recv_result = receiver.recv();
         println!("res: {:?}", recv_result);
+        while let Ok(recv_rslt) = receiver.try_recv() {
+            recv_result = Ok(recv_rslt);
+        }
+        // let recv_result = receiver.recv();
+        // println!("res2: {:?}", recv_result);
         match recv_result {
             Ok(Subscription::Added(ref name)) => names = vec![name.to_owned()],
             Ok(Subscription::List(ref nnames)) => names = nnames.to_owned(),
@@ -638,6 +643,7 @@ async fn run_client(
                 let (s2, r2) = channel();
                 let neighbor =
                     Neighbor::from_id_channel_time(neighbor_id, r2, s1, SwarmTime(0), SwarmTime(7));
+                println!("Request include neighbor");
                 let _ = sender.send(Subscription::IncludeNeighbor(name, neighbor));
                 ch_pairs.push((s2, r1));
             }
