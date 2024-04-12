@@ -18,13 +18,13 @@ use swarm_consensus::{GnomeId, Message, Neighbor, Request, SwarmTime};
 #[derive(Debug)]
 enum ConnError {
     Disconnected,
-    LocalStreamClosed,
+    // LocalStreamClosed,
 }
 impl fmt::Display for ConnError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ConnError::Disconnected => write!(f, "ConnError: Disconnected"),
-            ConnError::LocalStreamClosed => write!(f, "ConnError: LocalStreamClosed"),
+            // ConnError::LocalStreamClosed => write!(f, "ConnError: LocalStreamClosed"),
         }
     }
 }
@@ -95,7 +95,7 @@ pub async fn run_networking_tasks(
             .expect("SKT couldn't bind to address");
         let (token_send, token_recv) = channel();
         let (token_send_two, token_recv_two) = channel();
-        token_pipes_sender.send((token_send, token_recv_two));
+        let _ = token_pipes_sender.send((token_send, token_recv_two));
         run_client(
             gnome_id,
             server_addr,
@@ -253,7 +253,7 @@ async fn run_server(
                     if send_result.is_ok() {
                         let (token_send, token_recv) = channel();
                         let (token_send_two, token_recv_two) = channel();
-                        token_pipes_sender.send((token_send, token_recv_two));
+                        let _ = token_pipes_sender.send((token_send, token_recv_two));
                         spawn(serve_socket(
                             dedicated_socket,
                             ch_pairs,
@@ -272,18 +272,18 @@ async fn run_server(
 #[derive(Debug)]
 enum Subscription {
     Added(String),
-    Removed(String),
+    // Removed(String),
     ProvideList,
     List(Vec<String>),
     IncludeNeighbor(String, Neighbor),
 }
 
-#[derive(Debug)]
-enum TokenMessage {
-    Add((Sender<Token>, Receiver<Token>)),
-    AvailBandwith(u32),
-    SlowDown,
-}
+// #[derive(Debug)]
+// enum TokenMessage {
+//     Add((Sender<Token>, Receiver<Token>)),
+//     AvailBandwith(u32),
+//     SlowDown,
+// }
 
 #[derive(Debug)]
 enum Token {
@@ -299,12 +299,14 @@ async fn token_dispenser(
     reciever: Receiver<(Sender<Token>, Receiver<Token>)>,
     band_reciever: Receiver<Sender<u32>>,
 ) {
+    // Cover case when buffer size is less than bandwith
+    let buffer_size_bytes = std::cmp::max(bandwith_bytes_sec, buffer_size_bytes);
     let mut available_buffer = buffer_size_bytes;
     let bytes_per_msec: u32 = bandwith_bytes_sec / 1000;
     let mut socket_pipes: VecDeque<(Sender<Token>, Receiver<Token>, u32, bool)> = VecDeque::new();
     let mut bandwith_notification_senders: VecDeque<Sender<u32>> = VecDeque::new();
-    // let dur = Duration::from_micros(1000);
-    let dur = Duration::from_millis(1000);
+    let dur = Duration::from_micros(1000);
+    // let dur = Duration::from_millis(1000);
     let (timer_sender, timer_reciever) = channel();
 
     async fn timer(duration: Duration, sender: Sender<()>) {
@@ -319,7 +321,7 @@ async fn token_dispenser(
     task::spawn(timer(dur, timer_sender));
 
     let mut sent_avail_bandwith: u32 = bandwith_bytes_sec;
-    let mut token_size = 2048;
+    let token_size = 256;
     let min_token_size = 256;
     let min_overhead = 4;
     let max_overhead = 64;
@@ -358,6 +360,7 @@ async fn token_dispenser(
         }
         if let Ok(_) = timer_reciever.try_recv() {
             available_buffer = std::cmp::min(buffer_size_bytes, available_buffer + bytes_per_msec);
+            // println!("AvaBuf: {} {}", available_buffer, bytes_per_msec);
             send_tokens = true;
 
             if let Some((push, value)) = used_bandwith_ring.pop_front() {
@@ -426,15 +429,15 @@ async fn token_dispenser(
                         used_bandwith_msec += req_size;
                         new_size += req_size;
                         token_sent = true;
-                    } else {
-                        let res = s.send(Token::Provision(available_buffer));
-                        if res.is_err() {
-                            broken_pipe = true;
-                        }
-                        used_bandwith_msec += available_buffer;
-                        new_size += available_buffer;
-                        available_buffer = 0;
-                        token_sent = true;
+                        //                     } else {
+                        //                         let res = s.send(Token::Provision(available_buffer));
+                        //                         if res.is_err() {
+                        //                             broken_pipe = true;
+                        //                         }
+                        //                         used_bandwith_msec += available_buffer;
+                        //                         new_size += available_buffer;
+                        //                         available_buffer = 0;
+                        //                         token_sent = true;
                     }
                 }
                 // println!("unused: {}, req: {}", unused_size, req_size);
@@ -458,7 +461,12 @@ async fn token_dispenser(
                     if res.is_err() {
                         broken_pipe = true;
                     }
-                    available_buffer -= new_size;
+                    available_buffer = if new_size > available_buffer {
+                        0
+                    } else {
+                        available_buffer - new_size
+                    };
+
                     used_bandwith_msec += new_size;
                 }
                 if !broken_pipe {
@@ -823,6 +831,11 @@ async fn race_tasks(
                 if len <= available_tokens {
                     let _send_result = socket.send(&bytes).await;
                     available_tokens -= len;
+                    available_tokens = if len > available_tokens {
+                        0
+                    } else {
+                        available_tokens - len
+                    };
                 } else {
                     println!("Waiting for tokens...");
                     let _ = token_sender.send(Token::Request(2 * len));
@@ -831,7 +844,11 @@ async fn race_tasks(
                         Ok(Token::Provision(amount)) => {
                             available_tokens += amount;
                             let _send_result = socket.send(&bytes).await;
-                            available_tokens -= len;
+                            available_tokens = if len > available_tokens {
+                                0
+                            } else {
+                                available_tokens - len
+                            };
                         }
                         Ok(other) => println!("Received unexpected Token: {:?}", other),
                         Err(e) => {

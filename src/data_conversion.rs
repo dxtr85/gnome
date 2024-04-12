@@ -122,7 +122,7 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
                 let data: u32 = as_u32_be(&[bytes[10], bytes[11], bytes[12], bytes[13]]);
                 NeighborResponse::Block(BlockID(b_id), Data(data))
             }
-            other => {
+            _other => {
                 // TODO
                 NeighborResponse::CustomResponse(bytes[6], Data(0))
             }
@@ -185,8 +185,8 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
             bytes.put_u32(data.0);
             0b0_101_0000
         }
-        Payload::Multicast(mid, data) => 0b0_110_0000,
-        Payload::Broadcast(bid, data) => 0b0_011_0000,
+        Payload::Multicast(_mid, _data) => 0b0_110_0000,
+        Payload::Broadcast(_bid, _data) => 0b0_011_0000,
         Payload::Bye => 0b0_111_0000,
         Payload::Block(block_id, data) => {
             if !block_id_inserted {
