@@ -1,5 +1,7 @@
 // use async_std::task::spawn_blocking;
 // use async_std::task::spawn;
+use prelude::Decrypter;
+use prelude::Encrypter;
 pub use std::net::IpAddr;
 use swarm_consensus::GnomeId;
 use swarm_consensus::Request;
@@ -10,6 +12,7 @@ use swarm_consensus::Manager;
 // use swarm_consensus::Message;
 // use swarm_consensus::Neighbor;
 // use swarm_consensus::SwarmTime;
+mod crypto;
 mod data_conversion;
 mod networking;
 use networking::run_networking_tasks;
@@ -17,6 +20,10 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::{channel, Sender};
 
 pub mod prelude {
+    pub use crate::crypto::{
+        get_key_pair_from_files, get_new_key_pair, store_key_pair_as_pem_files, Decrypter,
+        Encrypter,
+    };
     pub use async_std::task::spawn;
     pub use swarm_consensus::Data;
     pub use swarm_consensus::GnomeId;
@@ -24,10 +31,11 @@ pub mod prelude {
     pub use swarm_consensus::Request;
 }
 
-pub fn create_manager_and_receiver() -> (Manager, Receiver<(String, Sender<Request>, Sender<u32>)>)
-{
+pub fn create_manager_and_receiver(
+    gnome_id: GnomeId,
+) -> (Manager, Receiver<(String, Sender<Request>, Sender<u32>)>) {
     let (networking_sender, networking_receiver) = channel();
-    let mgr = start(networking_sender);
+    let mgr = start(gnome_id, networking_sender);
     (mgr, networking_receiver)
 }
 
@@ -39,15 +47,19 @@ pub async fn activate_gnome(
     buffer_size_bytes: u32,
     uplink_bandwith_bytes_sec: u32,
     receiver: Receiver<(String, Sender<Request>, Sender<u32>)>,
+    decrypter: Decrypter,
+    pub_key_pem: String,
 ) {
     run_networking_tasks(
-        gnome_id,
+        // gnome_id,
         ip,
         broadcast,
         port,
         buffer_size_bytes,
         uplink_bandwith_bytes_sec,
         receiver,
+        decrypter,
+        pub_key_pem,
     )
     .await;
 }
