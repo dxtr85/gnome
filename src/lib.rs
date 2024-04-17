@@ -1,7 +1,6 @@
 // use async_std::task::spawn_blocking;
 // use async_std::task::spawn;
 use prelude::Decrypter;
-use prelude::Encrypter;
 pub use std::net::IpAddr;
 use swarm_consensus::GnomeId;
 use swarm_consensus::Request;
@@ -40,9 +39,9 @@ pub fn create_manager_and_receiver(
 }
 
 pub async fn activate_gnome(
-    gnome_id: GnomeId,
+    _gnome_id: GnomeId,
     ip: IpAddr,
-    broadcast: IpAddr,
+    _broadcast: IpAddr,
     port: u16,
     buffer_size_bytes: u32,
     uplink_bandwith_bytes_sec: u32,
@@ -53,7 +52,7 @@ pub async fn activate_gnome(
     run_networking_tasks(
         // gnome_id,
         ip,
-        broadcast,
+        // broadcast,
         port,
         buffer_size_bytes,
         uplink_bandwith_bytes_sec,
