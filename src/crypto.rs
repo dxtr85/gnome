@@ -39,7 +39,7 @@ impl Encrypter {
         Err("Unable to create Encrypter from data".to_string())
     }
 
-    pub fn encrypt(self, data: &[u8]) -> Result<Vec<u8>, String> {
+    pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>, String> {
         let mut rng = rand::thread_rng();
         let res = self.0.encrypt(&mut rng, Pkcs1v15Encrypt, data);
         if let Ok(vector) = res {
@@ -92,7 +92,7 @@ impl SessionKey {
         let ciphered_data = self
             .0
             .encrypt(&nonce, plaintext)
-            .expect("failed to encrypt");
+            .expect("failed to encrypt with session key");
 
         // combining nonce and encrypted data together
         // for storage purpose

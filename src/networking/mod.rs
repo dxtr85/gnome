@@ -1,4 +1,5 @@
 mod client;
+mod common;
 mod server;
 mod sock;
 mod subscription;
@@ -60,7 +61,7 @@ pub async fn run_networking_tasks(
         decrypter,
     ));
     let (token_pipes_sender, token_pipes_receiver) = channel();
-    // let (token_msg_sender_two, token_msg_receiver_two) = channel();
+
     spawn(token_dispenser(
         buffer_size_bytes,
         uplink_bandwith_bytes_sec,
@@ -68,9 +69,6 @@ pub async fn run_networking_tasks(
         token_pipes_receiver,
         token_dispenser_recv,
     ));
-
-    //TODO: make use of token_msg_sender_two, token_msg_receiver
-
     if let Ok(socket) = bind_result {
         run_server(
             // gnome_id,
@@ -83,17 +81,6 @@ pub async fn run_networking_tasks(
         )
         .await;
     } else {
-        // if let Ok((swarm_name, req_sender)) = subscription_receiver.try_recv() {
-        //     let futu_one = connect_with_lan_gnomes(
-        //         swarm_name.clone(),
-        //         host_ip,
-        //         broadcast_ip,
-        //         server_port,
-        //         sender.clone(),
-        //         req_sender.clone(),
-        //     );
-
-        //     let futu_two = async {
         run_client(
             // server_addr,
             // socket,
@@ -106,9 +93,6 @@ pub async fn run_networking_tasks(
             pub_key_pem,
         )
         .await;
-        //     };
-        //     join!(futu_one, futu_two);
-        // }
     };
 }
 
