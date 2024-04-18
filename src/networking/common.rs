@@ -3,7 +3,8 @@ use async_std::net::UdpSocket;
 use async_std::task::yield_now;
 use bytes::{BufMut, BytesMut};
 use std::net::SocketAddr;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use swarm_consensus::{GnomeId, Message, Neighbor, SwarmTime};
 
 pub async fn collect_subscribed_swarm_names(
     names: &mut Vec<String>,
@@ -78,4 +79,23 @@ pub async fn receive_remote_swarm_names(
     } else {
         Vec::new()
     };
+}
+
+pub fn create_a_neighbor_for_each_swarm(
+    common_names: Vec<String>,
+    sender: Sender<Subscription>,
+    remote_gnome_id: GnomeId,
+    ch_pairs: &mut Vec<(Sender<Message>, Receiver<Message>)>,
+) {
+    // println!("Neighbor: {}", neighbor_id);
+    // println!("komon names: {:?}", common_names);
+    for name in common_names {
+        let (s1, r1) = channel();
+        let (s2, r2) = channel();
+        let neighbor =
+            Neighbor::from_id_channel_time(remote_gnome_id, r2, s1, SwarmTime(0), SwarmTime(7));
+        println!("Request include neighbor");
+        let _ = sender.send(Subscription::IncludeNeighbor(name, neighbor));
+        ch_pairs.push((s2, r1));
+    }
 }

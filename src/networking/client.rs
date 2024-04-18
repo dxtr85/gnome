@@ -2,6 +2,7 @@ use super::serve_socket;
 use super::Token;
 use crate::crypto::SessionKey;
 use crate::networking::common::collect_subscribed_swarm_names;
+use crate::networking::common::create_a_neighbor_for_each_swarm;
 use crate::networking::common::distil_common_names;
 use crate::networking::common::receive_remote_swarm_names;
 use crate::networking::common::send_subscribed_swarm_names;
@@ -13,7 +14,7 @@ use bytes::BytesMut;
 use core::panic;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use swarm_consensus::{GnomeId, Message, Neighbor, SwarmTime};
+use swarm_consensus::GnomeId;
 
 pub async fn run_client(
     // server_addr: SocketAddr,
@@ -69,14 +70,14 @@ pub async fn run_client(
     send_subscribed_swarm_names(&socket, &names, remote_addr).await;
 
     let mut recv_buf = BytesMut::zeroed(1024);
-    socket_connect(&socket, &mut recv_buf).await;
-
     let mut remote_names: Vec<String> = vec![];
     receive_remote_swarm_names(&socket, &mut recv_buf, &mut remote_names).await;
     if remote_names.is_empty() {
         println!("Neighbor {} did not provide swarm list", remote_gnome_id);
         return;
     }
+
+    socket_connect(&socket, &mut recv_buf).await;
 
     let mut common_names = vec![];
     distil_common_names(&mut common_names, names, remote_names);
@@ -184,24 +185,5 @@ async fn socket_connect(socket: &UdpSocket, recv_buf: &mut BytesMut) {
         }
     } else {
         println!("SKT recv result: {:?}", recv_result);
-    }
-}
-
-fn create_a_neighbor_for_each_swarm(
-    common_names: Vec<String>,
-    sender: Sender<Subscription>,
-    remote_gnome_id: GnomeId,
-    ch_pairs: &mut Vec<(Sender<Message>, Receiver<Message>)>,
-) {
-    // println!("Neighbor: {}", neighbor_id);
-    // println!("komon names: {:?}", common_names);
-    for name in common_names {
-        let (s1, r1) = channel();
-        let (s2, r2) = channel();
-        let neighbor =
-            Neighbor::from_id_channel_time(remote_gnome_id, r2, s1, SwarmTime(0), SwarmTime(7));
-        println!("Request include neighbor");
-        let _ = sender.send(Subscription::IncludeNeighbor(name, neighbor));
-        ch_pairs.push((s2, r1));
     }
 }
