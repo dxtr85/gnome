@@ -13,7 +13,7 @@ pub enum Subscription {
     List(Vec<String>),
     IncludeNeighbor(String, Neighbor),
     Decode(Box<Vec<u8>>),
-    KeyDecoded(Box<[u8; 32]>),
+    KeyPortDecoded(u16, Box<[u8; 32]>),
     DecodeFailure,
 }
 
@@ -64,10 +64,14 @@ pub async fn subscriber(
                     println!("decoding: {:?}", msg);
                     let decode_res = decrypter.decrypt(msg.deref());
                     if let Ok(decoded) = decode_res {
-                        if decoded.len() == 32 {
-                            let sym_key: [u8; 32] = decoded.try_into().unwrap();
+                        if decoded.len() == 34 {
+                            let sym_port_key: [u8; 34] = decoded.try_into().unwrap();
+                            let sym_key: [u8; 32] = sym_port_key[2..].try_into().unwrap();
+                            let port: u16 =
+                                u16::from_be_bytes(sym_port_key[0..2].try_into().unwrap());
                             println!("succesfully decoded");
-                            let _ = sub_sender.send(Subscription::KeyDecoded(Box::new(sym_key)));
+                            let _ = sub_sender
+                                .send(Subscription::KeyPortDecoded(port, Box::new(sym_key)));
                         } else {
                             println!("Decoded symmetric key has wrong size: {}", decoded.len());
                             let _ = sub_sender.send(Subscription::DecodeFailure);

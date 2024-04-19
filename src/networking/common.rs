@@ -36,17 +36,19 @@ pub async fn collect_subscribed_swarm_names(
 pub async fn send_subscribed_swarm_names(
     socket: &UdpSocket,
     names: &Vec<String>,
-    remote_addr: SocketAddr,
+    // remote_addr: SocketAddr,
 ) {
-    let mut buf = BytesMut::with_capacity(1030);
+    // let mut buf = BytesMut::with_capacity(1030);
+    let mut buf = Vec::new();
     for name in names {
         buf.put(name.as_bytes());
         // TODO split with some other value
         buf.put_u8(255);
     }
-    let bytes = buf.split();
-    println!("After split: {:?}", bytes);
-    let send_result = socket.send_to(&bytes, remote_addr).await;
+    // let bytes = buf.col();
+    println!("After split: {:?}", &buf);
+    // let send_result = socket.send_to(&bytes, remote_addr).await;
+    let send_result = socket.send(&buf).await;
     if let Ok(count) = send_result {
         println!("SKT Sent {} bytes", count);
     }
@@ -67,10 +69,11 @@ pub fn distil_common_names(
 
 pub async fn receive_remote_swarm_names(
     socket: &UdpSocket,
-    mut recv_buf: &mut BytesMut,
+    // recv_buf: &mut BytesMut,
     remote_names: &mut Vec<String>,
 ) {
-    *remote_names = if let Ok((count, _from)) = socket.recv_from(&mut recv_buf).await {
+    let mut recv_buf = [0u8; 1024];
+    *remote_names = if let Ok(count) = socket.recv(&mut recv_buf).await {
         recv_buf[..count]
             // TODO split by some reasonable delimiter
             .split(|n| n == &255u8)

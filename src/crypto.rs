@@ -105,6 +105,7 @@ impl SessionKey {
     pub fn decrypt(&self, encrypted_data: &[u8]) -> Result<Vec<u8>, String> {
         // let key = Key::<Aes256Gcm>::from_slice(&key_str);
 
+        // println!("Got: {:?} {}", encrypted_data, encrypted_data.len());
         let (nonce_arr, ciphered_data) = encrypted_data.split_at(12);
         let nonce = Nonce::from_slice(nonce_arr);
         let res = self.0.decrypt(nonce, ciphered_data);
