@@ -1,10 +1,10 @@
-// use super::ConnError;
 use crate::crypto::SessionKey;
 use crate::data_conversion::bytes_to_message;
 use crate::data_conversion::message_to_bytes;
 use crate::networking::token::Token;
 use async_std::net::UdpSocket;
 use async_std::task;
+// TODO: get rid of bytes crate
 use bytes::{BufMut, Bytes, BytesMut};
 use core::panic;
 use futures::{
@@ -19,7 +19,7 @@ use swarm_consensus::Message;
 async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<(u8, Bytes), String> {
     // println!("read_bytes_from_socket");
     // TODO: increase size of buffer everywhere
-    let mut buf = BytesMut::zeroed(1024);
+    let mut buf = [0u8; 1100];
     let recv_result = socket.peek(&mut buf[..]).await;
     if let Ok(count) = recv_result {
         // println!("<<<<< {:?}", String::from_utf8_lossy(&buf[..count]));
@@ -78,7 +78,7 @@ async fn race_tasks(
         senders.insert(i as u8, sender);
         receivers.insert(i as u8, receiver);
     }
-    let mut buf = BytesMut::zeroed(1100);
+    let mut buf = [0u8; 1100];
     // if let Some((sender, mut receiver)) = send_recv_pairs.pop() {
     loop {
         if let Ok(token_msg) = token_reciever.try_recv() {

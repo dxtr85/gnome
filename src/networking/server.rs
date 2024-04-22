@@ -10,7 +10,6 @@ use crate::networking::subscription::Subscription;
 use crate::prelude::Encrypter;
 use async_std::net::UdpSocket;
 use async_std::task::spawn;
-use bytes::{BufMut, BytesMut};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use swarm_consensus::GnomeId;
@@ -72,8 +71,8 @@ async fn establish_secure_connection(
     session_key: &mut SessionKey,
     pub_key_pem: &str,
 ) -> Option<UdpSocket> {
-    let mut buf = BytesMut::zeroed(1030);
-    let mut bytes = buf.split();
+    let mut bytes = [0u8; 1100];
+    // let mut bytes = buf.split();
     let result = socket.recv_from(&mut bytes).await;
     if result.is_err() {
         println!("Failed to receive data on socket: {:?}", result);
@@ -90,35 +89,47 @@ async fn establish_secure_connection(
     let encr = result.unwrap();
 
     let dedicated_socket = UdpSocket::bind(SocketAddr::new(host_ip, 0)).await.unwrap();
-    let dedicated_port = dedicated_socket.local_addr().unwrap().port();
-    let mut bytes_to_send = Vec::from(dedicated_port.to_be_bytes());
+    // let dedicated_port = dedicated_socket.local_addr().unwrap().port();
+    // let mut bytes_to_send = Vec::from(dedicated_port.to_be_bytes());
     let key = generate_symmetric_key();
-    bytes_to_send.append(&mut Vec::from(key));
+    // bytes_to_send.append(&mut Vec::from(key));
+    // TODO maybe send remote external IP here?
+    let bytes_to_send = Vec::from(&key);
     let encr_res = encr.encrypt(&bytes_to_send);
     if encr_res.is_err() {
         println!("Failed to encrypt symmetric key: {:?}", encr_res);
         return None;
     }
-    println!("Encrypted port & symmetric key");
+    println!("Encrypted symmetric key");
 
     let encrypted_data = encr_res.unwrap();
-    let res = socket.send_to(&encrypted_data, remote_addr).await;
+    // let res = socket.send_to(&encrypted_data, remote_addr).await;
+    let res = dedicated_socket.send_to(&encrypted_data, remote_addr).await;
     if res.is_err() {
         println!("Failed to send encrypted symmetric key: {:?}", res);
         return None;
     }
-    println!("Sent encrypted symmetric key ");
+    println!("Sent encrypted symmetric key {}", encrypted_data.len());
 
     *session_key = SessionKey::from_key(&key);
 
     //TODO: put here new socket creation and work on that socket from now on
-    let dedi_sock_option =
-        create_dedicated_socket(socket, dedicated_socket, host_ip, remote_addr, session_key).await;
-    if dedi_sock_option.is_none() {
-        println!("Unable to create dedicated socket to Neighbor");
+    // let dedi_sock_option =
+    //     create_dedicated_socket(socket, dedicated_socket, host_ip, remote_addr, session_key).await;
+    // if dedi_sock_option.is_none() {
+    //     println!("Unable to create dedicated socket to Neighbor");
+    //     return None;
+    // }
+    // let dedicated_socket = dedi_sock_option.unwrap();
+
+    let mut r_buf = [0u8; 32];
+    let r_res = dedicated_socket.recv_from(&mut r_buf).await;
+    if r_res.is_err() {
+        println!("Failed to receive ping from Neighbor");
         return None;
     }
-    let dedicated_socket = dedi_sock_option.unwrap();
+    let (_count, remote_addr) = r_res.unwrap();
+    dedicated_socket.connect(remote_addr).await.unwrap();
 
     let my_encrypted_pubkey = session_key.encrypt(pub_key_pem.as_bytes());
     let res2 = dedicated_socket.send(&my_encrypted_pubkey).await;
@@ -136,7 +147,7 @@ async fn establish_secure_connection(
 async fn create_dedicated_socket(
     socket: &UdpSocket,
     dedicated_socket: UdpSocket,
-    host_ip: IpAddr,
+    // host_ip: IpAddr,
     mut remote_addr: SocketAddr,
     session_key: &SessionKey,
 ) -> Option<UdpSocket> {

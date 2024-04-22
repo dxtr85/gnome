@@ -1,4 +1,4 @@
-use async_std::task;
+use async_std::task::{self, yield_now};
 use std::collections::VecDeque;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
@@ -17,6 +17,7 @@ pub async fn token_dispenser(
     reciever: Receiver<(Sender<Token>, Receiver<Token>)>,
     band_reciever: Receiver<Sender<u32>>,
 ) {
+    println!("Starting token dispenser service");
     // Cover case when buffer size is less than bandwith
     let buffer_size_bytes = std::cmp::max(bandwith_bytes_sec, buffer_size_bytes);
     let mut available_buffer = buffer_size_bytes;
@@ -191,5 +192,6 @@ pub async fn token_dispenser(
                 }
             }
         }
+        yield_now().await;
     }
 }
