@@ -91,12 +91,12 @@ pub async fn holepunch(
             holepunch.local_addr().unwrap().port(),
             swarm_name
         );
-        let local_ports = (bind_port + 1..bind_port + 150).collect::<std::vec::Vec<u16>>();
+        let local_ports = (bind_port + 1..bind_port + 50).collect::<std::vec::Vec<u16>>();
         let mut remote_ports = if remote_controls_port {
-            let vec = (remote_e_port..remote_e_port + 150).collect::<std::vec::Vec<u16>>();
+            let vec = (remote_e_port..remote_e_port + 50).collect::<std::vec::Vec<u16>>();
             VecDeque::from(vec)
         } else {
-            let vec = (remote_e_port - 75..remote_e_port + 75).collect::<std::vec::Vec<u16>>();
+            let vec = (remote_e_port - 25..remote_e_port + 25).collect::<std::vec::Vec<u16>>();
             VecDeque::from(vec)
         };
         // println!("Using remote ports: {:?}", remote_ports);
@@ -253,44 +253,45 @@ pub async fn holepunch(
                     // return receiver;
                 }
             }
-            let encr_address = session_key.encrypt(remote_addr.to_string().as_bytes());
-
-            let send_remote_addr_result = dedicated_socket.send(&encr_address).await;
-            if send_remote_addr_result.is_err() {
-                println!(
-                    "Failed to send Neighbor's external address: {:?}",
-                    send_remote_addr_result
-                );
-            } else {
-                println!("External address sent with success");
-            }
-            let mut buf = [0u8; 128];
-            let recv_my_ext_addr_res = dedicated_socket.recv(&mut buf).await;
-            if recv_my_ext_addr_res.is_err() {
-                println!(
-                    "Unable to recv my external address from remote: {:?}",
-                    recv_my_ext_addr_res
-                );
-            }
-            let count = recv_my_ext_addr_res.unwrap();
-            let decode_result = session_key.decrypt(&buf[..count]);
-            if decode_result.is_err() {
-                println!(
-                    "Unable to decode received data with session key: {:?}",
-                    decode_result
-                );
-            }
-            let decoded_data = decode_result.unwrap();
-            let my_ext_addr_res = std::str::from_utf8(&decoded_data);
-            if my_ext_addr_res.is_err() {
-                println!(
-                    "Failed to parse string from received data: {:?}",
-                    my_ext_addr_res
-                );
-            }
-            // let my_ext_addr = SocketAddr::from(my_ext_addr_res.unwrap());
-            println!("My external addr: {}", my_ext_addr_res.unwrap());
         }
+        let encr_address = session_key.encrypt(remote_addr.to_string().as_bytes());
+
+        let send_remote_addr_result = dedicated_socket.send(&encr_address).await;
+        if send_remote_addr_result.is_err() {
+            println!(
+                "Failed to send Neighbor's external address: {:?}",
+                send_remote_addr_result
+            );
+        } else {
+            println!("External address sent with success");
+        }
+        let mut buf = [0u8; 128];
+        let recv_my_ext_addr_res = dedicated_socket.recv(&mut buf).await;
+        if recv_my_ext_addr_res.is_err() {
+            println!(
+                "Unable to recv my external address from remote: {:?}",
+                recv_my_ext_addr_res
+            );
+        }
+        let count = recv_my_ext_addr_res.unwrap();
+        let decode_result = session_key.decrypt(&buf[..count]);
+        if decode_result.is_err() {
+            println!(
+                "Unable to decode received data with session key: {:?}",
+                decode_result
+            );
+        }
+        let decoded_data = decode_result.unwrap();
+        let my_ext_addr_res = std::str::from_utf8(&decoded_data);
+        if my_ext_addr_res.is_err() {
+            println!(
+                "Failed to parse string from received data: {:?}",
+                my_ext_addr_res
+            );
+        }
+        // let my_ext_addr = SocketAddr::from(my_ext_addr_res.unwrap());
+        println!("My external addr: {}", my_ext_addr_res.unwrap());
+        // }
         let swarm_names = vec![swarm_name];
         spawn(prepare_and_serve(
             dedicated_socket,
@@ -415,7 +416,7 @@ async fn probe_socket(
     mut port_list: VecDeque<u16>,
     sender: Sender<Option<(SocketAddr, UdpSocket)>>,
 ) {
-    let sleep_time = Duration::from_millis(rand::random::<u8>() as u64 + 50);
+    let sleep_time = Duration::from_millis(rand::random::<u8>() as u64 + 200);
     loop {
         let new_port = port_list.pop_front().unwrap();
         remote_addr.set_port(new_port);
