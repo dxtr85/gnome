@@ -24,7 +24,7 @@ use bytes::BytesMut;
 //                   1 - Block
 //  PPP    = payload: 000 - KeepAlive
 //                    100 - Block
-//                    010 - Listing
+//                    010 - NeighborResponse
 //                    001 - NeighborRequest
 //                    101 - Unicast   TODO
 //                    110 - Multicast TODO
@@ -39,47 +39,47 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
     let bytes_len = bytes.len();
     let swarm_time: SwarmTime = SwarmTime(as_u32_be(&[bytes[1], bytes[2], bytes[3], bytes[4]]));
     let neighborhood: Neighborhood = Neighborhood(bytes[0] & 0b0_000_1111);
-    let header = if bytes[0] & 0b1_000_0000 > 0 {
+    let (header, data_idx) = if bytes[0] & 0b1_000_0000 == 128 {
         let block_id: u32 = as_u32_be(&[bytes[5], bytes[6], bytes[7], bytes[8]]);
-        Header::Block(BlockID(block_id))
+        (Header::Block(BlockID(block_id)), 9)
     } else {
-        Header::Sync
+        (Header::Sync, 5)
     };
     let payload: Payload = if bytes[0] & 0b0_111_0000 == 112 {
         println!("bytes[0]: {:#b}", bytes[0]);
         Payload::Bye
-    } else if bytes[0] & 0b0_101_0000 == 80 {
+    } else if bytes[0] & 0b0_111_0000 == 80 {
         // println!("UNICAST!!");
-        let cid: CastID = CastID(bytes[5]);
-        let data: Data = Data(as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]));
+        let cid: CastID = CastID(bytes[data_idx]);
+        let data: Data = Data(as_u32_be(&[bytes[data_idx+1], bytes[data_idx+2], bytes[data_idx+3], bytes[data_idx+4]]));
         Payload::Unicast(cid, data)
-    } else if bytes[0] & 0b0_001_0000 == 16 {
+    } else if bytes[0] & 0b0_111_0000 == 16 {
         println!("len: {}", bytes_len);
-        let request_type: u8 = bytes[5];
+        let request_type: u8 = bytes[data_idx];
         let nr = match request_type {
             255 => {
-                let st_value: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
+                let st_value: u32 = as_u32_be(&[bytes[data_idx+1], bytes[data_idx+2], bytes[data_idx+3], bytes[data_idx+4]]);
                 NeighborRequest::ListingRequest(SwarmTime(st_value))
             }
             254 => {
-                let swarm_id = SwarmID(bytes[6]);
+                let swarm_id = SwarmID(bytes[data_idx+1]);
                 let mut cast_ids = [CastID(0); 256];
                 let mut inserted = 0;
-                for c_id in &bytes[7..bytes_len] {
+                for c_id in &bytes[data_idx+2..bytes_len] {
                     cast_ids[inserted] = CastID(*c_id);
                     inserted += 1;
                 }
                 NeighborRequest::UnicastRequest(swarm_id, cast_ids)
             }
             253 => {
-                let count = bytes[7];
+                let count = bytes[data_idx+2];
                 let mut data = [BlockID(0); 128];
                 for i in 0..count as usize {
                     let bid = as_u32_be(&[
-                        bytes[4 * i + 7],
-                        bytes[4 * i + 8],
-                        bytes[4 * i + 9],
-                        bytes[4 * i + 10],
+                        bytes[4 * i + data_idx+3],
+                        bytes[4 * i + data_idx+4],
+                        bytes[4 * i + data_idx+5],
+                        bytes[4 * i + data_idx+6],
                     ]);
                     data[i as usize] = BlockID(bid);
                 }
@@ -87,47 +87,48 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
             }
             other => {
                 // TODO
-                let data: u32 = as_u32_be(&[bytes[7], bytes[8], bytes[9], bytes[10]]);
+                let data: u32 = as_u32_be(&[bytes[data_idx+2], bytes[data_idx+3], bytes[data_idx+4], bytes[data_idx+5]]);
                 NeighborRequest::CustomRequest(other, Data(data))
             }
         };
         Payload::Request(nr)
-    } else if bytes[0] & 0b0_100_0000 == 64 {
+    } else if bytes[0] & 0b0_111_0000 == 64 {
         // let bid: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
         // let data = Data(as_u32_be(&[bytes[10], bytes[11], bytes[12], bytes[13]]));
-        let bid: u32 = as_u32_be(&[bytes[9], bytes[6], bytes[7], bytes[8]]);
-        let data = Data(as_u32_be(&[bytes[9], bytes[10], bytes[11], bytes[12]]));
+        let bid: u32 = as_u32_be(&[bytes[5], bytes[6], bytes[7], bytes[8]]);
+        let data = Data(as_u32_be(&[bytes[data_idx], bytes[data_idx+1], bytes[data_idx+2], bytes[data_idx+3]]));
         Payload::Block(BlockID(bid), data)
-    } else if bytes[0] & 0b0_010_0000 == 32 {
-        let response_type = bytes[5];
+    } else if bytes[0] & 0b0_111_0000 == 32 {
+        let response_type = bytes[data_idx];
         let nr = match response_type {
             255 => {
-                let count = bytes[6];
+                let count = bytes[data_idx+1];
                 let mut data = [BlockID(0); 128];
                 for i in 0..count as usize {
                     let bid: u32 = as_u32_be(&[
-                        bytes[4 * i + 5],
-                        bytes[4 * i + 6],
-                        bytes[4 * i + 7],
-                        bytes[4 * i + 8],
+                        bytes[4 * i + data_idx+2],
+                        bytes[4 * i + data_idx+3],
+                        bytes[4 * i + data_idx+4],
+                        bytes[4 * i + data_idx+5],
                     ]);
                     data[i] = BlockID(bid);
                 }
                 NeighborResponse::Listing(count, data)
             }
-            254 => NeighborResponse::Unicast(SwarmID(bytes[6]), CastID(bytes[7])),
+            254 => NeighborResponse::Unicast(SwarmID(bytes[data_idx+1]), CastID(bytes[data_idx+2])),
             253 => {
-                let b_id: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
+                let b_id: u32 = as_u32_be(&[bytes[data_idx+1], bytes[data_idx+2], bytes[data_idx+3], bytes[data_idx+4]]);
 
-                let data: u32 = as_u32_be(&[bytes[10], bytes[11], bytes[12], bytes[13]]);
+                let data: u32 = as_u32_be(&[bytes[data_idx+5], bytes[data_idx+6], bytes[data_idx+7], bytes[data_idx+8]]);
                 NeighborResponse::Block(BlockID(b_id), Data(data))
             }
             _other => {
                 // TODO
-                NeighborResponse::CustomResponse(bytes[6], Data(0))
+                NeighborResponse::CustomResponse(bytes[data_idx+1], Data(0))
             }
         };
         Payload::Response(nr)
+    // TODO: handle Unicast/Multicast/Broadcast messages
     } else {
         Payload::KeepAlive
     };
@@ -191,7 +192,6 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
         Payload::Block(block_id, data) => {
             if !block_id_inserted {
                 bytes.put_u32(block_id.0);
-                // block_id_inserted = true;
             };
             bytes.put_u32(data.0);
             0b0_100_0000

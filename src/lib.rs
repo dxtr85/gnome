@@ -39,9 +39,9 @@ pub fn create_manager_and_receiver(
 }
 
 pub async fn activate_gnome(
-    _gnome_id: GnomeId,
+    // _gnome_id: GnomeId,
     ip: IpAddr,
-    _broadcast: IpAddr,
+    // _broadcast: IpAddr,
     port: u16,
     buffer_size_bytes: u32,
     uplink_bandwith_bytes_sec: u32,
