@@ -4,11 +4,15 @@ use std::error::Error;
 use swarm_consensus::BlockID;
 use swarm_consensus::CastID;
 use swarm_consensus::Data;
+use swarm_consensus::GnomeId;
 use swarm_consensus::Header;
 use swarm_consensus::Message;
+use swarm_consensus::Nat;
 use swarm_consensus::NeighborRequest;
 use swarm_consensus::NeighborResponse;
 use swarm_consensus::Neighborhood;
+use swarm_consensus::NetworkSettings;
+// use swarm_consensus::NetworkSettings;
 use swarm_consensus::Payload;
 use swarm_consensus::SwarmID;
 use swarm_consensus::SwarmTime;
@@ -16,6 +20,7 @@ use swarm_consensus::SwarmTime;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
+use std::net::IpAddr;
 
 // 1234567890123456789012345678901234567890|
 // _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
@@ -51,43 +56,75 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
     } else if bytes[0] & 0b0_111_0000 == 80 {
         // println!("UNICAST!!");
         let cid: CastID = CastID(bytes[data_idx]);
-        let data: Data = Data(as_u32_be(&[bytes[data_idx+1], bytes[data_idx+2], bytes[data_idx+3], bytes[data_idx+4]]));
+        let data: Data = Data(as_u32_be(&[
+            bytes[data_idx + 1],
+            bytes[data_idx + 2],
+            bytes[data_idx + 3],
+            bytes[data_idx + 4],
+        ]));
         Payload::Unicast(cid, data)
     } else if bytes[0] & 0b0_111_0000 == 16 {
         println!("len: {}", bytes_len);
         let request_type: u8 = bytes[data_idx];
         let nr = match request_type {
             255 => {
-                let st_value: u32 = as_u32_be(&[bytes[data_idx+1], bytes[data_idx+2], bytes[data_idx+3], bytes[data_idx+4]]);
+                let st_value: u32 = as_u32_be(&[
+                    bytes[data_idx + 1],
+                    bytes[data_idx + 2],
+                    bytes[data_idx + 3],
+                    bytes[data_idx + 4],
+                ]);
                 NeighborRequest::ListingRequest(SwarmTime(st_value))
             }
             254 => {
-                let swarm_id = SwarmID(bytes[data_idx+1]);
+                let swarm_id = SwarmID(bytes[data_idx + 1]);
                 let mut cast_ids = [CastID(0); 256];
                 let mut inserted = 0;
-                for c_id in &bytes[data_idx+2..bytes_len] {
+                for c_id in &bytes[data_idx + 2..bytes_len] {
                     cast_ids[inserted] = CastID(*c_id);
                     inserted += 1;
                 }
                 NeighborRequest::UnicastRequest(swarm_id, cast_ids)
             }
             253 => {
-                let count = bytes[data_idx+2];
+                let count = bytes[data_idx + 2];
                 let mut data = [BlockID(0); 128];
                 for i in 0..count as usize {
                     let bid = as_u32_be(&[
-                        bytes[4 * i + data_idx+3],
-                        bytes[4 * i + data_idx+4],
-                        bytes[4 * i + data_idx+5],
-                        bytes[4 * i + data_idx+6],
+                        bytes[4 * i + data_idx + 3],
+                        bytes[4 * i + data_idx + 4],
+                        bytes[4 * i + data_idx + 5],
+                        bytes[4 * i + data_idx + 6],
                     ]);
                     data[i as usize] = BlockID(bid);
                 }
                 NeighborRequest::PayloadRequest(count, data)
             }
+            252 => {
+                let net_set = parse_network_settings(bytes.slice(data_idx + 1..bytes_len));
+                NeighborRequest::ForwardConnectRequest(net_set)
+            }
+            251 => {
+                let id = bytes[data_idx + 1];
+                let mut g_id: u64 = ((bytes[data_idx + 2]) as u64) << 56;
+                g_id += ((bytes[data_idx + 3]) as u64) << 48;
+                g_id += ((bytes[data_idx + 4]) as u64) << 40;
+                g_id += ((bytes[data_idx + 5]) as u64) << 32;
+                g_id += ((bytes[data_idx + 6]) as u64) << 24;
+                g_id += ((bytes[data_idx + 7]) as u64) << 16;
+                g_id += ((bytes[data_idx + 8]) as u64) << 8;
+                g_id += (bytes[data_idx + 9]) as u64;
+                let net_set = parse_network_settings(bytes.slice(data_idx + 10..bytes_len));
+                NeighborRequest::ConnectRequest(id, GnomeId(g_id), net_set)
+            }
             other => {
                 // TODO
-                let data: u32 = as_u32_be(&[bytes[data_idx+2], bytes[data_idx+3], bytes[data_idx+4], bytes[data_idx+5]]);
+                let data: u32 = as_u32_be(&[
+                    bytes[data_idx + 2],
+                    bytes[data_idx + 3],
+                    bytes[data_idx + 4],
+                    bytes[data_idx + 5],
+                ]);
                 NeighborRequest::CustomRequest(other, Data(data))
             }
         };
@@ -96,35 +133,66 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
         // let bid: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
         // let data = Data(as_u32_be(&[bytes[10], bytes[11], bytes[12], bytes[13]]));
         let bid: u32 = as_u32_be(&[bytes[5], bytes[6], bytes[7], bytes[8]]);
-        let data = Data(as_u32_be(&[bytes[data_idx], bytes[data_idx+1], bytes[data_idx+2], bytes[data_idx+3]]));
+        let data = Data(as_u32_be(&[
+            bytes[data_idx],
+            bytes[data_idx + 1],
+            bytes[data_idx + 2],
+            bytes[data_idx + 3],
+        ]));
         Payload::Block(BlockID(bid), data)
     } else if bytes[0] & 0b0_111_0000 == 32 {
         let response_type = bytes[data_idx];
         let nr = match response_type {
             255 => {
-                let count = bytes[data_idx+1];
+                let count = bytes[data_idx + 1];
                 let mut data = [BlockID(0); 128];
                 for i in 0..count as usize {
                     let bid: u32 = as_u32_be(&[
-                        bytes[4 * i + data_idx+2],
-                        bytes[4 * i + data_idx+3],
-                        bytes[4 * i + data_idx+4],
-                        bytes[4 * i + data_idx+5],
+                        bytes[4 * i + data_idx + 2],
+                        bytes[4 * i + data_idx + 3],
+                        bytes[4 * i + data_idx + 4],
+                        bytes[4 * i + data_idx + 5],
                     ]);
                     data[i] = BlockID(bid);
                 }
                 NeighborResponse::Listing(count, data)
             }
-            254 => NeighborResponse::Unicast(SwarmID(bytes[data_idx+1]), CastID(bytes[data_idx+2])),
+            254 => {
+                NeighborResponse::Unicast(SwarmID(bytes[data_idx + 1]), CastID(bytes[data_idx + 2]))
+            }
             253 => {
-                let b_id: u32 = as_u32_be(&[bytes[data_idx+1], bytes[data_idx+2], bytes[data_idx+3], bytes[data_idx+4]]);
+                let b_id: u32 = as_u32_be(&[
+                    bytes[data_idx + 1],
+                    bytes[data_idx + 2],
+                    bytes[data_idx + 3],
+                    bytes[data_idx + 4],
+                ]);
 
-                let data: u32 = as_u32_be(&[bytes[data_idx+5], bytes[data_idx+6], bytes[data_idx+7], bytes[data_idx+8]]);
+                let data: u32 = as_u32_be(&[
+                    bytes[data_idx + 5],
+                    bytes[data_idx + 6],
+                    bytes[data_idx + 7],
+                    bytes[data_idx + 8],
+                ]);
                 NeighborResponse::Block(BlockID(b_id), Data(data))
+            }
+            252 => {
+                let net_set = parse_network_settings(bytes.slice(data_idx + 1..bytes_len));
+                NeighborResponse::ForwardConnectResponse(net_set)
+            }
+            251 => NeighborResponse::ForwardConnectFailed,
+            250 => {
+                let id = bytes[data_idx + 1];
+                NeighborResponse::AlreadyConnected(id)
+            }
+            249 => {
+                let id = bytes[data_idx + 1];
+                let net_set = parse_network_settings(bytes.slice(data_idx + 2..bytes_len));
+                NeighborResponse::ConnectResponse(id, net_set)
             }
             _other => {
                 // TODO
-                NeighborResponse::CustomResponse(bytes[data_idx+1], Data(0))
+                NeighborResponse::CustomResponse(bytes[data_idx + 1], Data(0))
             }
         };
         Payload::Response(nr)
@@ -215,10 +283,26 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
                     bytes.put_u32(b_id.0);
                     bytes.put_u32(data.0);
                 }
+                NeighborResponse::ForwardConnectResponse(network_settings) => {
+                    bytes.put_u8(252);
+                    insert_network_settings(&mut bytes, network_settings);
+                }
+                NeighborResponse::ForwardConnectFailed => {
+                    bytes.put_u8(251);
+                }
+                NeighborResponse::AlreadyConnected(id) => {
+                    bytes.put_u8(250);
+                    bytes.put_u8(id);
+                }
+                NeighborResponse::ConnectResponse(id, network_settings) => {
+                    bytes.put_u8(249);
+                    bytes.put_u8(id);
+                    insert_network_settings(&mut bytes, network_settings);
+                }
                 NeighborResponse::CustomResponse(id, data) => {
                     bytes.put_u8(id);
                     bytes.put_u32(data.0);
-                }
+                } // _ => todo!(),
             }
             0b0_010_0000
         }
@@ -242,6 +326,16 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
                         bytes.put_u32(chunk.0);
                     }
                 }
+                NeighborRequest::ForwardConnectRequest(network_settings) => {
+                    bytes.put_u8(252);
+                    insert_network_settings(&mut bytes, network_settings);
+                }
+                NeighborRequest::ConnectRequest(id, gnome_id, network_settings) => {
+                    bytes.put_u8(251);
+                    bytes.put_u8(id);
+                    bytes.put_u64(gnome_id.0);
+                    insert_network_settings(&mut bytes, network_settings);
+                }
                 NeighborRequest::CustomRequest(id, data) => {
                     bytes.put_u8(id);
                     bytes.put_u32(data.0);
@@ -252,4 +346,69 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
     };
     // println!("encoded: {:#08b} {:?}", bytes[0], bytes);
     bytes.split().into()
+}
+
+fn insert_network_settings(bytes: &mut BytesMut, network_settings: NetworkSettings) {
+    bytes.put_u8(network_settings.nat_type as u8);
+    bytes.put_u16(network_settings.pub_port);
+    bytes.put_u16(network_settings.port_range.0);
+    bytes.put_u16(network_settings.port_range.1);
+    let pub_ip = network_settings.pub_ip;
+    match pub_ip {
+        std::net::IpAddr::V4(ip4) => {
+            for b in ip4.octets() {
+                bytes.put_u8(b);
+            }
+        }
+        std::net::IpAddr::V6(ip4) => {
+            for b in ip4.octets() {
+                bytes.put_u8(b);
+            }
+        }
+    }
+}
+fn parse_network_settings(bytes: Bytes) -> NetworkSettings {
+    let mut bytes_iter = bytes.into_iter();
+    let raw_nat_type = bytes_iter.next().unwrap();
+    let nat_type = match raw_nat_type {
+        0 => Nat::Unknown,
+        1 => Nat::None,
+        2 => Nat::FullCone,
+        4 => Nat::AddressRestrictedCone,
+        8 => Nat::PortRestrictedCone,
+        16 => Nat::SymmetricWithPortControl,
+        32 => Nat::Symmetric,
+        _ => {
+            println!("Unrecognized NatType while parsing: {}", raw_nat_type);
+            Nat::Unknown
+        }
+    };
+    let mut port_bytes: [u8; 2] = [0, 0];
+    port_bytes[0] = bytes_iter.next().unwrap();
+    port_bytes[1] = bytes_iter.next().unwrap();
+    let pub_port: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
+    port_bytes[0] = bytes_iter.next().unwrap();
+    port_bytes[1] = bytes_iter.next().unwrap();
+    let port_range_min: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
+    port_bytes[0] = bytes_iter.next().unwrap();
+    port_bytes[1] = bytes_iter.next().unwrap();
+    let port_range_max: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
+    let ip_bytes: Vec<u8> = bytes_iter.collect();
+    let bytes_len = ip_bytes.len();
+    let pub_ip = if bytes_len == 4 {
+        let array: [u8; 4] = ip_bytes.try_into().unwrap();
+        IpAddr::from(array)
+    } else if bytes_len == 16 {
+        let array: [u8; 16] = ip_bytes.try_into().unwrap();
+        IpAddr::from(array)
+    } else {
+        println!("Unable to parse IP addr from: {:?}", ip_bytes);
+        IpAddr::from([0, 0, 0, 0])
+    };
+    NetworkSettings {
+        pub_ip,
+        pub_port,
+        nat_type,
+        port_range: (port_range_min, port_range_max),
+    }
 }

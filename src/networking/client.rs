@@ -7,6 +7,7 @@ use crate::networking::common::distil_common_names;
 use crate::networking::common::receive_remote_swarm_names;
 use crate::networking::common::send_subscribed_swarm_names;
 use crate::networking::subscription::Subscription;
+use crate::prelude::Decrypter;
 use crate::prelude::Encrypter;
 use async_std::net::UdpSocket;
 use async_std::task::{spawn, yield_now};
@@ -18,8 +19,9 @@ pub async fn run_client(
     host_ip: IpAddr,
     mut receiver: Receiver<Subscription>,
     sender: Sender<Subscription>,
-    req_sender: Sender<Vec<u8>>,
-    mut resp_receiver: Receiver<[u8; 32]>,
+    // req_sender: Sender<Vec<u8>>,
+    // mut resp_receiver: Receiver<[u8; 32]>,
+    decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     pub_key_pem: String,
 ) {
@@ -60,11 +62,12 @@ pub async fn run_client(
             println!("User is not subscribed to any Swarms");
             return;
         }
-        resp_receiver = establish_secure_connection(
+        establish_secure_connection(
             &socket,
             sender.clone(),
-            req_sender.clone(),
-            resp_receiver,
+            // req_sender.clone(),
+            // resp_receiver,
+            decrypter.clone(),
             pipes_sender.clone(),
             swarm_names,
         )
@@ -75,51 +78,55 @@ pub async fn run_client(
 async fn establish_secure_connection(
     socket: &UdpSocket,
     sender: Sender<Subscription>,
-    req_sender: Sender<Vec<u8>>,
-    resp_receiver: Receiver<[u8; 32]>,
+    // req_sender: Sender<Vec<u8>>,
+    // resp_receiver: Receiver<[u8; 32]>,
+    decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<String>,
-) -> Receiver<[u8; 32]> {
+    // ) -> Receiver<[u8; 32]> {
+) {
     let mut remote_gnome_id: GnomeId = GnomeId(0);
     let mut session_key: SessionKey = SessionKey::from_key(&[0; 32]);
     let mut remote_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
     let mut recv_buf = [0u8; 1100];
 
     let recv_result = socket.recv_from(&mut recv_buf).await;
-    let mut decoded_key: Option<[u8; 32]> = None;
-    println!("Dec key: {:?}", decoded_key);
+    // let mut decoded_key: Option<[u8; 32]> = None;
+    // println!("Dec key: {:?}", decoded_key);
     if let Ok((count, remote_adr)) = recv_result {
         remote_addr = remote_adr;
         println!("Received {}bytes", count);
+        let decoded_key = decrypter.decrypt(&recv_buf[..count]);
 
-        let _res = req_sender.send(Vec::from(&recv_buf[..count]));
-        println!("Sent decode request: {:?}", _res);
-        loop {
-            let response = resp_receiver.try_recv();
-            if let Ok(symmetric_key) = response {
-                // match subs_resp {
-                //     Subscription::KeyDecoded(symmetric_key) => {
-                //         // decoded_port = port;
-                decoded_key = Some(symmetric_key);
-                break;
-                //     }
-                //     Subscription::DecodeFailure => {
-                //         println!("Failed decoding symmetric key!");
-                //         break;
-                //     }
-                //     _ => println!("Unexpected message: {:?}", subs_resp),
-                // }
-            } else {
-                // println!("rec: {:?}", response);
-            }
-            yield_now().await
-        }
-        if let Some(sym_key) = decoded_key {
-            session_key = SessionKey::from_key(&sym_key);
+        // let _res = req_sender.send(Vec::from(&recv_buf[..count]));
+        // println!("Sent decode request: {:?}", _res);
+        // loop {
+        //     let response = resp_receiver.try_recv();
+        //     if let Ok(symmetric_key) = response {
+        //         // match subs_resp {
+        //         //     Subscription::KeyDecoded(symmetric_key) => {
+        //         //         // decoded_port = port;
+        //         decoded_key = Some(symmetric_key);
+        //         break;
+        //         //     }
+        //         //     Subscription::DecodeFailure => {
+        //         //         println!("Failed decoding symmetric key!");
+        //         //         break;
+        //         //     }
+        //         //     _ => println!("Unexpected message: {:?}", subs_resp),
+        //         // }
+        //     } else {
+        //         // println!("rec: {:?}", response);
+        //     }
+        //     yield_now().await
+        // }
+        if let Ok(sym_key) = decoded_key {
             println!("Got session key: {:?}", sym_key);
+            session_key = SessionKey::from_key(&sym_key.try_into().unwrap());
         } else {
             println!("Unable to decode key");
-            return resp_receiver;
+            // return resp_receiver;
+            return;
         }
 
         let dedicated_socket =
@@ -154,9 +161,9 @@ async fn establish_secure_connection(
             sender.clone(),
             pipes_sender.clone(),
         ));
-        return resp_receiver;
+        return;
     }
-    resp_receiver
+    // resp_receiver
 }
 
 // async fn socket_connect(

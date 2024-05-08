@@ -1,5 +1,6 @@
 mod client;
 mod common;
+mod direct_punch;
 mod holepunch;
 mod server;
 mod sock;
@@ -14,7 +15,7 @@ use async_std::net::UdpSocket;
 use async_std::task::{spawn, yield_now};
 use holepunch::holepunch;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use swarm_consensus::Request;
+use swarm_consensus::{NetworkSettings, Request};
 // use swarm_consensus::Message;
 
 // #[derive(Debug)]
@@ -42,7 +43,12 @@ pub async fn run_networking_tasks(
     server_port: u16,
     buffer_size_bytes: u32,
     uplink_bandwith_bytes_sec: u32,
-    notification_receiver: Receiver<(String, Sender<Request>, Sender<u32>)>,
+    notification_receiver: Receiver<(
+        String,
+        Sender<Request>,
+        Sender<u32>,
+        Receiver<(NetworkSettings, Option<NetworkSettings>)>,
+    )>,
     decrypter: Decrypter,
     pub_key_pem: String,
 ) {
@@ -53,15 +59,19 @@ pub async fn run_networking_tasks(
     let (sub_send_two, sub_recv_two) = channel();
     let (token_dispenser_send, token_dispenser_recv) = channel();
     let (holepunch_sender, holepunch_receiver) = channel();
+    let (token_pipes_sender, token_pipes_receiver) = channel();
     spawn(subscriber(
+        host_ip,
         sub_send_one,
+        decrypter.clone(),
+        token_pipes_sender.clone(),
+        pub_key_pem.clone(),
         sub_recv_two,
+        sub_send_two.clone(),
         notification_receiver,
         token_dispenser_send,
-        // decrypter,
         holepunch_sender,
     ));
-    let (token_pipes_sender, token_pipes_receiver) = channel();
 
     spawn(token_dispenser(
         buffer_size_bytes,
@@ -71,23 +81,24 @@ pub async fn run_networking_tasks(
         token_dispenser_recv,
     ));
 
-    let (decode_req_send, decode_req_recv) = channel();
-    let (decode_resp_send, decode_resp_recv) = channel();
-    println!("bifor");
-    spawn(decrypter_service(
-        decrypter,
-        decode_resp_send,
-        decode_req_recv,
-    ));
-    println!("after");
+    // let (decode_req_send, decode_req_recv) = channel();
+    // let (decode_resp_send, decode_resp_recv) = channel();
+    // println!("bifor");
+    // spawn(decrypter_service(
+    //     decrypter,
+    //     decode_resp_send,
+    //     decode_req_recv,
+    // ));
+    // println!("after");
     if let Ok(socket) = bind_result {
         let puncher = "tudbut.de:4277";
         spawn(holepunch(
             puncher,
             host_ip,
             sub_send_two.clone(),
-            decode_req_send,
-            decode_resp_recv,
+            // decode_req_send,
+            // decode_resp_recv,
+            decrypter.clone(),
             token_pipes_sender.clone(),
             holepunch_receiver,
             pub_key_pem.clone(),
@@ -110,8 +121,9 @@ pub async fn run_networking_tasks(
             sub_send_two,
             // token_send_two,
             // token_recv,
-            decode_req_send,
-            decode_resp_recv,
+            decrypter.clone(),
+            // decode_req_send,
+            // decode_resp_recv,
             token_pipes_sender,
             pub_key_pem,
         )
@@ -119,39 +131,40 @@ pub async fn run_networking_tasks(
     };
 }
 
-async fn decrypter_service(
-    decrypter: Decrypter,
-    sender: Sender<[u8; 32]>,
-    receiver: Receiver<Vec<u8>>,
-) {
-    println!("Starting decrypter service");
-    loop {
-        // for (sender, receiver) in &channel_pairs {
-        if let Ok(msg) = receiver.try_recv() {
-            println!("decoding: {:?}", msg);
-            let decode_res = decrypter.decrypt(&msg);
-            if let Ok(decoded) = decode_res {
-                if decoded.len() == 32 {
-                    // let sym_port_key: [u8; 34] = decoded.try_into().unwrap();
-                    // let sym_key: [u8; 32] = sym_port_key[2..].try_into().unwrap();
-                    let sym_key: [u8; 32] = decoded.try_into().unwrap();
-                    // let port: u16 =
-                    //     u16::from_be_bytes(sym_port_key[0..2].try_into().unwrap());
-                    println!("succesfully decoded");
-                    let _ = sender.send(sym_key);
-                } else {
-                    println!("Decoded symmetric key has wrong size: {}", decoded.len());
-                    // let _ = sub_sender.send(Subscription::DecodeFailure);
-                }
-            } else {
-                println!("Failed decoding message: {:?}", decode_res);
-                // let _ = sub_sender.send(Subscription::DecodeFailure);
-            }
-        }
-        yield_now().await;
-        // }
-    }
-}
+// async fn decrypter_service(
+//     decrypter: Decrypter,
+//     sender: Sender<[u8; 32]>,
+//     receiver: Receiver<Vec<u8>>,
+// ) {
+//     println!("Starting decrypter service");
+//     loop {
+//         // for (sender, receiver) in &channel_pairs {
+//         if let Ok(msg) = receiver.try_recv() {
+//             println!("decoding: {:?}", msg);
+//             let decode_res = decrypter.decrypt(&msg);
+//             if let Ok(decoded) = decode_res {
+//                 if decoded.len() == 32 {
+//                     // let sym_port_key: [u8; 34] = decoded.try_into().unwrap();
+//                     // let sym_key: [u8; 32] = sym_port_key[2..].try_into().unwrap();
+//                     let sym_key: [u8; 32] = decoded.try_into().unwrap();
+//                     // let port: u16 =
+//                     //     u16::from_be_bytes(sym_port_key[0..2].try_into().unwrap());
+//                     println!("succesfully decoded");
+//                     let _ = sender.send(sym_key);
+//                 } else {
+//                     println!("Decoded symmetric key has wrong size: {}", decoded.len());
+//                     // let _ = sub_sender.send(Subscription::DecodeFailure);
+//                 }
+//             } else {
+//                 println!("Failed decoding message: {:?}", decode_res);
+//                 // let _ = sub_sender.send(Subscription::DecodeFailure);
+//             }
+//         }
+//         yield_now().await;
+//         // }
+//     }
+// }
+
 // Decode(Box<Vec<u8>>),
 // KeyDecoded(Box<[u8; 32]>),
 // async fn connect_with_lan_gnomes(

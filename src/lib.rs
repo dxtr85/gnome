@@ -3,6 +3,7 @@
 use prelude::Decrypter;
 pub use std::net::IpAddr;
 use swarm_consensus::GnomeId;
+use swarm_consensus::NetworkSettings;
 use swarm_consensus::Request;
 // use std::time::Duration;
 use swarm_consensus::start;
@@ -27,14 +28,24 @@ pub mod prelude {
     pub use swarm_consensus::Data;
     pub use swarm_consensus::GnomeId;
     pub use swarm_consensus::Manager as GManager;
+    pub use swarm_consensus::NetworkSettings;
     pub use swarm_consensus::Request;
 }
 
 pub fn create_manager_and_receiver(
     gnome_id: GnomeId,
-) -> (Manager, Receiver<(String, Sender<Request>, Sender<u32>)>) {
+) -> (
+    Manager,
+    Receiver<(
+        String,
+        Sender<Request>,
+        Sender<u32>,
+        Receiver<(NetworkSettings, Option<NetworkSettings>)>,
+    )>,
+) {
     let (networking_sender, networking_receiver) = channel();
-    let mgr = start(gnome_id, networking_sender);
+    let network_settings = None;
+    let mgr = start(gnome_id, network_settings, networking_sender);
     (mgr, networking_receiver)
 }
 
@@ -45,7 +56,12 @@ pub async fn activate_gnome(
     port: u16,
     buffer_size_bytes: u32,
     uplink_bandwith_bytes_sec: u32,
-    receiver: Receiver<(String, Sender<Request>, Sender<u32>)>,
+    receiver: Receiver<(
+        String,
+        Sender<Request>,
+        Sender<u32>,
+        Receiver<(NetworkSettings, Option<NetworkSettings>)>,
+    )>,
     decrypter: Decrypter,
     pub_key_pem: String,
 ) {

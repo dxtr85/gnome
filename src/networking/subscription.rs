@@ -1,9 +1,13 @@
-use crate::crypto::Decrypter;
-use async_std::task::yield_now;
+// use crate::crypto::Decrypter;
+use crate::networking::direct_punch::direct_punching_service;
+use crate::prelude::Decrypter;
+use async_std::task::{spawn, yield_now};
 use std::collections::HashMap;
-use std::ops::Deref;
+use std::net::IpAddr;
 use std::sync::mpsc::{Receiver, Sender};
-use swarm_consensus::{Neighbor, Request};
+use swarm_consensus::{Nat, Neighbor, NetworkSettings, Request};
+
+use super::token::Token;
 
 #[derive(Debug)]
 pub enum Subscription {
@@ -12,17 +16,27 @@ pub enum Subscription {
     ProvideList,
     List(Vec<String>),
     IncludeNeighbor(String, Neighbor),
-    Decode(Box<Vec<u8>>),
-    KeyDecoded(Box<[u8; 32]>),
-    DecodeFailure,
+    Distribute(IpAddr, u16, Nat),
+    // Decode(Box<Vec<u8>>),
+    // KeyDecoded(Box<[u8; 32]>),
+    // DecodeFailure,
 }
 
 pub async fn subscriber(
+    host_ip: IpAddr,
     sub_sender: Sender<Subscription>,
+    decrypter: Decrypter,
+    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    pub_key_pem: String,
     sub_receiver: Receiver<Subscription>,
-    notification_receiver: Receiver<(String, Sender<Request>, Sender<u32>)>,
+    sub_sender_two: Sender<Subscription>,
+    notification_receiver: Receiver<(
+        String,
+        Sender<Request>,
+        Sender<u32>,
+        Receiver<(NetworkSettings, Option<NetworkSettings>)>,
+    )>,
     token_dispenser_send: Sender<Sender<u32>>,
-    // decrypter: Decrypter,
     holepunch_sender: Sender<String>,
 ) {
     let mut swarms: HashMap<String, Sender<Request>> = HashMap::with_capacity(10);
@@ -33,7 +47,19 @@ pub async fn subscriber(
         // println!("loop");
         let recv_result = notification_receiver.try_recv();
         match recv_result {
-            Ok((swarm_name, sender, band_sender)) => {
+            Ok((swarm_name, sender, band_sender, net_set_recv)) => {
+                spawn(direct_punching_service(
+                    host_ip,
+                    sub_sender_two.clone(),
+                    // req_sender.clone(),
+                    // resp_receiver,
+                    decrypter.clone(),
+                    pipes_sender.clone(),
+                    // receiver,
+                    pub_key_pem.clone(),
+                    swarm_name.clone(),
+                    net_set_recv,
+                ));
                 swarms.insert(swarm_name.clone(), sender);
                 names.push(swarm_name.clone());
                 // TODO: inform existing sockets about new subscription
@@ -68,6 +94,16 @@ pub async fn subscriber(
                 Subscription::ProvideList => {
                     println!("sub sending: {:?}", names);
                     let _ = sub_sender.send(Subscription::List(names.clone()));
+                }
+                Subscription::Distribute(ip, port, nat) => {
+                    for sender in swarms.values() {
+                        let ip_req = Request::SetAddress(ip);
+                        let port_req = Request::SetPort(port);
+                        let nat_req = Request::SetNat(nat);
+                        sender.send(ip_req);
+                        sender.send(port_req);
+                        sender.send(nat_req);
+                    }
                 }
                 // Subscription::Decode(msg) => {
                 // println!("decoding: {:?}", msg);
