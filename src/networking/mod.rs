@@ -4,17 +4,21 @@ mod direct_punch;
 mod holepunch;
 mod server;
 mod sock;
+mod stun;
 mod subscription;
 mod token;
 use self::client::run_client;
+use self::common::are_we_behind_a_nat;
+use self::common::discover_port_allocation_rule;
 use self::server::run_server;
 use self::sock::serve_socket;
 use self::subscription::subscriber;
 use self::token::{token_dispenser, Token};
 use async_std::net::UdpSocket;
-use async_std::task::{spawn, yield_now};
+use async_std::task::spawn;
 use holepunch::holepunch;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use stun::{build_request, stun_decode, stun_send};
 use swarm_consensus::{NetworkSettings, Request};
 // use swarm_consensus::Message;
 
@@ -37,6 +41,7 @@ use swarm_consensus::{NetworkSettings, Request};
 use std::net::{IpAddr, SocketAddr};
 
 use crate::crypto::Decrypter;
+use crate::networking::common::identify_nat;
 
 pub async fn run_networking_tasks(
     host_ip: IpAddr,
@@ -103,6 +108,47 @@ pub async fn run_networking_tasks(
             holepunch_receiver,
             pub_key_pem.clone(),
         ));
+
+        // Now we know all we need to establish a connection between two hosts behind
+        // any type of NAT. (We might not connect if NAT always assigns ports randomly.)
+        // From now on if we want to connect to another gnome, we create a new socket,
+        // if necessary send just one request to STUN server for port identification
+        // and we can send out our expected socket address for other gnome to connect to.
+
+        // The connection procedure should be as follows:
+        // Once we receive other socket address we send nine one byte datagrams
+        // in 100ms intervals counting down from 9 to 1
+        // then we listen for dgrams from remote gnome and receive until we get
+        // one with a single byte 1.
+        // Now we can pass that socket for Neighbor creation.
+        // If we do not receive any dgrams after specified period of time,
+        // we can start over from creation of a new socket,
+        // but current procedure is not successful.
+
+        // In case of using external proxy like tudbut.de for neighbor discovery
+        // we can simply send a drgram to that server and wait for a response.
+        // When we receive that response we have a remote socket address.
+        // Now we send another request to a proxy from a new socket, and we
+        // receive a reply - we note remote_port_1.
+        // We send another request to a proxy from yet another socket, and we
+        // note remote_port_2 from second reply.
+        // We calculate delta_p = remote_port_2 - remote_port_1.
+        // Now we calculate remote_port = remote_port_2 + delta_p.
+        // We start exchanging messages as described above to calculated remote_port.
+        // If no luck, we can turn back to proxy
+        // or some other mean to receive a neighbor's socket address.
+        let behind_a_nat = are_we_behind_a_nat(&socket).await;
+        if let Ok(is_there_nat) = behind_a_nat {
+            if is_there_nat {
+                println!("NAT detected, identifying...");
+                identify_nat(&socket).await;
+                discover_port_allocation_rule(&socket).await;
+            } else {
+                println!("We have a public IP!");
+            }
+        } else {
+            println!("Unable to tell if there is NAT: {:?}", behind_a_nat);
+        }
         run_server(
             host_ip,
             socket,

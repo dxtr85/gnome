@@ -66,6 +66,22 @@ pub async fn holepunch(
         let bytes = swarm_name.as_bytes();
         let mut buf = vec![0_u8; 200];
         buf[..bytes.len().min(200)].copy_from_slice(&bytes[..bytes.len().min(200)]);
+        // Initial request
+        holepunch
+            .send_to(&buf, puncher)
+            .await
+            .expect("unable to talk to helper");
+        println!("Waiting for UDPunch server to respond");
+        holepunch
+            .recv_from(&mut buf)
+            .await
+            .expect("unable to receive from helper");
+        // TODO: here we should temporarily send some invalid packet to proxy
+        let next_port = holepunch.local_addr().unwrap().port().saturating_add(1);
+        let holepunch = UdpSocket::bind((host_ip, next_port))
+            .await
+            .expect("unable to create second socket");
+        // Second request
         holepunch
             .send_to(&buf, puncher)
             .await
@@ -78,19 +94,49 @@ pub async fn holepunch(
         // buf should now contain our partner's address data.
         buf.retain(|e| *e != 0);
         let remote_addr = String::from_utf8_lossy(buf.as_slice()).to_string();
-        let remote_e_addr = remote_addr
+        let remote_1_addr = remote_addr
             .split(':')
             .next()
             .unwrap()
             .parse::<IpAddr>()
             .expect("Unable to parse remote address");
-        let remote_e_port = remote_addr
+        let remote_1_port = remote_addr
+            .split(':')
+            .nth(1)
+            .unwrap()
+            .parse::<u16>()
+            .expect("Unable to parse remote port");
+        // Third request
+        let holepunch = UdpSocket::bind((host_ip, next_port.saturating_add(1)))
+            .await
+            .expect("unable to create third socket");
+        holepunch
+            .send_to(&buf, puncher)
+            .await
+            .expect("unable to talk to helper");
+        println!("Waiting for UDPunch server to respond");
+        holepunch
+            .recv_from(&mut buf)
+            .await
+            .expect("unable to receive from helper");
+        // buf should now contain our partner's address data.
+        buf.retain(|e| *e != 0);
+        let remote_addr = String::from_utf8_lossy(buf.as_slice()).to_string();
+        let remote_2_addr = remote_addr
+            .split(':')
+            .next()
+            .unwrap()
+            .parse::<IpAddr>()
+            .expect("Unable to parse remote address");
+        let remote_2_port = remote_addr
             .split(':')
             .nth(1)
             .unwrap()
             .parse::<u16>()
             .expect("Unable to parse remote port");
         // println!("to be bind addr: {}", bind_addr);
+        let delta_port = remote_2_port - remote_1_port;
+        let remote_e_port = remote_2_port + delta_port;
         let remote_controls_port = magic_ports.is_magic(remote_e_port);
         println!(
             "Holepunching {} (magic?: {:?}) and :{} (you) for {}.",
@@ -100,6 +146,7 @@ pub async fn holepunch(
             swarm_name
         );
 
+        // TODO: end this brutality, follow the rigtheous path
         let (remote_port_start, remote_port_end) = if remote_controls_port {
             (remote_e_port, remote_e_port + 50) //.collect::<std::vec::Vec<u16>>();
                                                 // VecDeque::from(vec)
@@ -116,7 +163,7 @@ pub async fn holepunch(
             decrypter.clone(),
             (bind_port + 1, bind_port + 50),
             (remote_port_start, remote_port_end),
-            (remote_e_addr, remote_e_port),
+            (remote_2_addr, remote_e_port),
             // req_sender.clone(),
             pipes_sender.clone(),
             sub_sender.clone(),
@@ -237,41 +284,64 @@ async fn probe_socket(
     mut port_list: VecDeque<u16>,
     sender: Sender<Option<(SocketAddr, UdpSocket)>>,
 ) {
-    let sleep_time = Duration::from_millis(rand::random::<u8>() as u64 + 200);
-    loop {
-        let new_port = port_list.pop_front().unwrap();
-        remote_addr.set_port(new_port);
-        port_list.push_back(new_port);
-        let t1 = timeout(&sleep_time).fuse();
-        let t2 = try_communicate(&socket, remote_addr).fuse();
-
-        pin_mut!(t1, t2);
-
-        let break_anyway = select! {
-            _t1 = t1 =>  false,
-            result2 = t2 => {match result2{
-                Ok(rem) =>{
-                    punch_back(&socket, rem).await;
-                     remote_addr=rem;
-                     true},
-                Err(_e)=>false,
-            }},
-        };
-        // let break_anyway = option.is_some();
-        if !break_anyway {
-            let send_result = sender.send(None);
-            if send_result.is_err() {
-                // println!("Unable to send: {:?}", send_result);
-                // println!("Unable to send: {:?}", send_result.err().unwrap());
-                // std::process::exit(255);
-                return;
-            }
-        } else {
-            break;
-        };
+    let sleep_time = Duration::from_millis(100);
+    for i in (1..10).rev() {
+        let _ = socket.send_to(&[i as u8], remote_addr).await;
+        sleep(sleep_time).await;
     }
-    let _ = sender.send(Some((remote_addr, socket)));
+    let mut bytes: [u8; 10] = [0; 10];
+    let mut socket_found = false;
+    while !socket_found {
+        let recv_res = socket.recv_from(&mut bytes).await;
+        println!("Recv: {:?}", recv_res);
+        if let Ok((count, from)) = recv_res {
+            println!("Recv: {} from {:?}", bytes[0], from);
+            if count == 1 && bytes[0] == 1 {
+                socket_found = true;
+            }
+        }
+    }
+    // let sleep_time = Duration::from_millis(rand::random::<u8>() as u64 + 200);
+    // loop {
+    //     let new_port = port_list.pop_front().unwrap();
+    //     remote_addr.set_port(new_port);
+    //     port_list.push_back(new_port);
+    //     let t1 = timeout(&sleep_time).fuse();
+    //     let t2 = try_communicate(&socket, remote_addr).fuse();
+
+    //     pin_mut!(t1, t2);
+
+    //     let break_anyway = select! {
+    //         _t1 = t1 =>  false,
+    //         result2 = t2 => {match result2{
+    //             Ok(rem) =>{
+    //                 punch_back(&socket, rem).await;
+    //                  remote_addr=rem;
+    //                  socket_found = true;
+    //                  true},
+    //             Err(_e)=>false,
+    //         }},
+    //     };
+    //     // let break_anyway = option.is_some();
+    //     if !break_anyway {
+    //         let send_result = sender.send(None);
+    //         if send_result.is_err() {
+    //             // println!("Unable to send: {:?}", send_result);
+    //             // println!("Unable to send: {:?}", send_result.err().unwrap());
+    //             // std::process::exit(255);
+    //             break;
+    //         }
+    //     } else {
+    //         break;
+    //     };
+    // }
+    if socket_found {
+        let _ = sender.send(Some((remote_addr, socket)));
+    } else {
+        drop(socket);
+    }
 }
+
 async fn punch_back(
     socket: &UdpSocket,
     remote_addr: SocketAddr,
@@ -325,31 +395,31 @@ pub async fn punch_it(
             sender.clone(),
         ));
     }
-    for my_port in local_ports {
-        let port = remote_ports.pop_front().unwrap();
-        remote_ports.push_back(port);
-        // let mut b_addr: SocketAddr = bind_addr.into();
-        let mut b_addr: SocketAddr = SocketAddr::new(host_ip, my_port);
-        b_addr.set_port(my_port);
-        let bind_result = UdpSocket::bind(b_addr).await;
-        if bind_result.is_err() {
-            println!("Unable to bind {:?}: {:?}", b_addr, bind_result);
-            continue;
-        }
-        let socket = bind_result.unwrap();
-        spawn(probe_socket(
-            socket,
-            remote_adr,
-            remote_ports.clone(),
-            sender.clone(),
-        ));
-    }
+    // for my_port in local_ports {
+    //     let port = remote_ports.pop_front().unwrap();
+    //     remote_ports.push_back(port);
+    //     // let mut b_addr: SocketAddr = bind_addr.into();
+    //     let mut b_addr: SocketAddr = SocketAddr::new(host_ip, my_port);
+    //     b_addr.set_port(my_port);
+    //     let bind_result = UdpSocket::bind(b_addr).await;
+    //     if bind_result.is_err() {
+    //         println!("Unable to bind {:?}: {:?}", b_addr, bind_result);
+    //         continue;
+    //     }
+    //     let socket = bind_result.unwrap();
+    //     spawn(probe_socket(
+    //         socket,
+    //         remote_adr,
+    //         remote_ports.clone(),
+    //         sender.clone(),
+    //     ));
+    // }
     let bind_addr = (host_ip, 0);
     let mut dedicated_socket = UdpSocket::bind(bind_addr).await.unwrap();
-    println!(
-        "Waiting for some socket on {:?}",
-        dedicated_socket.local_addr()
-    );
+    // println!(
+    //     "Waiting for some socket on {:?}",
+    //     dedicated_socket.local_addr()
+    // );
     let mut responsive_socket_result;
     loop {
         responsive_socket_result = reciever.try_recv();

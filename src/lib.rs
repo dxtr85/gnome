@@ -28,12 +28,14 @@ pub mod prelude {
     pub use swarm_consensus::Data;
     pub use swarm_consensus::GnomeId;
     pub use swarm_consensus::Manager as GManager;
+    pub use swarm_consensus::Nat;
     pub use swarm_consensus::NetworkSettings;
     pub use swarm_consensus::Request;
 }
 
 pub fn create_manager_and_receiver(
     gnome_id: GnomeId,
+    network_settings: Option<NetworkSettings>,
 ) -> (
     Manager,
     Receiver<(
@@ -44,7 +46,7 @@ pub fn create_manager_and_receiver(
     )>,
 ) {
     let (networking_sender, networking_receiver) = channel();
-    let network_settings = None;
+    // let network_settings = None;
     let mgr = start(gnome_id, network_settings, networking_sender);
     (mgr, networking_receiver)
 }

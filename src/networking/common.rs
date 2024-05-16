@@ -1,10 +1,19 @@
+use crate::networking::stun::{
+    build_request, stun_decode, stun_send, StunChangeRequest, StunMessage,
+};
 use crate::networking::subscription::Subscription;
 use async_std::net::UdpSocket;
-use async_std::task::yield_now;
+use async_std::task::{sleep, yield_now};
 use bytes::{BufMut, BytesMut};
+use futures::{
+    future::FutureExt, // for `.fuse()`
+    pin_mut,
+    select,
+};
 use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use swarm_consensus::{GnomeId, Message, Neighbor, SwarmTime};
+use std::time::Duration;
+use swarm_consensus::{GnomeId, Message, Nat, Neighbor, SwarmTime};
 
 pub async fn collect_subscribed_swarm_names(
     names: &mut Vec<String>,
@@ -100,5 +109,208 @@ pub fn create_a_neighbor_for_each_swarm(
         println!("Request include neighbor");
         let _ = sender.send(Subscription::IncludeNeighbor(name, neighbor));
         ch_pairs.push((s2, r1));
+    }
+}
+// We need to write a procedure that establishes
+// whether or not we are behind a NAT
+// To do that we have to ask a STUN server for our public address
+// If we do not receive a response within reasonable period of time that
+// means firewall cuts off UDP communication
+// or a STUN server is unresponsive
+// We can try two or three STUN servers.
+// In case we receive a response we compare our port and address
+// with MAPPED_ADDRESS received from STUN server
+// If both IP and PORT are the same then we have a public IP
+// and we can connect with anyone we want on any port we want
+// If IP is different but port is the same we do not have a public IP
+// but we do have control over public port assignment, which means
+// we can function as if we had a public IP.
+// In case both IP and PORT are different from what we have set up
+// we need to run an additional procedure in order to identify
+// what type of NAT we are behind.
+pub async fn are_we_behind_a_nat(socket: &UdpSocket) -> Result<bool, String> {
+    let request = build_request(None);
+    let _send_result = stun_send(socket, request, None, None).await;
+    let mut bytes: [u8; 128] = [0; 128];
+    let recv_result = socket.recv_from(&mut bytes).await;
+    if let Ok((_count, _from)) = recv_result {
+        let msg = stun_decode(&bytes);
+        // println!("Received {} bytes from {:?}:\n{:?}", count, from, msg);
+        let mapped_address = msg.mapped_address().unwrap();
+        if mapped_address == socket.local_addr().unwrap() {
+            Ok(false)
+        } else {
+            Ok(true)
+        }
+    } else {
+        Err(format!("Did not receive STUN response: {:?}", recv_result))
+    }
+}
+// This procedure for NAT identification has two stages:
+// 1 - we ask STUN server to reply from a different IP & port
+// 2 - we ask STUN server to reply from same IP but different port
+// If we get response for request 1, then we are behind a Full Cone NAT,
+// which means we can receive messages from anyone
+// If we do not get a response we need to verify request nr 2
+// If we get a response for request 2, then we are behind an Address
+// Restricted Cone NAT, and if we do not receive any response
+// then we are behind a symmetric NAT.
+// In case we are behind a symmetric NAT we can only receive a response from
+// an IP and PORT that we have previously sent a message to, no other pair
+// of IP and PORT will get through our NAT.
+// We still need to find out how are external PORTS assigned.
+pub async fn identify_nat(socket: &UdpSocket) -> Nat {
+    let request = build_request(Some(StunChangeRequest::ChangeIpPort));
+    let first_id = request.id();
+    let _send_result = stun_send(socket, request, None, None).await;
+    let request = build_request(Some(StunChangeRequest::ChangePort));
+    let second_id = request.id();
+    let _send_result = stun_send(socket, request, None, None).await;
+
+    let mut secs_remaining = 5;
+    let mut received_responses = Vec::new();
+    while secs_remaining > 0 && received_responses.len() < 2 {
+        println!("Waiting {} for STUN to respond...", secs_remaining);
+        let t1 = sleep(Duration::from_secs(1)).fuse();
+        let t2 = receive_response(socket).fuse();
+
+        pin_mut!(t1, t2);
+        select! {
+            _result1 = t1 =>{
+                 secs_remaining-=1;
+             },
+            result2 = t2 => {
+                println!("Received a response: {:?}", result2);
+                received_responses.push(result2)}
+        };
+    }
+    if received_responses.is_empty() {
+        println!("NAT type: Symmetric");
+        Nat::Symmetric
+    } else {
+        let mut first_response_received = false;
+        let mut second_response_received = false;
+        for response in received_responses {
+            if response.id() == first_id {
+                first_response_received = true;
+            } else if response.id() == second_id {
+                second_response_received = true;
+            }
+        }
+        if first_response_received {
+            println!("NAT type: FullCone");
+            Nat::FullCone
+        } else if second_response_received {
+            println!("NAT type: AddressRestrictedCone");
+            Nat::AddressRestrictedCone
+        } else {
+            println!("NAT type: Unknown");
+            Nat::Unknown
+        }
+    }
+    // let _recv_result = socket.recv_from(&mut bytes).await;
+    // let second_response = stun_decode(&bytes);
+}
+async fn receive_response(socket: &UdpSocket) -> StunMessage {
+    let mut bytes: [u8; 128] = [0; 128];
+    let _res = socket.recv_from(&mut bytes).await;
+    let response = stun_decode(&bytes.clone());
+    println!("Received a response: {:?}", response);
+    response
+}
+
+// In order to find how ports are assigned we send four messages to STUN server:
+// First one is identical to the very first request we have sent to STUN server
+// and can be skipped
+// Second request we send to the same STUN IP address but different PORT that we
+// have received as as response to first request in CHANGED_ADDRESS
+// Third request is sent to same port as first request, but IP is taken from
+// CHANGED_ADDRESS stored in first response
+// Fourth request is sent to both IP and PORT taken from CHANGED_ADDRESS stored
+// in first response
+// This way we obtain four MAPPED_ADDRESSes and we use them to
+// determine the port allocation rule, find out delta p value
+// and evaluate port allocation consistency.
+// To further evaluate consistency we can use another socket or two and repeat
+// the four step procedure.
+// If ports in MAPPED_ADDRESS from reply 1 and 2 are the same, and also reply
+// 3 and 4 have same ports, but those two ports are not the same, we have
+// address sensitive port allocation, and delta p
+// is equal to difference between second and first external port number.
+// If both ports are equal we have a Full Cone NAT.
+// In case every port in MAPPED_ADDRESS replies is different we are behind
+// a Port Resticted Cone NAT or symmetric NAT and we determine delta p
+// as a difference between port numbers in two consecutive responses.
+// This difference should be constant for every consecutive pair
+// (maybe one exception is allowed where increment is larger than usual).
+pub async fn discover_port_allocation_rule(socket: &UdpSocket) {
+    stun_send(socket, build_request(None), None, None).await;
+    let mut bytes: [u8; 128] = [0; 128];
+    let recv_result = socket.recv_from(&mut bytes).await;
+    if let Ok((_count, _from)) = recv_result {
+        let msg = stun_decode(&bytes);
+        if let Some(changed_address) = msg.changed_address() {
+            let m_addr_1 = msg.mapped_address().unwrap();
+            println!("Mapped address 1: {:?}", m_addr_1);
+            let port_1 = m_addr_1.port();
+            stun_send(
+                socket,
+                build_request(None),
+                None,
+                Some(changed_address.port()),
+            )
+            .await;
+            bytes = [0; 128];
+            let _recv_result = socket.recv_from(&mut bytes).await;
+            let msg = stun_decode(&bytes);
+            let m_addr_2 = msg.mapped_address().unwrap();
+            println!("Mapped address 2: {:?}", m_addr_2);
+            let port_2 = m_addr_2.port();
+            stun_send(
+                socket,
+                build_request(None),
+                Some(changed_address.ip()),
+                None,
+            )
+            .await;
+            bytes = [0; 128];
+            let _recv_result = socket.recv_from(&mut bytes).await;
+            let msg = stun_decode(&bytes);
+            let m_addr_3 = msg.mapped_address().unwrap();
+            println!("Mapped address 3: {:?}", m_addr_3);
+            let port_3 = m_addr_3.port();
+            stun_send(
+                socket,
+                build_request(None),
+                Some(changed_address.ip()),
+                Some(changed_address.port()),
+            )
+            .await;
+            bytes = [0; 128];
+            let _recv_result = socket.recv_from(&mut bytes).await;
+            let msg = stun_decode(&bytes);
+            let m_addr_4 = msg.mapped_address().unwrap();
+            println!("Mapped address 4: {:?}", m_addr_4);
+            let port_4 = m_addr_4.port();
+            let p1_and_p2_eq = port_1 == port_2;
+            let p3_and_p4_eq = port_3 == port_4;
+            if p1_and_p2_eq && p3_and_p4_eq {
+                if port_1 == port_3 {
+                    println!("Port allocation: FullCone, delta p: 0");
+                } else {
+                    println!(
+                        "Port allocation: AddressSensitive, delta p: {}",
+                        port_3 - port_2
+                    );
+                }
+            } else {
+                println!(
+                    "Port allocation: PortSensitive delta p: {} {} {}",
+                    port_2 - port_1,
+                    port_3 - port_2,
+                    port_4 - port_3
+                );
+            }
+        }
     }
 }
