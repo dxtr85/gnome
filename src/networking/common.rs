@@ -10,10 +10,13 @@ use futures::{
     pin_mut,
     select,
 };
+use std::cmp::min;
 use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{GnomeId, Message, Nat, Neighbor, SwarmTime};
+use swarm_consensus::{
+    GnomeId, Message, Nat, Neighbor, NetworkSettings, PortAllocationRule, SwarmTime,
+};
 
 pub async fn collect_subscribed_swarm_names(
     names: &mut Vec<String>,
@@ -128,7 +131,7 @@ pub fn create_a_neighbor_for_each_swarm(
 // In case both IP and PORT are different from what we have set up
 // we need to run an additional procedure in order to identify
 // what type of NAT we are behind.
-pub async fn are_we_behind_a_nat(socket: &UdpSocket) -> Result<bool, String> {
+pub async fn are_we_behind_a_nat(socket: &UdpSocket) -> Result<(bool, SocketAddr), String> {
     let request = build_request(None);
     let _send_result = stun_send(socket, request, None, None).await;
     let mut bytes: [u8; 128] = [0; 128];
@@ -138,9 +141,9 @@ pub async fn are_we_behind_a_nat(socket: &UdpSocket) -> Result<bool, String> {
         // println!("Received {} bytes from {:?}:\n{:?}", count, from, msg);
         let mapped_address = msg.mapped_address().unwrap();
         if mapped_address == socket.local_addr().unwrap() {
-            Ok(false)
+            Ok((false, mapped_address))
         } else {
-            Ok(true)
+            Ok((true, mapped_address))
         }
     } else {
         Err(format!("Did not receive STUN response: {:?}", recv_result))
@@ -167,22 +170,23 @@ pub async fn identify_nat(socket: &UdpSocket) -> Nat {
     let second_id = request.id();
     let _send_result = stun_send(socket, request, None, None).await;
 
-    let mut secs_remaining = 5;
+    let mut millis_remaining = 1000;
     let mut received_responses = Vec::new();
-    while secs_remaining > 0 && received_responses.len() < 2 {
-        println!("Waiting {} for STUN to respond...", secs_remaining);
-        let t1 = sleep(Duration::from_secs(1)).fuse();
+    println!("Waiting for STUN to respond...");
+    while millis_remaining > 0 && received_responses.len() < 2 {
+        let t1 = sleep(Duration::from_millis(1)).fuse();
         let t2 = receive_response(socket).fuse();
 
         pin_mut!(t1, t2);
         select! {
             _result1 = t1 =>{
-                 secs_remaining-=1;
+                 millis_remaining-=1;
              },
             result2 = t2 => {
                 println!("Received a response: {:?}", result2);
                 received_responses.push(result2)}
         };
+        yield_now().await;
     }
     if received_responses.is_empty() {
         println!("NAT type: Symmetric");
@@ -243,7 +247,7 @@ async fn receive_response(socket: &UdpSocket) -> StunMessage {
 // as a difference between port numbers in two consecutive responses.
 // This difference should be constant for every consecutive pair
 // (maybe one exception is allowed where increment is larger than usual).
-pub async fn discover_port_allocation_rule(socket: &UdpSocket) {
+pub async fn discover_port_allocation_rule(socket: &UdpSocket) -> (PortAllocationRule, i8) {
     stun_send(socket, build_request(None), None, None).await;
     let mut bytes: [u8; 128] = [0; 128];
     let recv_result = socket.recv_from(&mut bytes).await;
@@ -297,20 +301,62 @@ pub async fn discover_port_allocation_rule(socket: &UdpSocket) {
             if p1_and_p2_eq && p3_and_p4_eq {
                 if port_1 == port_3 {
                     println!("Port allocation: FullCone, delta p: 0");
+                    (PortAllocationRule::FullCone, 0)
                 } else {
                     println!(
                         "Port allocation: AddressSensitive, delta p: {}",
                         port_3 - port_2
                     );
+                    (
+                        PortAllocationRule::AddressSensitive,
+                        (port_3 - port_2) as i8,
+                    )
                 }
             } else {
+                let d1 = port_2 - port_1;
+                let d2 = port_3 - port_2;
+                let d3 = port_4 - port_3;
                 println!(
                     "Port allocation: PortSensitive delta p: {} {} {}",
-                    port_2 - port_1,
-                    port_3 - port_2,
-                    port_4 - port_3
+                    d1, d2, d3
                 );
+                let delta_p = min(min(d1, d2), d3) as i8;
+                (PortAllocationRule::PortSensitive, delta_p)
             }
+        } else {
+            (PortAllocationRule::Random, 0)
         }
+    } else {
+        (PortAllocationRule::Random, 0)
     }
+}
+// Now we know all we need to establish a connection between two hosts behind
+// any type of NAT. (We might not connect if NAT always assigns ports randomly.)
+// From now on if we want to connect to another gnome, we create a new socket,
+// send just one request to STUN server for port identification if necessary,
+// and we can send out our expected socket address for other gnome to connect to.
+
+pub async fn discover_network_settings(socket: &mut UdpSocket) -> NetworkSettings {
+    let behind_a_nat = are_we_behind_a_nat(socket).await;
+    let mut my_settings = NetworkSettings::default();
+    if let Ok((is_there_nat, public_addr)) = behind_a_nat {
+        let ip = public_addr.ip();
+        my_settings.pub_ip = ip;
+        let port = public_addr.port();
+        my_settings.pub_port = port;
+        if is_there_nat {
+            println!("NAT detected, identifying...");
+            let nat = identify_nat(socket).await;
+            my_settings.nat_type = nat;
+            let port_allocation = discover_port_allocation_rule(socket).await;
+            my_settings.port_allocation = port_allocation;
+        } else {
+            println!("We have a public IP!");
+            my_settings.nat_type = Nat::None;
+            my_settings.port_allocation = (PortAllocationRule::FullCone, 0);
+        }
+    } else {
+        println!("Unable to tell if there is NAT: {:?}", behind_a_nat);
+    }
+    my_settings
 }

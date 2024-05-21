@@ -1,5 +1,4 @@
 // use crate::crypto::Decrypter;
-use crate::networking::direct_punch::direct_punching_service;
 use crate::prelude::Decrypter;
 use async_std::task::{spawn, yield_now};
 use std::collections::HashMap;
@@ -34,10 +33,11 @@ pub async fn subscriber(
         String,
         Sender<Request>,
         Sender<u32>,
-        Receiver<(NetworkSettings, Option<NetworkSettings>)>,
+        Receiver<NetworkSettings>,
     )>,
     token_dispenser_send: Sender<Sender<u32>>,
     holepunch_sender: Sender<String>,
+    direct_punch_sender: Sender<(String, Sender<Request>, Receiver<NetworkSettings>)>,
 ) {
     let mut swarms: HashMap<String, Sender<Request>> = HashMap::with_capacity(10);
     let mut names: Vec<String> = Vec::with_capacity(10);
@@ -47,20 +47,14 @@ pub async fn subscriber(
         // println!("loop");
         let recv_result = notification_receiver.try_recv();
         match recv_result {
-            Ok((swarm_name, sender, band_sender, net_set_recv)) => {
-                spawn(direct_punching_service(
-                    host_ip,
-                    sub_sender_two.clone(),
-                    // req_sender.clone(),
-                    // resp_receiver,
-                    decrypter.clone(),
-                    pipes_sender.clone(),
-                    // receiver,
-                    pub_key_pem.clone(),
+            Ok((swarm_name, req_sender, band_sender, net_set_recv)) => {
+                // TODO: only one punching service for all swarms!
+                let _ = direct_punch_sender.send((
                     swarm_name.clone(),
+                    req_sender.clone(),
                     net_set_recv,
                 ));
-                swarms.insert(swarm_name.clone(), sender);
+                swarms.insert(swarm_name.clone(), req_sender);
                 names.push(swarm_name.clone());
                 // TODO: inform existing sockets about new subscription
                 println!("Added swarm: {}", swarm_name);
@@ -97,12 +91,8 @@ pub async fn subscriber(
                 }
                 Subscription::Distribute(ip, port, nat) => {
                     for sender in swarms.values() {
-                        let ip_req = Request::SetAddress(ip);
-                        let port_req = Request::SetPort(port);
-                        let nat_req = Request::SetNat(nat);
-                        sender.send(ip_req);
-                        sender.send(port_req);
-                        sender.send(nat_req);
+                        let request = Request::NetworkSettingsUpdate(false, ip, port, nat);
+                        let _ = sender.send(request);
                     }
                 }
                 // Subscription::Decode(msg) => {

@@ -14,6 +14,7 @@ use swarm_consensus::Neighborhood;
 use swarm_consensus::NetworkSettings;
 // use swarm_consensus::NetworkSettings;
 use swarm_consensus::Payload;
+use swarm_consensus::PortAllocationRule;
 use swarm_consensus::SwarmID;
 use swarm_consensus::SwarmTime;
 
@@ -351,8 +352,8 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
 fn insert_network_settings(bytes: &mut BytesMut, network_settings: NetworkSettings) {
     bytes.put_u8(network_settings.nat_type as u8);
     bytes.put_u16(network_settings.pub_port);
-    bytes.put_u16(network_settings.port_range.0);
-    bytes.put_u16(network_settings.port_range.1);
+    bytes.put_u8(network_settings.port_allocation.0 as u8);
+    bytes.put_i8(network_settings.port_allocation.1);
     let pub_ip = network_settings.pub_ip;
     match pub_ip {
         std::net::IpAddr::V4(ip4) => {
@@ -383,16 +384,26 @@ fn parse_network_settings(bytes: Bytes) -> NetworkSettings {
             Nat::Unknown
         }
     };
+
     let mut port_bytes: [u8; 2] = [0, 0];
     port_bytes[0] = bytes_iter.next().unwrap();
     port_bytes[1] = bytes_iter.next().unwrap();
     let pub_port: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
-    port_bytes[0] = bytes_iter.next().unwrap();
-    port_bytes[1] = bytes_iter.next().unwrap();
-    let port_range_min: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
-    port_bytes[0] = bytes_iter.next().unwrap();
-    port_bytes[1] = bytes_iter.next().unwrap();
-    let port_range_max: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
+
+    let port_allocation_rule = match bytes_iter.next().unwrap() {
+        0 => PortAllocationRule::Random,
+        1 => PortAllocationRule::FullCone,
+        2 => PortAllocationRule::AddressSensitive,
+        4 => PortAllocationRule::PortSensitive,
+        _ => PortAllocationRule::Random,
+    };
+    let delta_port = bytes_iter.next().unwrap() as i8;
+    // port_bytes[0] = bytes_iter.next().unwrap();
+    // port_bytes[1] = bytes_iter.next().unwrap();
+    // let port_range_min: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
+    // port_bytes[0] = bytes_iter.next().unwrap();
+    // port_bytes[1] = bytes_iter.next().unwrap();
+    // let port_range_max: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
     let ip_bytes: Vec<u8> = bytes_iter.collect();
     let bytes_len = ip_bytes.len();
     let pub_ip = if bytes_len == 4 {
@@ -409,6 +420,6 @@ fn parse_network_settings(bytes: Bytes) -> NetworkSettings {
         pub_ip,
         pub_port,
         nat_type,
-        port_range: (port_range_min, port_range_max),
+        port_allocation: (port_allocation_rule, delta_port),
     }
 }

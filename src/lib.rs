@@ -30,6 +30,7 @@ pub mod prelude {
     pub use swarm_consensus::Manager as GManager;
     pub use swarm_consensus::Nat;
     pub use swarm_consensus::NetworkSettings;
+    pub use swarm_consensus::PortAllocationRule;
     pub use swarm_consensus::Request;
 }
 
@@ -42,7 +43,7 @@ pub fn create_manager_and_receiver(
         String,
         Sender<Request>,
         Sender<u32>,
-        Receiver<(NetworkSettings, Option<NetworkSettings>)>,
+        Receiver<NetworkSettings>,
     )>,
 ) {
     let (networking_sender, networking_receiver) = channel();
@@ -62,7 +63,7 @@ pub async fn activate_gnome(
         String,
         Sender<Request>,
         Sender<u32>,
-        Receiver<(NetworkSettings, Option<NetworkSettings>)>,
+        Receiver<NetworkSettings>,
     )>,
     decrypter: Decrypter,
     pub_key_pem: String,

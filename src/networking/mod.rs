@@ -1,3 +1,4 @@
+use crate::networking::direct_punch::direct_punching_service;
 mod client;
 mod common;
 mod direct_punch;
@@ -8,8 +9,8 @@ mod stun;
 mod subscription;
 mod token;
 use self::client::run_client;
-use self::common::are_we_behind_a_nat;
-use self::common::discover_port_allocation_rule;
+// use self::common::are_we_behind_a_nat;
+// use self::common::discover_port_allocation_rule;
 use self::server::run_server;
 use self::sock::serve_socket;
 use self::subscription::subscriber;
@@ -18,7 +19,6 @@ use async_std::net::UdpSocket;
 use async_std::task::spawn;
 use holepunch::holepunch;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use stun::{build_request, stun_decode, stun_send};
 use swarm_consensus::{NetworkSettings, Request};
 // use swarm_consensus::Message;
 
@@ -41,7 +41,7 @@ use swarm_consensus::{NetworkSettings, Request};
 use std::net::{IpAddr, SocketAddr};
 
 use crate::crypto::Decrypter;
-use crate::networking::common::identify_nat;
+// use crate::networking::common::identify_nat;
 
 pub async fn run_networking_tasks(
     host_ip: IpAddr,
@@ -52,7 +52,7 @@ pub async fn run_networking_tasks(
         String,
         Sender<Request>,
         Sender<u32>,
-        Receiver<(NetworkSettings, Option<NetworkSettings>)>,
+        Receiver<NetworkSettings>,
     )>,
     decrypter: Decrypter,
     pub_key_pem: String,
@@ -65,6 +65,7 @@ pub async fn run_networking_tasks(
     let (token_dispenser_send, token_dispenser_recv) = channel();
     let (holepunch_sender, holepunch_receiver) = channel();
     let (token_pipes_sender, token_pipes_receiver) = channel();
+    let (send_pair, recv_pair) = channel();
     spawn(subscriber(
         host_ip,
         sub_send_one,
@@ -76,8 +77,22 @@ pub async fn run_networking_tasks(
         notification_receiver,
         token_dispenser_send,
         holepunch_sender,
+        send_pair,
     ));
-
+    spawn(direct_punching_service(
+        host_ip,
+        sub_send_two.clone(),
+        // req_sender.clone(),
+        // resp_receiver,
+        decrypter.clone(),
+        token_pipes_sender.clone(),
+        recv_pair,
+        // receiver,
+        pub_key_pem.clone(),
+        // swarm_name.clone(),
+        // net_set_recv,
+        // None,
+    ));
     spawn(token_dispenser(
         buffer_size_bytes,
         uplink_bandwith_bytes_sec,
@@ -109,46 +124,6 @@ pub async fn run_networking_tasks(
             pub_key_pem.clone(),
         ));
 
-        // Now we know all we need to establish a connection between two hosts behind
-        // any type of NAT. (We might not connect if NAT always assigns ports randomly.)
-        // From now on if we want to connect to another gnome, we create a new socket,
-        // if necessary send just one request to STUN server for port identification
-        // and we can send out our expected socket address for other gnome to connect to.
-
-        // The connection procedure should be as follows:
-        // Once we receive other socket address we send nine one byte datagrams
-        // in 100ms intervals counting down from 9 to 1
-        // then we listen for dgrams from remote gnome and receive until we get
-        // one with a single byte 1.
-        // Now we can pass that socket for Neighbor creation.
-        // If we do not receive any dgrams after specified period of time,
-        // we can start over from creation of a new socket,
-        // but current procedure is not successful.
-
-        // In case of using external proxy like tudbut.de for neighbor discovery
-        // we can simply send a drgram to that server and wait for a response.
-        // When we receive that response we have a remote socket address.
-        // Now we send another request to a proxy from a new socket, and we
-        // receive a reply - we note remote_port_1.
-        // We send another request to a proxy from yet another socket, and we
-        // note remote_port_2 from second reply.
-        // We calculate delta_p = remote_port_2 - remote_port_1.
-        // Now we calculate remote_port = remote_port_2 + delta_p.
-        // We start exchanging messages as described above to calculated remote_port.
-        // If no luck, we can turn back to proxy
-        // or some other mean to receive a neighbor's socket address.
-        let behind_a_nat = are_we_behind_a_nat(&socket).await;
-        if let Ok(is_there_nat) = behind_a_nat {
-            if is_there_nat {
-                println!("NAT detected, identifying...");
-                identify_nat(&socket).await;
-                discover_port_allocation_rule(&socket).await;
-            } else {
-                println!("We have a public IP!");
-            }
-        } else {
-            println!("Unable to tell if there is NAT: {:?}", behind_a_nat);
-        }
         run_server(
             host_ip,
             socket,
