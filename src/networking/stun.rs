@@ -210,7 +210,7 @@ pub async fn stun_send(sock: &UdpSocket, msg: StunMessage, ip: Option<IpAddr>, p
     let to: SocketAddr = SocketAddr::new(ip, port);
     let buf = msg.bytes();
     let _result = sock.send_to(&buf, to).await;
-    println!("Send to stun: {:?}", to);
+    // println!("Send to stun: {:?}", to);
 }
 
 pub type Length = u16;

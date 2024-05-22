@@ -9,18 +9,17 @@ mod stun;
 mod subscription;
 mod token;
 use self::client::run_client;
-// use self::common::are_we_behind_a_nat;
-// use self::common::discover_port_allocation_rule;
 use self::server::run_server;
 use self::sock::serve_socket;
 use self::subscription::subscriber;
 use self::token::{token_dispenser, Token};
+use crate::crypto::Decrypter;
 use async_std::net::UdpSocket;
 use async_std::task::spawn;
 use holepunch::holepunch;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use swarm_consensus::{NetworkSettings, Request};
-// use swarm_consensus::Message;
 
 // #[derive(Debug)]
 // enum ConnError {
@@ -35,13 +34,7 @@ use swarm_consensus::{NetworkSettings, Request};
 //         }
 //     }
 // }
-
 // impl Error for ConnError {}
-
-use std::net::{IpAddr, SocketAddr};
-
-use crate::crypto::Decrypter;
-// use crate::networking::common::identify_nat;
 
 pub async fn run_networking_tasks(
     host_ip: IpAddr,

@@ -109,7 +109,7 @@ pub async fn holepunch(
         //     .await
         //     .expect("unable to receive from helper");
         // // buf should now contain our partner's address data.
-        println!("Holepunch responded: {:?}", buf);
+        // println!("Holepunch responded: {:?}", buf);
         buf.retain(|e| *e != 0);
         let remote_addr = String::from_utf8_lossy(buf.as_slice()).to_string();
         let remote_1_addr = remote_addr
@@ -322,18 +322,19 @@ async fn probe_socket(
     // port_list: VecDeque<u16>,
     sender: Sender<(UdpSocket, Option<SocketAddr>)>,
 ) {
-    println!("running probe socket");
+    // println!("running probe socket");
     let sleep_time = Duration::from_millis(100);
     let wait_time = Duration::from_millis(4100);
+    print!("sent ");
     for i in (1..10).rev() {
         let _ = socket.send_to(&[i as u8], remote_addr).await;
-        println!("sent {}", i);
+        print!("{} ", i);
         sleep(sleep_time).await;
     }
     let mut socket_found = false;
     let mut timed_out = false;
+    println!("waiting for response");
     while !socket_found && !timed_out {
-        println!("still not found");
         let t1 = wait_for_bytes(&socket).fuse();
         let t2 = time_out(wait_time).fuse();
 
@@ -344,17 +345,17 @@ async fn probe_socket(
             _result2 = t2 => (false,true),
         };
     }
-    if socket_found {
-        println!("socket found!");
-    } else {
-        println!("timed out");
-    } // let sleep_time = Duration::from_millis(rand::random::<u8>() as u64 + 200);
-      // loop {
-      //     let new_port = port_list.pop_front().unwrap();
-      //     remote_addr.set_port(new_port);
-      //     port_list.push_back(new_port);
-      //     let t1 = timeout(&sleep_time).fuse();
-      //     let t2 = try_communicate(&socket, remote_addr).fuse();
+    // if socket_found {
+    //     println!("socket found!");
+    // } else {
+    //     println!("timed out");
+    // } // let sleep_time = Duration::from_millis(rand::random::<u8>() as u64 + 200);
+    // loop {
+    //     let new_port = port_list.pop_front().unwrap();
+    //     remote_addr.set_port(new_port);
+    //     port_list.push_back(new_port);
+    //     let t1 = timeout(&sleep_time).fuse();
+    //     let t2 = try_communicate(&socket, remote_addr).fuse();
 
     //     pin_mut!(t1, t2);
 
@@ -391,7 +392,7 @@ async fn probe_socket(
 }
 
 async fn wait_for_bytes(socket: &UdpSocket) {
-    println!("waiting for bytes");
+    // println!("waiting for bytes");
     let mut bytes: [u8; 10] = [0; 10];
     loop {
         let recv_res = socket.recv_from(&mut bytes).await;
@@ -445,10 +446,10 @@ pub async fn punch_it(
     sub_sender: Sender<Subscription>,
 ) {
     let mut remote_adr = SocketAddr::new(other_settings.pub_ip, other_settings.pub_port);
-    println!(
-        "punching: {:?}:{:?}",
-        other_settings.pub_ip, other_settings.pub_port
-    );
+    // println!(
+    //     "punching: {:?}:{:?}",
+    //     other_settings.pub_ip, other_settings.pub_port
+    // );
     let (sender, reciever) = channel();
     spawn(probe_socket(socket, remote_adr, sender.clone()));
     let mut dedicated_socket: Option<UdpSocket> = None;
@@ -458,7 +459,7 @@ pub async fn punch_it(
         responsive_socket_result = reciever.try_recv();
         match responsive_socket_result {
             Ok((socket, None)) => {
-                println!("none");
+                // println!("none");
                 if my_settings.nat_at_most_address_sensitive()
                     && other_settings.port_allocation_predictable()
                 {

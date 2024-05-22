@@ -189,7 +189,7 @@ pub async fn identify_nat(socket: &UdpSocket) -> Nat {
         yield_now().await;
     }
     if received_responses.is_empty() {
-        println!("NAT type: Symmetric");
+        print!("NAT type: Symmetric ");
         Nat::Symmetric
     } else {
         let mut first_response_received = false;
@@ -202,13 +202,13 @@ pub async fn identify_nat(socket: &UdpSocket) -> Nat {
             }
         }
         if first_response_received {
-            println!("NAT type: FullCone");
+            print!("NAT type: FullCone ");
             Nat::FullCone
         } else if second_response_received {
-            println!("NAT type: AddressRestrictedCone");
+            print!("NAT type: AddressRestrictedCone ");
             Nat::AddressRestrictedCone
         } else {
-            println!("NAT type: Unknown");
+            print!("NAT type: Unknown ");
             Nat::Unknown
         }
     }
@@ -255,7 +255,7 @@ pub async fn discover_port_allocation_rule(socket: &UdpSocket) -> (PortAllocatio
         let msg = stun_decode(&bytes);
         if let Some(changed_address) = msg.changed_address() {
             let m_addr_1 = msg.mapped_address().unwrap();
-            println!("Mapped address 1: {:?}", m_addr_1);
+            // println!("Mapped address 1: {:?}", m_addr_1);
             let port_1 = m_addr_1.port();
             stun_send(
                 socket,
@@ -268,7 +268,7 @@ pub async fn discover_port_allocation_rule(socket: &UdpSocket) -> (PortAllocatio
             let _recv_result = socket.recv_from(&mut bytes).await;
             let msg = stun_decode(&bytes);
             let m_addr_2 = msg.mapped_address().unwrap();
-            println!("Mapped address 2: {:?}", m_addr_2);
+            // println!("Mapped address 2: {:?}", m_addr_2);
             let port_2 = m_addr_2.port();
             stun_send(
                 socket,
@@ -281,7 +281,7 @@ pub async fn discover_port_allocation_rule(socket: &UdpSocket) -> (PortAllocatio
             let _recv_result = socket.recv_from(&mut bytes).await;
             let msg = stun_decode(&bytes);
             let m_addr_3 = msg.mapped_address().unwrap();
-            println!("Mapped address 3: {:?}", m_addr_3);
+            // println!("Mapped address 3: {:?}", m_addr_3);
             let port_3 = m_addr_3.port();
             stun_send(
                 socket,
@@ -294,7 +294,7 @@ pub async fn discover_port_allocation_rule(socket: &UdpSocket) -> (PortAllocatio
             let _recv_result = socket.recv_from(&mut bytes).await;
             let msg = stun_decode(&bytes);
             let m_addr_4 = msg.mapped_address().unwrap();
-            println!("Mapped address 4: {:?}", m_addr_4);
+            // println!("Mapped address 4: {:?}", m_addr_4);
             let port_4 = m_addr_4.port();
             let p1_and_p2_eq = port_1 == port_2;
             let p3_and_p4_eq = port_3 == port_4;
