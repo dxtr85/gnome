@@ -204,7 +204,7 @@ pub async fn stun_send(sock: &UdpSocket, msg: StunMessage, ip: Option<IpAddr>, p
     let ip = if ip.is_some() {
         ip.unwrap()
     } else {
-        IpAddr::V4(Ipv4Addr::new(193, 43, 148, 37))
+        IpAddr::V4(Ipv4Addr::new(108, 177, 15, 127))
     };
     let port = if port.is_some() { port.unwrap() } else { 3478 };
     let to: SocketAddr = SocketAddr::new(ip, port);

@@ -72,13 +72,19 @@ async fn establish_secure_connection(
     pub_key_pem: &str,
 ) -> Option<UdpSocket> {
     let mut bytes = [0u8; 1100];
-    // let mut bytes = buf.split();
-    let result = socket.recv_from(&mut bytes).await;
-    if result.is_err() {
-        println!("Failed to receive data on socket: {:?}", result);
-        return None;
+    let mut count;
+    let mut remote_addr;
+    loop {
+        let result = socket.recv_from(&mut bytes).await;
+        if result.is_err() {
+            println!("Failed to receive data on socket: {:?}", result);
+            return None;
+        }
+        (count, remote_addr) = result.unwrap();
+        if count > 1 {
+            break;
+        }
     }
-    let (count, remote_addr) = result.unwrap();
     println!("SKT Received {} bytes", count);
     let id_pub_key_pem = std::str::from_utf8(&bytes[..count]).unwrap();
     let result = Encrypter::create_from_data(id_pub_key_pem);

@@ -44,7 +44,7 @@ pub async fn subscriber(
     println!("Subscriber service started");
     let mut notify_holepunch = true;
     loop {
-        // println!("loop");
+        // print!("sub");
         let recv_result = notification_receiver.try_recv();
         match recv_result {
             Ok((swarm_name, req_sender, band_sender, net_set_recv)) => {

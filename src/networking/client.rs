@@ -86,83 +86,91 @@ async fn establish_secure_connection(
     // ) -> Receiver<[u8; 32]> {
 ) {
     let mut remote_gnome_id: GnomeId = GnomeId(0);
-    let mut session_key: SessionKey = SessionKey::from_key(&[0; 32]);
-    let mut remote_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
+    let session_key: SessionKey; // = SessionKey::from_key(&[0; 32]);
+    let mut remote_addr: SocketAddr; // = "0.0.0.0:0".parse().unwrap();
+    let mut count;
     let mut recv_buf = [0u8; 1100];
-
-    let recv_result = socket.recv_from(&mut recv_buf).await;
-    // let mut decoded_key: Option<[u8; 32]> = None;
-    // println!("Dec key: {:?}", decoded_key);
-    if let Ok((count, remote_adr)) = recv_result {
-        remote_addr = remote_adr;
-        println!("Received {}bytes", count);
-        let decoded_key = decrypter.decrypt(&recv_buf[..count]);
-
-        // let _res = req_sender.send(Vec::from(&recv_buf[..count]));
-        // println!("Sent decode request: {:?}", _res);
-        // loop {
-        //     let response = resp_receiver.try_recv();
-        //     if let Ok(symmetric_key) = response {
-        //         // match subs_resp {
-        //         //     Subscription::KeyDecoded(symmetric_key) => {
-        //         //         // decoded_port = port;
-        //         decoded_key = Some(symmetric_key);
-        //         break;
-        //         //     }
-        //         //     Subscription::DecodeFailure => {
-        //         //         println!("Failed decoding symmetric key!");
-        //         //         break;
-        //         //     }
-        //         //     _ => println!("Unexpected message: {:?}", subs_resp),
-        //         // }
-        //     } else {
-        //         // println!("rec: {:?}", response);
-        //     }
-        //     yield_now().await
-        // }
-        if let Ok(sym_key) = decoded_key {
-            println!("Got session key: {:?}", sym_key);
-            session_key = SessionKey::from_key(&sym_key.try_into().unwrap());
-        } else {
-            println!("Unable to decode key");
-            // return resp_receiver;
-            return;
-        }
-
-        let dedicated_socket =
-            UdpSocket::bind(SocketAddr::new(socket.local_addr().unwrap().ip(), 0))
-                .await
-                .unwrap();
-        dedicated_socket.connect(remote_addr).await.unwrap();
-        let _ = dedicated_socket.send(&[0u8]).await;
-
-        let mut recv_buf = [0u8; 1100];
-        let recv_result = dedicated_socket.recv(&mut recv_buf).await;
-        if let Ok(count) = recv_result {
-            println!("Received {}bytes", count);
-            let decr_res = session_key.decrypt(&recv_buf[..count]);
-            if let Ok(remote_pubkey_pem) = decr_res {
-                let remote_id_pub_key_pem = std::str::from_utf8(&remote_pubkey_pem).unwrap();
-                let encr = Encrypter::create_from_data(remote_id_pub_key_pem).unwrap();
-                remote_gnome_id = GnomeId(encr.hash());
-                println!("Remote GnomeId: {}", remote_gnome_id);
-                println!(
-                    "Decrypted PEM using session key:\n {:?}",
-                    remote_id_pub_key_pem
-                );
+    loop {
+        let recv_result = socket.recv_from(&mut recv_buf).await;
+        if recv_result.is_ok() {
+            (count, remote_addr) = recv_result.unwrap();
+            if count > 1 {
+                break;
             }
         }
+    }
 
-        spawn(prepare_and_serve(
-            dedicated_socket,
-            remote_gnome_id,
-            session_key,
-            swarm_names,
-            sender.clone(),
-            pipes_sender.clone(),
-        ));
+    // let mut decoded_key: Option<[u8; 32]> = None;
+    // println!("Dec key: {:?}", decoded_key);
+    // if let Ok((count, remote_adr)) = recv_result {
+    //     remote_addr = remote_adr;
+    println!("Received {}bytes", count);
+    let decoded_key = decrypter.decrypt(&recv_buf[..count]);
+
+    // let _res = req_sender.send(Vec::from(&recv_buf[..count]));
+    // println!("Sent decode request: {:?}", _res);
+    // loop {
+    //     let response = resp_receiver.try_recv();
+    //     if let Ok(symmetric_key) = response {
+    //         // match subs_resp {
+    //         //     Subscription::KeyDecoded(symmetric_key) => {
+    //         //         // decoded_port = port;
+    //         decoded_key = Some(symmetric_key);
+    //         break;
+    //         //     }
+    //         //     Subscription::DecodeFailure => {
+    //         //         println!("Failed decoding symmetric key!");
+    //         //         break;
+    //         //     }
+    //         //     _ => println!("Unexpected message: {:?}", subs_resp),
+    //         // }
+    //     } else {
+    //         // println!("rec: {:?}", response);
+    //     }
+    //     yield_now().await
+    // }
+    if let Ok(sym_key) = decoded_key {
+        println!("Got session key: {:?}", sym_key);
+        session_key = SessionKey::from_key(&sym_key.try_into().unwrap());
+    } else {
+        println!("Unable to decode key");
+        // return resp_receiver;
         return;
     }
+
+    let dedicated_socket = UdpSocket::bind(SocketAddr::new(socket.local_addr().unwrap().ip(), 0))
+        .await
+        .unwrap();
+    dedicated_socket.connect(remote_addr).await.unwrap();
+    let _ = dedicated_socket.send(&[0u8]).await;
+
+    let mut recv_buf = [0u8; 1100];
+    let recv_result = dedicated_socket.recv(&mut recv_buf).await;
+    if let Ok(count) = recv_result {
+        println!("Received {}bytes", count);
+        let decr_res = session_key.decrypt(&recv_buf[..count]);
+        if let Ok(remote_pubkey_pem) = decr_res {
+            let remote_id_pub_key_pem = std::str::from_utf8(&remote_pubkey_pem).unwrap();
+            let encr = Encrypter::create_from_data(remote_id_pub_key_pem).unwrap();
+            remote_gnome_id = GnomeId(encr.hash());
+            println!("Remote GnomeId: {}", remote_gnome_id);
+            println!(
+                "Decrypted PEM using session key:\n {:?}",
+                remote_id_pub_key_pem
+            );
+        }
+    }
+
+    spawn(prepare_and_serve(
+        dedicated_socket,
+        remote_gnome_id,
+        session_key,
+        swarm_names,
+        sender.clone(),
+        pipes_sender.clone(),
+    ));
+    return;
+    // }
     // resp_receiver
 }
 

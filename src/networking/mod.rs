@@ -104,18 +104,18 @@ pub async fn run_networking_tasks(
     // ));
     // println!("after");
     if let Ok(socket) = bind_result {
-        let puncher = "tudbut.de:4277";
-        spawn(holepunch(
-            puncher,
-            host_ip,
-            sub_send_two.clone(),
-            // decode_req_send,
-            // decode_resp_recv,
-            decrypter.clone(),
-            token_pipes_sender.clone(),
-            holepunch_receiver,
-            pub_key_pem.clone(),
-        ));
+        // let puncher = "tudbut.de:4277";
+        // spawn(holepunch(
+        //     puncher,
+        //     host_ip,
+        //     sub_send_two.clone(),
+        //     // decode_req_send,
+        //     // decode_resp_recv,
+        //     decrypter.clone(),
+        //     token_pipes_sender.clone(),
+        //     holepunch_receiver,
+        //     pub_key_pem.clone(),
+        // ));
 
         run_server(
             host_ip,

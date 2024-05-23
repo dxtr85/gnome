@@ -134,9 +134,22 @@ pub fn create_a_neighbor_for_each_swarm(
 pub async fn are_we_behind_a_nat(socket: &UdpSocket) -> Result<(bool, SocketAddr), String> {
     let request = build_request(None);
     let _send_result = stun_send(socket, request, None, None).await;
-    let mut bytes: [u8; 128] = [0; 128];
-    let recv_result = socket.recv_from(&mut bytes).await;
-    if let Ok((_count, _from)) = recv_result {
+    // let mut bytes: [u8; 128] = [0; 128];
+
+    let t1 = time_out(Duration::from_secs(3), None).fuse();
+    // TODO: serv pairs of sender-receiver
+    let t2 = wait_for_response(&socket).fuse();
+
+    pin_mut!(t1, t2);
+
+    let (received, bytes) = select! {
+        _result1 = t1 =>  (false,[0;128]),
+        result2 = t2 => (true,result2),
+    };
+    //new above
+    // let recv_result = socket.recv_from(&mut bytes).await;
+    // if let Ok((_count, _from)) = recv_result {
+    if received {
         let msg = stun_decode(&bytes);
         // println!("Received {} bytes from {:?}:\n{:?}", count, from, msg);
         let mapped_address = msg.mapped_address().unwrap();
@@ -146,8 +159,25 @@ pub async fn are_we_behind_a_nat(socket: &UdpSocket) -> Result<(bool, SocketAddr
             Ok((true, mapped_address))
         }
     } else {
-        Err(format!("Did not receive STUN response: {:?}", recv_result))
+        Err(format!("Timed out while waiting for STUN response"))
     }
+}
+
+async fn wait_for_response(socket: &UdpSocket) -> [u8; 128] {
+    // println!("waiting for bytes");
+    let mut bytes: [u8; 128] = [0; 128];
+    // loop {
+    let _recv_res = socket.recv_from(&mut bytes).await;
+    bytes
+
+    // println!("Recv: {:?}", recv_res);
+    //     if let Ok((count, from)) = recv_res {
+    //         // println!("Recv: {} from {:?}", bytes[0], from);
+    //         if count == 1 && bytes[0] == 1 {
+    //             return;
+    //         }
+    //     }
+    // }
 }
 // This procedure for NAT identification has two stages:
 // 1 - we ask STUN server to reply from a different IP & port
@@ -221,6 +251,18 @@ async fn receive_response(socket: &UdpSocket) -> StunMessage {
     let response = stun_decode(&bytes.clone());
     println!("Received a response: {:?}", response);
     response
+}
+
+pub async fn time_out(mut time: Duration, sender: Option<Sender<()>>) {
+    let time_step = Duration::from_millis(100);
+    while time > Duration::ZERO {
+        print!(".");
+        time -= time_step;
+        sleep(time_step).await;
+    }
+    if let Some(sender) = sender {
+        sender.send(());
+    }
 }
 
 // In order to find how ports are assigned we send four messages to STUN server:
