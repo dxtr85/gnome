@@ -1,12 +1,9 @@
 // use crate::crypto::Decrypter;
-use crate::prelude::Decrypter;
-use async_std::task::{spawn, yield_now};
+use async_std::task::yield_now;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::mpsc::{Receiver, Sender};
-use swarm_consensus::{Nat, Neighbor, NetworkSettings, Request};
-
-use super::token::Token;
+use swarm_consensus::{Nat, Neighbor, NetworkSettings, NotificationBundle, Request};
 
 #[derive(Debug)]
 pub enum Subscription {
@@ -22,19 +19,14 @@ pub enum Subscription {
 }
 
 pub async fn subscriber(
-    host_ip: IpAddr,
+    // host_ip: IpAddr,
     sub_sender: Sender<Subscription>,
-    decrypter: Decrypter,
-    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
-    pub_key_pem: String,
+    // decrypter: Decrypter,
+    // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    // pub_key_pem: String,
     sub_receiver: Receiver<Subscription>,
-    sub_sender_two: Sender<Subscription>,
-    notification_receiver: Receiver<(
-        String,
-        Sender<Request>,
-        Sender<u32>,
-        Receiver<NetworkSettings>,
-    )>,
+    // sub_sender_two: Sender<Subscription>,
+    notification_receiver: Receiver<NotificationBundle>,
     token_dispenser_send: Sender<Sender<u32>>,
     holepunch_sender: Sender<String>,
     direct_punch_sender: Sender<(String, Sender<Request>, Receiver<NetworkSettings>)>,
@@ -47,26 +39,26 @@ pub async fn subscriber(
         // print!("sub");
         let recv_result = notification_receiver.try_recv();
         match recv_result {
-            Ok((swarm_name, req_sender, band_sender, net_set_recv)) => {
+            Ok(notif_bundle) => {
                 // TODO: only one punching service for all swarms!
                 let _ = direct_punch_sender.send((
-                    swarm_name.clone(),
-                    req_sender.clone(),
-                    net_set_recv,
+                    notif_bundle.swarm_name.clone(),
+                    notif_bundle.request_sender.clone(),
+                    notif_bundle.network_settings_receiver,
                 ));
-                swarms.insert(swarm_name.clone(), req_sender);
-                names.push(swarm_name.clone());
+                swarms.insert(notif_bundle.swarm_name.clone(), notif_bundle.request_sender);
+                names.push(notif_bundle.swarm_name.clone());
                 // TODO: inform existing sockets about new subscription
-                println!("Added swarm: {}", swarm_name);
+                println!("Added swarm: {}", notif_bundle.swarm_name);
                 // TODO: serve err results
-                let _ = sub_sender.send(Subscription::Added(swarm_name.clone()));
+                let _ = sub_sender.send(Subscription::Added(notif_bundle.swarm_name.clone()));
                 if notify_holepunch {
-                    let h_res = holepunch_sender.send(swarm_name);
+                    let h_res = holepunch_sender.send(notif_bundle.swarm_name);
                     if h_res.is_err() {
                         notify_holepunch = false;
                     }
                 }
-                let _ = token_dispenser_send.send(band_sender);
+                let _ = token_dispenser_send.send(notif_bundle.token_sender);
                 // TODO: sockets should be able to respond if they want to join
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {

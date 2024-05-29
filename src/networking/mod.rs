@@ -9,6 +9,7 @@ mod stun;
 mod subscription;
 mod token;
 use self::client::run_client;
+use self::common::are_we_behind_a_nat;
 use self::server::run_server;
 use self::sock::serve_socket;
 use self::subscription::subscriber;
@@ -16,10 +17,9 @@ use self::token::{token_dispenser, Token};
 use crate::crypto::Decrypter;
 use async_std::net::UdpSocket;
 use async_std::task::spawn;
-use holepunch::holepunch;
-use std::net::{IpAddr, SocketAddr};
-use std::sync::mpsc::{channel, Receiver, Sender};
-use swarm_consensus::{NetworkSettings, Request};
+use std::net::SocketAddr;
+use std::sync::mpsc::{channel, Receiver};
+use swarm_consensus::NotificationBundle;
 
 // #[derive(Debug)]
 // enum ConnError {
@@ -37,21 +37,15 @@ use swarm_consensus::{NetworkSettings, Request};
 // impl Error for ConnError {}
 
 pub async fn run_networking_tasks(
-    host_ip: IpAddr,
+    // host_ip: IpAddr,
     server_port: u16,
     buffer_size_bytes: u32,
     uplink_bandwith_bytes_sec: u32,
-    notification_receiver: Receiver<(
-        String,
-        Sender<Request>,
-        Sender<u32>,
-        Receiver<NetworkSettings>,
-    )>,
+    notification_receiver: Receiver<NotificationBundle>,
     decrypter: Decrypter,
     pub_key_pem: String,
 ) {
     let server_addr: SocketAddr = SocketAddr::new("0.0.0.0".parse().unwrap(), server_port);
-    // let server_addr: SocketAddr = SocketAddr::new(host_ip, server_port);
     let bind_result = UdpSocket::bind(server_addr).await;
     let (sub_send_one, sub_recv_one) = channel();
     let (sub_send_two, sub_recv_two) = channel();
@@ -60,31 +54,17 @@ pub async fn run_networking_tasks(
     let (token_pipes_sender, token_pipes_receiver) = channel();
     let (send_pair, recv_pair) = channel();
     spawn(subscriber(
-        host_ip,
+        // host_ip,
         sub_send_one,
-        decrypter.clone(),
-        token_pipes_sender.clone(),
-        pub_key_pem.clone(),
+        // decrypter.clone(),
+        // token_pipes_sender.clone(),
+        // pub_key_pem.clone(),
         sub_recv_two,
-        sub_send_two.clone(),
+        // sub_send_two.clone(),
         notification_receiver,
         token_dispenser_send,
         holepunch_sender,
         send_pair,
-    ));
-    spawn(direct_punching_service(
-        host_ip,
-        sub_send_two.clone(),
-        // req_sender.clone(),
-        // resp_receiver,
-        decrypter.clone(),
-        token_pipes_sender.clone(),
-        recv_pair,
-        // receiver,
-        pub_key_pem.clone(),
-        // swarm_name.clone(),
-        // net_set_recv,
-        // None,
     ));
     spawn(token_dispenser(
         buffer_size_bytes,
@@ -94,16 +74,70 @@ pub async fn run_networking_tasks(
         token_dispenser_recv,
     ));
 
-    // let (decode_req_send, decode_req_recv) = channel();
-    // let (decode_resp_send, decode_resp_recv) = channel();
-    // println!("bifor");
-    // spawn(decrypter_service(
-    //     decrypter,
-    //     decode_resp_send,
-    //     decode_req_recv,
-    // ));
-    // println!("after");
     if let Ok(socket) = bind_result {
+        spawn(run_server(
+            // host_ip,
+            socket,
+            sub_send_two.clone(),
+            sub_recv_one,
+            token_pipes_sender.clone(),
+            pub_key_pem.clone(),
+        ))
+        // .await;
+    } else {
+        spawn(run_client(
+            // server_addr,
+            // socket,
+            // host_ip,
+            sub_recv_one,
+            sub_send_two.clone(),
+            // token_send_two,
+            // token_recv,
+            decrypter.clone(),
+            // decode_req_send,
+            // decode_resp_recv,
+            token_pipes_sender.clone(),
+            pub_key_pem.clone(),
+        ))
+        // .await;
+    };
+    //TODO: We need to organize how and which networking services get started.
+    // 1. We always need to run basic services like token_dispenser and subscriber.
+    // 2. We also always need to run_client and try to run_server.
+    // 2. We need te establish if we have a public_ip.
+    let behind_nat_result = are_we_behind_a_nat(
+        &UdpSocket::bind(SocketAddr::new("0.0.0.0".parse().unwrap(), 0))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let we_are_behind_nat;
+    // let mut our_public_ip = None;
+    if let Ok((behind_a_nat, _public_addr)) = behind_nat_result {
+        we_are_behind_nat = behind_a_nat;
+        // our_public_ip = Some(public_addr.ip());
+    } else {
+        we_are_behind_nat = true;
+    }
+    // 3. a) If we are not behind a NAT then we are done.
+    //    b) Other way we are behind a NAT.
+    if we_are_behind_nat {
+        // In case we are behind a NAT we need to run direct_punch and holepunch
+        // Both of those services need a sophisticated procedure for connection establishment.
+        spawn(direct_punching_service(
+            // host_ip,
+            sub_send_two,
+            // req_sender.clone(),
+            // resp_receiver,
+            decrypter.clone(),
+            token_pipes_sender,
+            recv_pair,
+            // receiver,
+            pub_key_pem,
+            // swarm_name.clone(),
+            // net_set_recv,
+            // None,
+        ));
         // let puncher = "tudbut.de:4277";
         // spawn(holepunch(
         //     puncher,
@@ -116,33 +150,16 @@ pub async fn run_networking_tasks(
         //     holepunch_receiver,
         //     pub_key_pem.clone(),
         // ));
-
-        run_server(
-            host_ip,
-            socket,
-            sub_send_two,
-            sub_recv_one,
-            token_pipes_sender,
-            pub_key_pem,
-        )
-        .await;
-    } else {
-        run_client(
-            // server_addr,
-            // socket,
-            host_ip,
-            sub_recv_one,
-            sub_send_two,
-            // token_send_two,
-            // token_recv,
-            decrypter.clone(),
-            // decode_req_send,
-            // decode_resp_recv,
-            token_pipes_sender,
-            pub_key_pem,
-        )
-        .await;
-    };
+    }
+    // let (decode_req_send, decode_req_recv) = channel();
+    // let (decode_resp_send, decode_resp_recv) = channel();
+    // println!("bifor");
+    // spawn(decrypter_service(
+    //     decrypter,
+    //     decode_resp_send,
+    //     decode_req_recv,
+    // ));
+    // println!("after");
 }
 
 // async fn decrypter_service(

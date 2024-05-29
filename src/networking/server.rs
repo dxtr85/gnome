@@ -10,12 +10,12 @@ use crate::networking::subscription::Subscription;
 use crate::prelude::Encrypter;
 use async_std::net::UdpSocket;
 use async_std::task::spawn;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use swarm_consensus::GnomeId;
 
 pub async fn run_server(
-    host_ip: IpAddr,
+    // host_ip: IpAddr,
     socket: UdpSocket,
     sub_sender: Sender<Subscription>,
     mut sub_receiver: Receiver<Subscription>,
@@ -26,7 +26,7 @@ pub async fn run_server(
     println!("- - - - - - - - SERVER - - - - - - - -");
     println!("- Listens on: {:?}   -", socket.local_addr().unwrap());
     println!("--------------------------------------");
-    println!("My Pubkey PEM:\n {:?}", pub_key_pem);
+    // println!("My Pubkey PEM:\n {:?}", pub_key_pem);
     let loc_encr = Encrypter::create_from_data(&pub_key_pem).unwrap();
     let gnome_id = GnomeId(loc_encr.hash());
     println!("My GnomeId: {}", gnome_id);
@@ -34,7 +34,7 @@ pub async fn run_server(
         let mut remote_gnome_id: GnomeId = GnomeId(0);
         let mut session_key: SessionKey = SessionKey::from_key(&[0; 32]);
         let optional_sock = establish_secure_connection(
-            host_ip,
+            // host_ip,
             &socket,
             &mut remote_gnome_id,
             &mut session_key,
@@ -65,7 +65,7 @@ pub async fn run_server(
 }
 
 async fn establish_secure_connection(
-    host_ip: IpAddr,
+    // host_ip: IpAddr,
     socket: &UdpSocket,
     remote_gnome_id: &mut GnomeId,
     session_key: &mut SessionKey,
@@ -94,7 +94,9 @@ async fn establish_secure_connection(
     }
     let encr = result.unwrap();
 
-    let dedicated_socket = UdpSocket::bind(SocketAddr::new(host_ip, 0)).await.unwrap();
+    let dedicated_socket = UdpSocket::bind(SocketAddr::new(socket.local_addr().unwrap().ip(), 0))
+        .await
+        .unwrap();
     // let dedicated_port = dedicated_socket.local_addr().unwrap().port();
     // let mut bytes_to_send = Vec::from(dedicated_port.to_be_bytes());
     let key = generate_symmetric_key();
@@ -119,15 +121,6 @@ async fn establish_secure_connection(
 
     *session_key = SessionKey::from_key(&key);
 
-    //TODO: put here new socket creation and work on that socket from now on
-    // let dedi_sock_option =
-    //     create_dedicated_socket(socket, dedicated_socket, host_ip, remote_addr, session_key).await;
-    // if dedi_sock_option.is_none() {
-    //     println!("Unable to create dedicated socket to Neighbor");
-    //     return None;
-    // }
-    // let dedicated_socket = dedi_sock_option.unwrap();
-
     let mut r_buf = [0u8; 32];
     let r_res = dedicated_socket.recv_from(&mut r_buf).await;
     if r_res.is_err() {
@@ -135,7 +128,11 @@ async fn establish_secure_connection(
         return None;
     }
     let (_count, remote_addr) = r_res.unwrap();
-    dedicated_socket.connect(remote_addr).await.unwrap();
+    let conn_result = dedicated_socket.connect(remote_addr).await;
+    if conn_result.is_err() {
+        println!("Unable to connect dedicated socket: {:?}", conn_result);
+        return None;
+    }
 
     let my_encrypted_pubkey = session_key.encrypt(pub_key_pem.as_bytes());
     let res2 = dedicated_socket.send(&my_encrypted_pubkey).await;
@@ -150,63 +147,63 @@ async fn establish_secure_connection(
     Some(dedicated_socket)
 }
 
-async fn create_dedicated_socket(
-    socket: &UdpSocket,
-    dedicated_socket: UdpSocket,
-    // host_ip: IpAddr,
-    mut remote_addr: SocketAddr,
-    session_key: &SessionKey,
-) -> Option<UdpSocket> {
-    // let send_result = socket
-    //     .send_to(
-    //         dedicated_socket
-    //             .local_addr()
-    //             .unwrap()
-    //             .to_string()
-    //             .as_bytes(),
-    //         remote_addr,
-    //     )
-    //     .await;
-    // if send_result.is_err() {
-    //     println!("Unable to send new socket addr: {:?}", send_result);
-    //     return None;
-    // }
-    let mut bytes = [0; 128];
-    let recv_result = socket.recv_from(&mut bytes).await;
+// async fn create_dedicated_socket(
+//     socket: &UdpSocket,
+//     dedicated_socket: UdpSocket,
+//     // host_ip: IpAddr,
+//     mut remote_addr: SocketAddr,
+//     session_key: &SessionKey,
+// ) -> Option<UdpSocket> {
+//     // let send_result = socket
+//     //     .send_to(
+//     //         dedicated_socket
+//     //             .local_addr()
+//     //             .unwrap()
+//     //             .to_string()
+//     //             .as_bytes(),
+//     //         remote_addr,
+//     //     )
+//     //     .await;
+//     // if send_result.is_err() {
+//     //     println!("Unable to send new socket addr: {:?}", send_result);
+//     //     return None;
+//     // }
+//     let mut bytes = [0; 128];
+//     let recv_result = socket.recv_from(&mut bytes).await;
 
-    if let Ok((count, rem_addr)) = recv_result {
-        println!("Received {} bytes: {:?}", count, bytes);
-        let decryp_res = session_key.decrypt(&bytes[..count]);
-        if decryp_res.is_err() {
-            println!(
-                "Unable to decrypt new socket addr with session key:\n{:?}",
-                decryp_res
-            );
-            return None;
-        }
+//     if let Ok((count, rem_addr)) = recv_result {
+//         println!("Received {} bytes: {:?}", count, bytes);
+//         let decryp_res = session_key.decrypt(&bytes[..count]);
+//         if decryp_res.is_err() {
+//             println!(
+//                 "Unable to decrypt new socket addr with session key:\n{:?}",
+//                 decryp_res
+//             );
+//             return None;
+//         }
 
-        let recv_str_res = String::from_utf8(decryp_res.unwrap());
-        if recv_str_res.is_err() {
-            println!("Unable to parse String: {:?}", recv_str_res);
-            return None;
-        }
-        let port_res = recv_str_res.unwrap().parse::<u16>();
-        if port_res.is_err() {
-            println!("Failed constructing u16 port number: {:?}", port_res);
-            return None;
-        }
-        let port = port_res.unwrap();
-        remote_addr = SocketAddr::new(rem_addr.ip(), port);
-    }
-    let conn_result = dedicated_socket.connect(remote_addr).await;
-    if conn_result.is_err() {
-        println!("Unable to connect dedicated socket: {:?}", conn_result);
-        return None;
-    }
+//         let recv_str_res = String::from_utf8(decryp_res.unwrap());
+//         if recv_str_res.is_err() {
+//             println!("Unable to parse String: {:?}", recv_str_res);
+//             return None;
+//         }
+//         let port_res = recv_str_res.unwrap().parse::<u16>();
+//         if port_res.is_err() {
+//             println!("Failed constructing u16 port number: {:?}", port_res);
+//             return None;
+//         }
+//         let port = port_res.unwrap();
+//         remote_addr = SocketAddr::new(rem_addr.ip(), port);
+//     }
+//     let conn_result = dedicated_socket.connect(remote_addr).await;
+//     if conn_result.is_err() {
+//         println!("Unable to connect dedicated socket: {:?}", conn_result);
+//         return None;
+//     }
 
-    println!("SKT Connected to client");
-    Some(dedicated_socket)
-}
+//     println!("SKT Connected to client");
+//     Some(dedicated_socket)
+// }
 
 async fn prepare_and_serve(
     dedicated_socket: UdpSocket,

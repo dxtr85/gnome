@@ -2,7 +2,7 @@ use crate::networking::stun::{
     build_request, stun_decode, stun_send, StunChangeRequest, StunMessage,
 };
 use crate::networking::subscription::Subscription;
-use async_std::net::UdpSocket;
+use async_std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use async_std::task::{sleep, yield_now};
 use bytes::{BufMut, BytesMut};
 use futures::{
@@ -133,12 +133,14 @@ pub fn create_a_neighbor_for_each_swarm(
 // what type of NAT we are behind.
 pub async fn are_we_behind_a_nat(socket: &UdpSocket) -> Result<(bool, SocketAddr), String> {
     let request = build_request(None);
-    let _send_result = stun_send(socket, request, None, None).await;
+    let ip = IpAddr::V4(Ipv4Addr::new(108, 177, 15, 127));
+    let port = 3478;
+    let _send_result = stun_send(socket, request, Some(ip), Some(port)).await;
     // let mut bytes: [u8; 128] = [0; 128];
 
     let t1 = time_out(Duration::from_secs(3), None).fuse();
     // TODO: serv pairs of sender-receiver
-    let t2 = wait_for_response(&socket).fuse();
+    let t2 = wait_for_response(socket, SocketAddr::new(ip, port)).fuse();
 
     pin_mut!(t1, t2);
 
@@ -153,31 +155,56 @@ pub async fn are_we_behind_a_nat(socket: &UdpSocket) -> Result<(bool, SocketAddr
         let msg = stun_decode(&bytes);
         // println!("Received {} bytes from {:?}:\n{:?}", count, from, msg);
         let mapped_address = msg.mapped_address().unwrap();
-        if mapped_address == socket.local_addr().unwrap() {
+        if UdpSocket::bind((mapped_address.ip(), 0)).await.is_ok() {
+            // if mapped_address == socket.local_addr().unwrap() {
             Ok((false, mapped_address))
         } else {
             Ok((true, mapped_address))
         }
     } else {
-        Err(format!("Timed out while waiting for STUN response"))
+        Err("Timed out while waiting for STUN response".to_string())
     }
 }
 
-async fn wait_for_response(socket: &UdpSocket) -> [u8; 128] {
+pub async fn wait_for_bytes(socket: &UdpSocket) {
+    // println!("waiting for bytes");
+    let mut bytes: [u8; 10] = [0; 10];
+    loop {
+        let recv_res = socket.recv_from(&mut bytes).await;
+        // println!("Recv: {:?}", recv_res);
+        if let Ok((count, from)) = recv_res {
+            // println!("Recv: {} from {:?}", bytes[0], from);
+            if count == 1 && bytes[0] == 1 {
+                return;
+            }
+        }
+    }
+}
+
+async fn wait_for_response(socket: &UdpSocket, addr: SocketAddr) -> [u8; 128] {
     // println!("waiting for bytes");
     let mut bytes: [u8; 128] = [0; 128];
-    // loop {
-    let _recv_res = socket.recv_from(&mut bytes).await;
-    bytes
+    loop {
+        let _recv_res = socket.recv_from(&mut bytes).await;
 
-    // println!("Recv: {:?}", recv_res);
-    //     if let Ok((count, from)) = recv_res {
-    //         // println!("Recv: {} from {:?}", bytes[0], from);
-    //         if count == 1 && bytes[0] == 1 {
-    //             return;
-    //         }
-    //     }
-    // }
+        match _recv_res {
+            Ok((_count, from)) => {
+                if addr == from {
+                    // println!("Socket recv: {:?} {:?}", _recv_res, bytes);
+                    return bytes;
+                }
+            }
+            _ => continue,
+        }
+
+        // println!("Recv: {:?}", recv_res);
+        //     if let Ok((count, from)) = recv_res {
+        //         // println!("Recv: {} from {:?}", bytes[0], from);
+        //         if count == 1 && bytes[0] == 1 {
+        //             return;
+        //         }
+        //     }
+    }
 }
 // This procedure for NAT identification has two stages:
 // 1 - we ask STUN server to reply from a different IP & port
@@ -260,8 +287,9 @@ pub async fn time_out(mut time: Duration, sender: Option<Sender<()>>) {
         time -= time_step;
         sleep(time_step).await;
     }
+    println!("Timed out after: {:?}", time);
     if let Some(sender) = sender {
-        sender.send(());
+        let _ = sender.send(());
     }
 }
 

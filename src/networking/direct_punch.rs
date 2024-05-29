@@ -1,21 +1,21 @@
-use super::common::are_we_behind_a_nat;
+// use super::common::are_we_behind_a_nat;
 use super::common::discover_network_settings;
 use super::token::Token;
 use crate::networking::{
     holepunch::{punch_it, start_communication},
     subscription::Subscription,
 };
-use crate::prelude::{Decrypter, Encrypter};
-use crate::GnomeId;
+use crate::prelude::Decrypter;
+// use crate::GnomeId;
 use async_std::net::UdpSocket;
 use async_std::task::{spawn, yield_now};
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use swarm_consensus::{Nat, NetworkSettings, PortAllocationRule, Request};
+use swarm_consensus::{NetworkSettings, Request};
 
 pub async fn direct_punching_service(
-    host_ip: IpAddr,
+    // host_ip: IpAddr,
     sub_sender: Sender<Subscription>,
     decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
@@ -58,7 +58,7 @@ pub async fn direct_punching_service(
     let (send_my, recv_my) = channel();
     // println!("before sm spawn");
     spawn(socket_maintainer(
-        host_ip,
+        // host_ip,
         pub_key_pem.clone(),
         // gnome_id,
         sub_sender.clone(),
@@ -108,7 +108,7 @@ pub async fn direct_punching_service(
 }
 
 async fn socket_maintainer(
-    host_ip: IpAddr,
+    // host_ip: IpAddr,
     pub_key_pem: String,
     // gnome_id: GnomeId,
     sub_sender: Sender<Subscription>,
@@ -118,8 +118,10 @@ async fn socket_maintainer(
     recv_other: Receiver<(String, NetworkSettings)>,
 ) {
     // println!("SM start");
-    let bind_port = 1030;
-    let bind_addr = (host_ip, bind_port);
+    // let bind_port = 0;
+    // let bind_addr = (host_ip, bind_port);
+    // let bind_addr = (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0u16);
+    let bind_addr = (IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0u16);
     let mut socket = UdpSocket::bind(bind_addr).await.unwrap();
     let mut my_settings = discover_network_settings(&mut socket).await;
 
@@ -143,7 +145,7 @@ async fn socket_maintainer(
                 swarm_name,
                 (my_settings, other_settings),
             ));
-            socket = UdpSocket::bind((host_ip, 0)).await.unwrap();
+            socket = UdpSocket::bind(bind_addr).await.unwrap();
             my_settings = discover_network_settings(&mut socket).await;
             // if my_settings.nat_type != Nat::None {
             //     let behind_a_nat = are_we_behind_a_nat(&socket).await;

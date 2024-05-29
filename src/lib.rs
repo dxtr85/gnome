@@ -4,7 +4,7 @@ use prelude::Decrypter;
 pub use std::net::IpAddr;
 use swarm_consensus::GnomeId;
 use swarm_consensus::NetworkSettings;
-use swarm_consensus::Request;
+// use swarm_consensus::Request;
 // use std::time::Duration;
 use swarm_consensus::start;
 // use swarm_consensus::GnomeId;
@@ -16,8 +16,9 @@ mod crypto;
 mod data_conversion;
 mod networking;
 use networking::run_networking_tasks;
+use std::sync::mpsc::channel;
 use std::sync::mpsc::Receiver;
-use std::sync::mpsc::{channel, Sender};
+use swarm_consensus::NotificationBundle;
 
 pub mod prelude {
     pub use crate::crypto::{
@@ -37,15 +38,7 @@ pub mod prelude {
 pub fn create_manager_and_receiver(
     gnome_id: GnomeId,
     network_settings: Option<NetworkSettings>,
-) -> (
-    Manager,
-    Receiver<(
-        String,
-        Sender<Request>,
-        Sender<u32>,
-        Receiver<NetworkSettings>,
-    )>,
-) {
+) -> (Manager, Receiver<NotificationBundle>) {
     let (networking_sender, networking_receiver) = channel();
     // let network_settings = None;
     let mgr = start(gnome_id, network_settings, networking_sender);
@@ -59,18 +52,13 @@ pub async fn activate_gnome(
     port: u16,
     buffer_size_bytes: u32,
     uplink_bandwith_bytes_sec: u32,
-    receiver: Receiver<(
-        String,
-        Sender<Request>,
-        Sender<u32>,
-        Receiver<NetworkSettings>,
-    )>,
+    receiver: Receiver<NotificationBundle>,
     decrypter: Decrypter,
     pub_key_pem: String,
 ) {
     run_networking_tasks(
         // gnome_id,
-        ip,
+        // ip,
         // broadcast,
         port,
         buffer_size_bytes,

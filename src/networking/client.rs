@@ -10,13 +10,12 @@ use crate::networking::subscription::Subscription;
 use crate::prelude::Decrypter;
 use crate::prelude::Encrypter;
 use async_std::net::UdpSocket;
-use async_std::task::{spawn, yield_now};
-use std::net::{IpAddr, SocketAddr};
+use async_std::task::spawn;
+use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use swarm_consensus::GnomeId;
 
 pub async fn run_client(
-    host_ip: IpAddr,
     mut receiver: Receiver<Subscription>,
     sender: Sender<Subscription>,
     // req_sender: Sender<Vec<u8>>,
@@ -33,7 +32,9 @@ pub async fn run_client(
     //     so that in operates on dedicated socket it receives as argument
 
     println!("SKT CLIENT");
-    let result = UdpSocket::bind(SocketAddr::new(host_ip, 0)).await;
+    // let result = UdpSocket::bind(SocketAddr::new(host_ip, 0)).await;
+    let client_addr: SocketAddr = SocketAddr::new("0.0.0.0".parse().unwrap(), 0);
+    let result = UdpSocket::bind(client_addr).await;
     if result.is_err() {
         println!("SKT couldn't bind to address");
         return;
@@ -104,7 +105,7 @@ async fn establish_secure_connection(
     // println!("Dec key: {:?}", decoded_key);
     // if let Ok((count, remote_adr)) = recv_result {
     //     remote_addr = remote_adr;
-    println!("Received {}bytes", count);
+    println!("Received {} bytes", count);
     let decoded_key = decrypter.decrypt(&recv_buf[..count]);
 
     // let _res = req_sender.send(Vec::from(&recv_buf[..count]));
@@ -147,7 +148,7 @@ async fn establish_secure_connection(
     let mut recv_buf = [0u8; 1100];
     let recv_result = dedicated_socket.recv(&mut recv_buf).await;
     if let Ok(count) = recv_result {
-        println!("Received {}bytes", count);
+        println!("Received {} bytes", count);
         let decr_res = session_key.decrypt(&recv_buf[..count]);
         if let Ok(remote_pubkey_pem) = decr_res {
             let remote_id_pub_key_pem = std::str::from_utf8(&remote_pubkey_pem).unwrap();

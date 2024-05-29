@@ -1,7 +1,7 @@
 use super::Token;
 use crate::crypto::{generate_symmetric_key, SessionKey};
 use crate::networking::client::prepare_and_serve;
-use crate::networking::common::{discover_network_settings, time_out};
+use crate::networking::common::{discover_network_settings, time_out, wait_for_bytes};
 use crate::networking::subscription::Subscription;
 use crate::prelude::{Decrypter, Encrypter};
 use async_std::net::UdpSocket;
@@ -545,21 +545,6 @@ async fn probe_socket(
     } else {
         let _ = sender.send((socket, None));
         // drop(socket);
-    }
-}
-
-async fn wait_for_bytes(socket: &UdpSocket) {
-    // println!("waiting for bytes");
-    let mut bytes: [u8; 10] = [0; 10];
-    loop {
-        let recv_res = socket.recv_from(&mut bytes).await;
-        // println!("Recv: {:?}", recv_res);
-        if let Ok((count, from)) = recv_res {
-            // println!("Recv: {} from {:?}", bytes[0], from);
-            if count == 1 && bytes[0] == 1 {
-                return;
-            }
-        }
     }
 }
 
