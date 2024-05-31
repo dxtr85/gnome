@@ -78,7 +78,7 @@ pub async fn subscriber(
                     }
                 }
                 Subscription::ProvideList => {
-                    println!("sub sending: {:?}", names);
+                    // println!("sub sending: {:?}", names);
                     let _ = sub_sender.send(Subscription::List(names.clone()));
                 }
                 Subscription::Distribute(ip, port, nat) => {

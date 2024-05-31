@@ -42,7 +42,7 @@ pub async fn run_server(
         )
         .await;
         if optional_sock.is_none() {
-            println!("Failed to establish secure connection with Neighbor");
+            // println!("Failed to establish secure connection with Neighbor");
             continue;
         }
         let dedicated_socket = optional_sock.unwrap();
@@ -85,8 +85,11 @@ async fn establish_secure_connection(
             break;
         }
     }
-    println!("SKT Received {} bytes", count);
     let id_pub_key_pem = std::str::from_utf8(&bytes[..count]).unwrap();
+    if id_pub_key_pem == pub_key_pem {
+        return None;
+    }
+    println!("SKT Received {} bytes", count);
     let result = Encrypter::create_from_data(id_pub_key_pem);
     if result.is_err() {
         println!("Failed to build Encripter from received PEM: {:?}", result);

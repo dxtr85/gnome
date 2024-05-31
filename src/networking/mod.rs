@@ -1,3 +1,4 @@
+use crate::networking::common::collect_subscribed_swarm_names;
 use crate::networking::direct_punch::direct_punching_service;
 mod client;
 mod common;
@@ -10,6 +11,7 @@ mod subscription;
 mod token;
 use self::client::run_client;
 use self::common::are_we_behind_a_nat;
+use self::holepunch::holepunch;
 use self::server::run_server;
 use self::sock::serve_socket;
 use self::subscription::subscriber;
@@ -47,7 +49,7 @@ pub async fn run_networking_tasks(
 ) {
     let server_addr: SocketAddr = SocketAddr::new("0.0.0.0".parse().unwrap(), server_port);
     let bind_result = UdpSocket::bind(server_addr).await;
-    let (sub_send_one, sub_recv_one) = channel();
+    let (sub_send_one, mut sub_recv_one) = channel();
     let (sub_send_two, sub_recv_two) = channel();
     let (token_dispenser_send, token_dispenser_recv) = channel();
     let (holepunch_sender, holepunch_receiver) = channel();
@@ -74,31 +76,26 @@ pub async fn run_networking_tasks(
         token_dispenser_recv,
     ));
 
+    let mut swarm_names = vec![];
+    sub_recv_one =
+        collect_subscribed_swarm_names(&mut swarm_names, sub_send_two.clone(), sub_recv_one).await;
+    spawn(run_client(
+        swarm_names,
+        sub_send_two.clone(),
+        decrypter.clone(),
+        token_pipes_sender.clone(),
+        pub_key_pem.clone(),
+        None,
+    ));
+    // .await;
     if let Ok(socket) = bind_result {
         spawn(run_server(
-            // host_ip,
             socket,
             sub_send_two.clone(),
             sub_recv_one,
             token_pipes_sender.clone(),
             pub_key_pem.clone(),
-        ))
-        // .await;
-    } else {
-        spawn(run_client(
-            // server_addr,
-            // socket,
-            // host_ip,
-            sub_recv_one,
-            sub_send_two.clone(),
-            // token_send_two,
-            // token_recv,
-            decrypter.clone(),
-            // decode_req_send,
-            // decode_resp_recv,
-            token_pipes_sender.clone(),
-            pub_key_pem.clone(),
-        ))
+        ));
         // .await;
     };
     //TODO: We need to organize how and which networking services get started.
@@ -126,30 +123,31 @@ pub async fn run_networking_tasks(
         // Both of those services need a sophisticated procedure for connection establishment.
         spawn(direct_punching_service(
             // host_ip,
-            sub_send_two,
+            sub_send_two.clone(),
             // req_sender.clone(),
             // resp_receiver,
             decrypter.clone(),
-            token_pipes_sender,
+            token_pipes_sender.clone(),
             recv_pair,
             // receiver,
-            pub_key_pem,
+            pub_key_pem.clone(),
             // swarm_name.clone(),
             // net_set_recv,
             // None,
         ));
         // let puncher = "tudbut.de:4277";
-        // spawn(holepunch(
-        //     puncher,
-        //     host_ip,
-        //     sub_send_two.clone(),
-        //     // decode_req_send,
-        //     // decode_resp_recv,
-        //     decrypter.clone(),
-        //     token_pipes_sender.clone(),
-        //     holepunch_receiver,
-        //     pub_key_pem.clone(),
-        // ));
+        let puncher = SocketAddr::new("217.160.249.125".parse().unwrap(), 4277);
+        spawn(holepunch(
+            puncher,
+            // host_ip,
+            sub_send_two,
+            // decode_req_send,
+            // decode_resp_recv,
+            decrypter,
+            token_pipes_sender,
+            holepunch_receiver,
+            pub_key_pem,
+        ));
     }
     // let (decode_req_send, decode_req_recv) = channel();
     // let (decode_resp_send, decode_resp_recv) = channel();

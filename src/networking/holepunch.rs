@@ -1,7 +1,10 @@
+use super::common::are_we_behind_a_nat;
 use super::Token;
 use crate::crypto::{generate_symmetric_key, SessionKey};
 use crate::networking::client::prepare_and_serve;
-use crate::networking::common::{discover_network_settings, time_out, wait_for_bytes};
+use crate::networking::common::{
+    discover_network_settings, time_out, wait_for_bytes, wait_for_response,
+};
 use crate::networking::subscription::Subscription;
 use crate::prelude::{Decrypter, Encrypter};
 use async_std::net::UdpSocket;
@@ -24,7 +27,11 @@ use swarm_consensus::{Nat, PortAllocationRule};
 // let (remote_addr, socket, server) = holepunch(puncher, swarm_name);
 
 // In case of using external proxy like tudbut.de for neighbor discovery
-// we can simply send a drgram to that server and wait for a response.
+// we can simply send a dgram to that server and wait for a response.
+// First we send two dgrams with the same, unique swarm_name to detect
+// if remote host is responsive/not blocked by NAT.
+// If not responsive we quit - holepunch won't work.
+// If responsive we send dgram with proper swarm name.
 // When we receive that response we have a remote socket address.
 // We first try to reach that received socket from our existing socket
 // by using punch_it procedure.
@@ -39,18 +46,21 @@ use swarm_consensus::{Nat, PortAllocationRule};
 // If no luck, we can turn back to proxy
 // or some other mean to receive a neighbor's socket address.
 pub async fn holepunch(
-    puncher: &str,
-    host_ip: IpAddr,
+    puncher: SocketAddr,
     sub_sender: Sender<Subscription>,
     decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     receiver: Receiver<String>,
     pub_key_pem: String,
 ) {
-    // ) -> (SocketAddr, UdpSocket, bool) {
-    println!("Holepunch started");
     let mut magic_ports = MagicPorts::new();
     let sleep_duration = Duration::from_millis(50);
+
+    if !holepunch_probe_ok(puncher).await {
+        println!("Unable to start holepunch service: proxy unresponsive or blocked");
+        return;
+    }
+    println!("Holepunch started");
 
     loop {
         let recv_result = receiver.try_recv();
@@ -60,7 +70,6 @@ pub async fn holepunch(
                 TryRecvError::Disconnected => break,
                 _ => {
                     sleep(sleep_duration).await;
-                    // yield_now().await;
                     continue;
                 }
             }
@@ -70,43 +79,84 @@ pub async fn holepunch(
         let swarm_name: String = recv_result.unwrap();
         let bind_port = magic_ports.next();
         spawn(holepunch_task(
-            // host_ip,
-            puncher.to_string(),
+            puncher,
             sub_sender.clone(),
             decrypter.clone(),
             pipes_sender.clone(),
             pub_key_pem.clone(),
             swarm_name,
-            (host_ip, bind_port),
+            bind_port,
         ));
+    }
+}
+
+// If we receive a response at any point in this procedure
+// Then we can communicate with holepunch proxy
+async fn holepunch_probe_ok(puncher: SocketAddr) -> bool {
+    let socket = UdpSocket::bind(("0.0.0.0", 0)).await.unwrap();
+    if let Ok((_nat, pub_addr)) = are_we_behind_a_nat(&socket).await {
+        if ask_proxy_for_remote_socket(&socket, puncher, pub_addr.to_string(), false)
+            .await
+            .is_some()
+        {
+            return true;
+        } else if ask_proxy_for_remote_socket(&socket, puncher, pub_addr.to_string(), false)
+            .await
+            .is_some()
+        {
+            return true;
+        } else {
+            return false;
+        }
+    } else {
+        return false;
     }
 }
 
 async fn holepunch_task(
     // host_ip: IpAddr,
-    puncher: String,
+    puncher: SocketAddr,
     sub_sender: Sender<Subscription>,
     decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     pub_key_pem: String,
     swarm_name: String,
-    mut bind_addr: (IpAddr, u16),
+    mut bind_port: u16,
 ) {
     let magic_ports = MagicPorts::new();
-    println!("Round '1'");
     // TODO: read only magic_ports!
-    let mut holepunch = UdpSocket::bind(bind_addr)
-        .await
-        .expect("unable to create socket");
+    let bind_result = UdpSocket::bind(("0.0.0.0", bind_port)).await;
+    if bind_result.is_err() {
+        println!("unable to create socket for holepunch service");
+        return;
+    }
+    println!("Round '1'");
+    let mut holepunch = bind_result.unwrap();
 
     let my_settings = discover_network_settings(&mut holepunch).await;
-    let remote_socket_opt =
-        ask_proxy_for_remote_socket(&holepunch, puncher.clone(), swarm_name.clone()).await;
+    let mut remote_socket_opt =
+        ask_proxy_for_remote_socket(&holepunch, puncher, swarm_name.clone(), true).await;
+    if remote_socket_opt.is_none() {
+        println!("Unable to receive remote socket addr");
+        return;
+    }
+    let (remote_1_addr, _remote_1_port) = remote_socket_opt.unwrap();
+    // println!("My PUB IP: {:?}", my_settings.pub_ip);
+    // println!("Remote IP: {:?}", remote_1_addr);
+    if remote_1_addr == my_settings.pub_ip {
+        println!("Proxy returned my own IP, trying again...");
+        remote_socket_opt =
+            ask_proxy_for_remote_socket(&holepunch, puncher, swarm_name.clone(), true).await;
+    }
     if remote_socket_opt.is_none() {
         println!("Unable to receive remote socket addr");
         return;
     }
     let (remote_1_addr, remote_1_port) = remote_socket_opt.unwrap();
+    if remote_1_addr == my_settings.pub_ip {
+        println!("Proxy returned my own IP again, done trying.");
+        return;
+    }
     let remote_controls_port = magic_ports.is_magic(remote_1_port);
     let (remote_nat, remote_port_rule) = if remote_controls_port {
         (
@@ -140,7 +190,7 @@ async fn holepunch_task(
     if let Some(dedicated_socket) = punch_it_result {
         spawn(start_communication(
             dedicated_socket,
-            swarm_name.clone(),
+            vec![swarm_name.clone()],
             pub_key_pem.clone(),
             // gnome_id,
             decrypter.clone(),
@@ -165,13 +215,13 @@ async fn holepunch_task(
     }
     // 2. Then we create a new socket and send via that socket a request to connect with
     // other host via that common phrase
-    bind_addr.1 -= 3;
-    holepunch = UdpSocket::bind(bind_addr)
+    bind_port -= 3;
+    holepunch = UdpSocket::bind(("0.0.0.0", bind_port))
         .await
         .expect("unable to create socket");
 
     let remote_socket_opt =
-        ask_proxy_for_remote_socket(&holepunch, puncher.clone(), common_phrase.clone()).await;
+        ask_proxy_for_remote_socket(&holepunch, puncher, common_phrase.clone(), true).await;
     if remote_socket_opt.is_none() {
         println!("Unable to receive remote socket addr");
         return;
@@ -180,13 +230,13 @@ async fn holepunch_task(
     let (remote_1_addr, remote_1_port) = remote_socket_opt.unwrap();
     println!("First remote socket: {:?}:{}", remote_1_addr, remote_1_port);
     // 4. We repeat steps 1, 2, 3 and now we have two remote socket addresses.
-    bind_addr.1 += 1;
-    holepunch = UdpSocket::bind(bind_addr)
+    bind_port += 1;
+    holepunch = UdpSocket::bind(("0.0.0.0", bind_port))
         .await
         .expect("unable to create socket");
     common_phrase.push_str("bar");
     let remote_socket_opt =
-        ask_proxy_for_remote_socket(&holepunch, puncher.clone(), common_phrase).await;
+        ask_proxy_for_remote_socket(&holepunch, puncher, common_phrase, true).await;
     if remote_socket_opt.is_none() {
         println!("Unable to receive remote socket addr");
         return;
@@ -204,8 +254,8 @@ async fn holepunch_task(
     let target_remote_port = remote_2_port + delta_port;
     // 7. We create a new socket and try to punch through to remote host using
     //    known remote public IP and PORT calculated in point 6.
-    bind_addr.1 += 1;
-    holepunch = UdpSocket::bind(bind_addr)
+    bind_port += 1;
+    holepunch = UdpSocket::bind(("0.0.0.0", bind_port))
         .await
         .expect("unable to create socket");
     // 8. We pass that socket to punch_it function and await it.
@@ -225,7 +275,7 @@ async fn holepunch_task(
     if let Some(dedicated_socket) = punch_it_result {
         spawn(start_communication(
             dedicated_socket,
-            swarm_name.clone(),
+            vec![swarm_name.clone()],
             pub_key_pem.clone(),
             decrypter.clone(),
             pipes_sender.clone(),
@@ -235,12 +285,12 @@ async fn holepunch_task(
     };
 
     println!("Round '3'");
-    let my_port_min = bind_addr.1 + 2;
+    let my_port_min = bind_port + 2;
     let his_port_min = target_remote_port + delta_port;
     let his_port_max = target_remote_port + (50 * delta_port);
     let timeout = Duration::from_secs(120);
     let punch_it_result = cluster_punch_it(
-        bind_addr.0,
+        "0.0.0.0".parse().unwrap(),
         remote_1_addr,
         my_port_min,
         50,
@@ -251,7 +301,7 @@ async fn holepunch_task(
     if let Some(dedicated_socket) = punch_it_result {
         spawn(start_communication(
             dedicated_socket,
-            swarm_name.clone(),
+            vec![swarm_name.clone()],
             pub_key_pem.clone(),
             decrypter.clone(),
             pipes_sender.clone(),
@@ -313,9 +363,11 @@ async fn holepunch_task(
 
 async fn ask_proxy_for_remote_socket(
     holepunch: &UdpSocket,
-    puncher: String,
+    puncher: SocketAddr,
     swarm_name: String,
+    keep_waiting: bool,
 ) -> Option<(IpAddr, u16)> {
+    let timeout_sec: Duration = Duration::from_secs(5);
     let bytes = swarm_name.as_bytes();
     let mut buf = vec![0_u8; 200];
     buf[..bytes.len().min(200)].copy_from_slice(&bytes[..bytes.len().min(200)]);
@@ -325,10 +377,37 @@ async fn ask_proxy_for_remote_socket(
         .await
         .expect("unable to talk to helper");
     println!("Waiting for UDPunch server to respond");
-    holepunch
-        .recv_from(&mut buf)
-        .await
-        .expect("unable to receive from helper");
+    let mut received;
+    let mut bytes;
+    loop {
+        let t1 = time_out(timeout_sec, None).fuse();
+        let t2 = wait_for_response(holepunch, puncher).fuse();
+
+        pin_mut!(t1, t2);
+
+        (received, bytes) = select! {
+            _result1 = t1 =>  (false,[0;128]),
+            result2 = t2 => (true,result2),
+        };
+        if received {
+            break;
+        } else if keep_waiting {
+            holepunch
+                .send_to(&vec![], puncher)
+                .await
+                .expect("unable to ping helper");
+        } else {
+            break;
+        };
+    }
+    if !received {
+        return None;
+    }
+    buf = Vec::from(bytes);
+    // holepunch
+    //     .recv_from(&mut buf)
+    //     .await
+    //     .expect("unable to receive from helper");
     // println!("Holepunch responded: {:?}", buf);
     // TODO: here we should temporarily send some invalid packet to proxy
     // let next_port = holepunch.local_addr().unwrap().port().saturating_add(1);
@@ -476,13 +555,13 @@ async fn try_communicate(socket: &UdpSocket, remote_addr: SocketAddr) -> Result<
 // but current procedure is not successful.
 async fn probe_socket(
     socket: UdpSocket,
-    remote_addr: SocketAddr,
+    remote_addr: (IpAddr, u16),
     sender: Sender<(UdpSocket, Option<SocketAddr>)>,
 ) {
     // println!("running probe socket");
     let sleep_time = Duration::from_millis(100);
     let wait_time = Duration::from_millis(1100);
-    print!("sent ");
+    // print!("sent ");
     for i in (1..10).rev() {
         let _ = socket.send_to(&[i as u8], remote_addr).await;
         print!("{} ", i);
@@ -541,7 +620,7 @@ async fn probe_socket(
     //     };
     // }
     if socket_found {
-        let _ = sender.send((socket, Some(remote_addr)));
+        let _ = sender.send((socket, Some(SocketAddr::new(remote_addr.0, remote_addr.1))));
     } else {
         let _ = sender.send((socket, None));
         // drop(socket);
@@ -578,7 +657,7 @@ pub async fn punch_it(
     // socket_sender: Sender<Option<UdpSocket>>,
     (my_settings, other_settings): (NetworkSettings, NetworkSettings),
 ) -> Option<UdpSocket> {
-    let mut remote_adr = SocketAddr::new(other_settings.pub_ip, other_settings.pub_port);
+    let mut remote_adr = other_settings.get_predicted_addr(0);
     println!(
         "Punching: {:?}:{:?}",
         other_settings.pub_ip, other_settings.pub_port
@@ -587,7 +666,8 @@ pub async fn punch_it(
     spawn(probe_socket(socket, remote_adr, sender.clone()));
     let mut dedicated_socket: Option<UdpSocket> = None;
     let mut responsive_socket_result;
-    let mut retries_remaining = 5;
+    let retries_count_start = 6u8;
+    let mut retries_remaining = 5u8;
     while retries_remaining > 0 {
         responsive_socket_result = reciever.try_recv();
         match responsive_socket_result {
@@ -603,8 +683,9 @@ pub async fn punch_it(
                     let mut local_addr = socket.local_addr().unwrap();
                     local_addr.set_port(local_addr.port() + 1);
                     let socket = UdpSocket::bind(local_addr).await.unwrap();
-                    let next_port = other_settings.port_increment(remote_adr.port());
-                    remote_adr.set_port(next_port);
+                    remote_adr =
+                        other_settings.get_predicted_addr(retries_count_start - retries_remaining);
+                    // remote_adr.set_port(next_port);
                     spawn(probe_socket(socket, remote_adr, sender.clone()));
                     retries_remaining -= 1;
                 } else {
@@ -660,11 +741,7 @@ pub async fn cluster_punch_it(
     let (send, recv) = channel();
     for i in 0..my_count {
         let a_socket = UdpSocket::bind((my_ip, my_port_min + i)).await.unwrap();
-        spawn(probe_socket(
-            a_socket,
-            SocketAddr::new(his_ip, his_current),
-            send.clone(),
-        ));
+        spawn(probe_socket(a_socket, (his_ip, his_current), send.clone()));
         his_current += his_step;
         if his_current > his_port_max {
             his_current = his_port_min;
@@ -691,11 +768,7 @@ pub async fn cluster_punch_it(
             Ok((socket, None)) => {
                 let local_port = socket.local_addr().unwrap().port();
                 let mut his_next = next_remote_port.remove(&local_port).unwrap();
-                spawn(probe_socket(
-                    socket,
-                    SocketAddr::new(his_ip, his_next),
-                    send.clone(),
-                ));
+                spawn(probe_socket(socket, (his_ip, his_next), send.clone()));
                 his_next += his_step;
                 if his_next > his_port_max {
                     his_next = his_port_min;
@@ -719,7 +792,7 @@ pub async fn cluster_punch_it(
 
 pub async fn start_communication(
     dedicated_socket: UdpSocket,
-    swarm_name: String,
+    swarm_names: Vec<String>,
     pub_key_pem: String,
     decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
@@ -895,7 +968,7 @@ pub async fn start_communication(
     let _ = sub_sender.send(Subscription::Distribute(my_pub_ip, my_pub_port, my_nat));
     // println!("My external addr: {}", my_ext_addr_res.unwrap());
     // }
-    let swarm_names = vec![swarm_name];
+    // let swarm_names = vec![swarm_name];
     spawn(prepare_and_serve(
         dedicated_socket,
         remote_gnome_id,

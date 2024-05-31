@@ -1,67 +1,79 @@
 use super::serve_socket;
 use super::Token;
 use crate::crypto::SessionKey;
-use crate::networking::common::collect_subscribed_swarm_names;
 use crate::networking::common::create_a_neighbor_for_each_swarm;
 use crate::networking::common::distil_common_names;
 use crate::networking::common::receive_remote_swarm_names;
 use crate::networking::common::send_subscribed_swarm_names;
+use crate::networking::common::time_out;
 use crate::networking::subscription::Subscription;
 use crate::prelude::Decrypter;
 use crate::prelude::Encrypter;
 use async_std::net::UdpSocket;
 use async_std::task::spawn;
+use futures::{
+    future::FutureExt, // for `.fuse()`
+    pin_mut,
+    select,
+};
 use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::time::Duration;
 use swarm_consensus::GnomeId;
+use swarm_consensus::NetworkSettings;
 
 pub async fn run_client(
-    mut receiver: Receiver<Subscription>,
+    swarm_names: Vec<String>,
     sender: Sender<Subscription>,
-    // req_sender: Sender<Vec<u8>>,
-    // mut resp_receiver: Receiver<[u8; 32]>,
     decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     pub_key_pem: String,
+    target_host: Option<(UdpSocket, NetworkSettings)>,
 ) {
+    // ) -> Receiver<Subscription> {
     // First pull out broadcast sending pubkey
     // Second receive symmetric key
     // Third receive redirect for new socket
     // Fourth make socket connect to new address
     // Then move previous points out from this function
     //     so that in operates on dedicated socket it receives as argument
-
     println!("SKT CLIENT");
-    // let result = UdpSocket::bind(SocketAddr::new(host_ip, 0)).await;
-    let client_addr: SocketAddr = SocketAddr::new("0.0.0.0".parse().unwrap(), 0);
-    let result = UdpSocket::bind(client_addr).await;
-    if result.is_err() {
-        println!("SKT couldn't bind to address");
-        return;
-    }
-    let socket = result.unwrap();
+    let (socket, send_addr) = if let Some((sock, net_set)) = target_host {
+        (sock, net_set.get_predicted_addr(0))
+    } else {
+        // let result = UdpSocket::bind(SocketAddr::new(host_ip, 0)).await;
+        let client_addr: SocketAddr = SocketAddr::new("0.0.0.0".parse().unwrap(), 0);
+        let result = UdpSocket::bind(client_addr).await;
+        if result.is_err() {
+            println!("SKT couldn't bind to address");
+            return;
+            // return receiver;
+        }
+        let socket = result.unwrap();
+        let result = socket.set_broadcast(true);
+        if result.is_err() {
+            println!("SKT couldn't enable broadcast");
+            return;
+            // return receiver;
+        }
+        (socket, ("255.255.255.255".parse().unwrap(), 1026))
+    };
 
-    let result = socket.set_broadcast(true);
-    if result.is_err() {
-        println!("SKT couldn't enable broadcast");
-        return;
-    }
-
-    let send_result = socket
-        .send_to(pub_key_pem.as_bytes(), "255.255.255.255:1026")
-        .await;
+    let send_result = socket.send_to(pub_key_pem.as_bytes(), send_addr).await;
     if send_result.is_err() {
         println!("Unable te send broadcast message: {:?}", send_result);
         return;
+        // return receiver;
     }
 
-    // TODO: maybe finish loop after timeout?
-    loop {
-        let mut swarm_names = vec![];
-        receiver = collect_subscribed_swarm_names(&mut swarm_names, sender.clone(), receiver).await;
+    let timeout_sec = Duration::from_secs(5);
+    let (t_send, timeout) = channel();
+    spawn(time_out(timeout_sec, Some(t_send)));
+    while timeout.try_recv().is_err() {
         if swarm_names.is_empty() {
             println!("User is not subscribed to any Swarms");
             return;
+            // return receiver;
         }
         establish_secure_connection(
             &socket,
@@ -70,35 +82,58 @@ pub async fn run_client(
             // resp_receiver,
             decrypter.clone(),
             pipes_sender.clone(),
-            swarm_names,
+            swarm_names.clone(),
         )
         .await;
     }
+    println!("Client is done");
+    // receiver
 }
 
-async fn establish_secure_connection(
-    socket: &UdpSocket,
-    sender: Sender<Subscription>,
-    // req_sender: Sender<Vec<u8>>,
-    // resp_receiver: Receiver<[u8; 32]>,
-    decrypter: Decrypter,
-    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
-    swarm_names: Vec<String>,
-    // ) -> Receiver<[u8; 32]> {
-) {
-    let mut remote_gnome_id: GnomeId = GnomeId(0);
-    let session_key: SessionKey; // = SessionKey::from_key(&[0; 32]);
-    let mut remote_addr: SocketAddr; // = "0.0.0.0:0".parse().unwrap();
-    let mut count;
-    let mut recv_buf = [0u8; 1100];
+async fn wait_for_bytes(socket: &UdpSocket) {
+    let mut recv_buf = [0u8; 1024];
     loop {
-        let recv_result = socket.recv_from(&mut recv_buf).await;
+        let recv_result = socket.peek_from(&mut recv_buf).await;
         if recv_result.is_ok() {
-            (count, remote_addr) = recv_result.unwrap();
+            let (count, _remote_addr) = recv_result.unwrap();
             if count > 1 {
                 break;
             }
         }
+    }
+}
+async fn establish_secure_connection(
+    socket: &UdpSocket,
+    sender: Sender<Subscription>,
+    decrypter: Decrypter,
+    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    swarm_names: Vec<String>,
+) {
+    let mut remote_gnome_id: GnomeId = GnomeId(0);
+    let session_key: SessionKey; // = SessionKey::from_key(&[0; 32]);
+    let remote_addr: SocketAddr; // = "0.0.0.0:0".parse().unwrap();
+    let count;
+    let mut recv_buf = [0u8; 1100];
+
+    // let mut socket_found = false;
+    let wait_time = Duration::from_secs(1);
+    let t1 = wait_for_bytes(socket).fuse();
+    let t2 = time_out(wait_time, None).fuse();
+
+    pin_mut!(t1, t2);
+
+    let timed_out = select! {
+        _result1 = t1 =>  false,
+        _result2 = t2 => true,
+    };
+    if timed_out {
+        return;
+    }
+    let recv_result = socket.recv_from(&mut recv_buf).await;
+    if recv_result.is_ok() {
+        (count, remote_addr) = recv_result.unwrap();
+    } else {
+        return;
     }
 
     // let mut decoded_key: Option<[u8; 32]> = None;

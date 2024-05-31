@@ -23,7 +23,7 @@ pub async fn collect_subscribed_swarm_names(
     sender: Sender<Subscription>,
     receiver: Receiver<Subscription>,
 ) -> Receiver<Subscription> {
-    println!("Collecting swarm names...");
+    // println!("Collecting swarm names...");
     let _ = sender.send(Subscription::ProvideList);
     loop {
         if let Ok(subs_msg) = receiver.try_recv() {
@@ -181,7 +181,7 @@ pub async fn wait_for_bytes(socket: &UdpSocket) {
     }
 }
 
-async fn wait_for_response(socket: &UdpSocket, addr: SocketAddr) -> [u8; 128] {
+pub async fn wait_for_response(socket: &UdpSocket, addr: SocketAddr) -> [u8; 128] {
     // println!("waiting for bytes");
     let mut bytes: [u8; 128] = [0; 128];
     loop {
@@ -246,7 +246,7 @@ pub async fn identify_nat(socket: &UdpSocket) -> Nat {
         yield_now().await;
     }
     if received_responses.is_empty() {
-        print!("NAT type: Symmetric ");
+        println!("NAT type: Symmetric ");
         Nat::Symmetric
     } else {
         let mut first_response_received = false;
@@ -259,13 +259,13 @@ pub async fn identify_nat(socket: &UdpSocket) -> Nat {
             }
         }
         if first_response_received {
-            print!("NAT type: FullCone ");
+            println!("NAT type: FullCone ");
             Nat::FullCone
         } else if second_response_received {
-            print!("NAT type: AddressRestrictedCone ");
+            println!("NAT type: AddressRestrictedCone ");
             Nat::AddressRestrictedCone
         } else {
-            print!("NAT type: Unknown ");
+            println!("NAT type: Unknown ");
             Nat::Unknown
         }
     }
@@ -283,11 +283,11 @@ async fn receive_response(socket: &UdpSocket) -> StunMessage {
 pub async fn time_out(mut time: Duration, sender: Option<Sender<()>>) {
     let time_step = Duration::from_millis(100);
     while time > Duration::ZERO {
-        print!(".");
+        // print!(".");
         time -= time_step;
         sleep(time_step).await;
     }
-    println!("Timed out after: {:?}", time);
+    // println!("timed out");
     if let Some(sender) = sender {
         let _ = sender.send(());
     }

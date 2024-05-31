@@ -1,7 +1,9 @@
 // use super::common::are_we_behind_a_nat;
-use super::common::discover_network_settings;
+use super::common::{are_we_behind_a_nat, discover_network_settings, time_out};
 use super::token::Token;
+use crate::networking::holepunch::cluster_punch_it;
 use crate::networking::{
+    client::run_client,
     holepunch::{punch_it, start_communication},
     subscription::Subscription,
 };
@@ -12,6 +14,7 @@ use async_std::task::{spawn, yield_now};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::time::Duration;
 use swarm_consensus::{NetworkSettings, Request};
 
 pub async fn direct_punching_service(
@@ -117,6 +120,7 @@ async fn socket_maintainer(
     send_my: Sender<NetworkSettings>,
     recv_other: Receiver<(String, NetworkSettings)>,
 ) {
+    let mut swarm_names = vec![];
     // println!("SM start");
     // let bind_port = 0;
     // let bind_addr = (host_ip, bind_port);
@@ -127,10 +131,19 @@ async fn socket_maintainer(
 
     // TODO: race two tasks: either timeout or receive NetworkSettings from pipe
     //       if timeout - we need to refresh the socket by sending to STUN server
+    let timeout_sec = Duration::from_secs(14);
+    let (t_send, timeout) = channel();
+    spawn(time_out(timeout_sec, Some(t_send.clone())));
     loop {
-        // print!("sm");
+        if timeout.try_recv().is_ok() {
+            my_settings = update_my_pub_addr(&socket, my_settings).await;
+            spawn(time_out(timeout_sec, Some(t_send.clone())));
+        }
         let recv_result = recv_other.try_recv();
         if let Ok((swarm_name, other_settings)) = recv_result {
+            if !swarm_names.contains(&swarm_name) {
+                swarm_names.push(swarm_name.clone());
+            }
             // TODO: discover with stun server
             println!("recvd other!");
             let _ = send_my.send(my_settings);
@@ -142,25 +155,39 @@ async fn socket_maintainer(
                 sub_sender.clone(),
                 decrypter.clone(),
                 pipes_sender.clone(),
-                swarm_name,
+                swarm_names.clone(),
                 (my_settings, other_settings),
             ));
             socket = UdpSocket::bind(bind_addr).await.unwrap();
-            my_settings = discover_network_settings(&mut socket).await;
-            // if my_settings.nat_type != Nat::None {
-            //     let behind_a_nat = are_we_behind_a_nat(&socket).await;
-            //     if let Ok((_is_there_nat, public_addr)) = behind_a_nat {
-            //         let ip = public_addr.ip();
-            //         my_settings.pub_ip = ip;
-            //         let port = public_addr.port();
-            //         my_settings.pub_port = port;
-            //     }
-            // } else {
-            //     my_settings.pub_port = socket.local_addr().unwrap().port();
-            // }
+            my_settings = update_my_pub_addr(&socket, my_settings).await;
         }
         yield_now().await;
     }
+}
+async fn update_my_pub_addr(
+    socket: &UdpSocket,
+    mut my_settings: NetworkSettings,
+) -> NetworkSettings {
+    let ping_result = are_we_behind_a_nat(socket).await;
+    if let Ok((_nat, our_addr)) = ping_result {
+        let new_ip = our_addr.ip();
+        let new_port = our_addr.port();
+        if new_ip != my_settings.pub_ip {
+            println!(
+                "My pub IP has changed from {:?} to {:?}",
+                my_settings.pub_ip, new_ip
+            );
+            my_settings.pub_ip = new_ip;
+        }
+        if new_port != my_settings.pub_port {
+            println!(
+                "My pub port has changed from {:?} to {:?}",
+                my_settings.pub_port, new_port
+            );
+            my_settings.pub_port = new_port;
+        }
+    }
+    my_settings
 }
 
 async fn punch_and_communicate(
@@ -171,34 +198,106 @@ async fn punch_and_communicate(
     sub_sender: Sender<Subscription>,
     decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
-    swarm_name: String,
+    swarm_names: Vec<String>,
     (my_settings, other_settings): (NetworkSettings, NetworkSettings),
 ) {
-    println!("DPunch {:?} and {:?}", bind_addr, other_settings);
-    // let (socket_sender, socket_receiver) = channel();
-    // spawn(punch_it(
-    let punch_it_result = punch_it(
-        socket,
-        // socket_sender,
-        // my_settings.port_range,
-        // other_settings.port_range,
-        (my_settings, other_settings),
-        // req_sender.clone(),
-    )
-    .await;
-    // let socket_recv_result = socket_receiver.recv();
-    if let Some(dedicated_socket) = punch_it_result {
-        spawn(start_communication(
-            dedicated_socket,
-            swarm_name.clone(),
-            pub_key_pem.clone(),
-            // gnome_id,
-            decrypter.clone(),
-            pipes_sender.clone(),
-            sub_sender.clone(),
-        ));
-        // return;
-    };
+    if other_settings.no_nat() {
+        println!("DP Case 0 - there is no NAT");
+        run_client(
+            swarm_names.clone(),
+            sub_sender,
+            decrypter,
+            pipes_sender,
+            pub_key_pem,
+            Some((socket, other_settings)),
+        )
+        .await;
+    } else {
+        // TODO: here we need to strategize how to proceed
+        // depending on our and theirs NAT type and port allocation rule
+        // We first need to establish wether our NAT or their NAT is less
+        // restrictive. If both are equal use pub_ip to determine which.
+        // No we have two paths. We either have a less restrictive NAT or not.
+        // None = 1, -- covered
+        println!("DPunch {:?} and {:?}", bind_addr, other_settings);
+        let punch_it_result = if my_settings.nat_at_most_address_sensitive()
+            || other_settings.nat_at_most_address_sensitive()
+        {
+            println!("DP Case 1");
+            // We: FullCone,                them: AddressRestrictedCone = 4,
+            // We: FullCone,                them: PortRestrictedCone = 8,
+            // We: FullCone,                them: SymmetricWithPortControl = 16,
+            // We: FullCone,                them: Symmetric = 32, or Unknown = 0
+            // We: AddressRestrictedCone,   them PortRestrictedCone = 8,
+            // We: AddressRestrictedCone,   them SymmetricWithPortControl = 16,
+            // We: AddressRestrictedCone,   them Symmetric = 32, or Unknown = 0
+            //    ^ for all above we run punch_it procedure on one socket
+            //      them also run punch_it on one socket
+            punch_it(socket, (my_settings, other_settings)).await
+        } else if my_settings.nat_port_restricted()
+            && other_settings.nat_symmetric_with_port_control()
+        {
+            println!("DP Case 2");
+            // We: PortRestrictedCone,      them: SymmetricWithPortControl = 16,
+            // TODO:   ^ we run punch_it on one socket
+            //      them run punch_it on one socket
+            //      if no success...
+            punch_it(socket, (my_settings, other_settings)).await
+        } else if my_settings.nat_port_restricted()
+            && (other_settings.nat_symmetric() || other_settings.nat_unknown())
+        {
+            println!("DP Case 3");
+            // We: PortRestrictedCone,      them: Symmetric = 32, or Unknown = 0
+            // TODO:   ^ we run punch_it on one socket
+            //      them run punch_it on one socket
+            //      if no success...
+            punch_it(socket, (my_settings, other_settings)).await
+        } else if my_settings.nat_symmetric_with_port_control()
+            && (other_settings.nat_symmetric() || other_settings.nat_unknown())
+        {
+            println!("DP Case 4");
+            // We: SymmetricWithPortControl,them: Symmetric = 32, or Unknown = 0
+            // TODO:   ^ we run punch_it on one socket
+            //      them run punch_it on one socket
+            //      if no success...
+            let p_res = punch_it(socket, (my_settings, other_settings)).await;
+            if p_res.is_some() {
+                p_res
+            } else {
+                let his_port_min = other_settings.port_increment(other_settings.pub_port);
+                let his_port_max = other_settings.get_predicted_addr(50).1;
+                cluster_punch_it(
+                    my_settings.pub_ip,
+                    other_settings.pub_ip,
+                    my_settings.pub_port,
+                    50,
+                    (
+                        his_port_min,
+                        other_settings.port_allocation.1.unsigned_abs() as u16, //TODO:?
+                        his_port_max,
+                    ),
+                    Duration::from_secs(60),
+                )
+                .await
+            }
+        } else {
+            println!("DP Case 5 - no luck");
+            None
+        };
+        // let socket_recv_result = socket_receiver.recv();
+        if let Some(dedicated_socket) = punch_it_result {
+            spawn(start_communication(
+                dedicated_socket,
+                swarm_names,
+                pub_key_pem.clone(),
+                // gnome_id,
+                decrypter.clone(),
+                pipes_sender.clone(),
+                sub_sender.clone(),
+            ));
+            // return;
+        };
+    }
 
     // if let (
     //     PortAllocationRule::AddressSensitive | PortAllocationRule::PortSensitive,
