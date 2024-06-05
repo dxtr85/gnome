@@ -144,7 +144,7 @@ async fn race_tasks(
                         // let deciphered = byte_iterator.collect();
                         // println!("Decrypted msg: {:?}", deciphered);
                         if let Ok(message) = bytes_to_message(&deciphered) {
-                            // println!("decode OK");
+                            // println!("decode OK: {:?}", message);
                             if let Some(sender) = senders.get(&id) {
                                 // if message.is_bye() {
                                 //     println!("Sending: {:?}", message);

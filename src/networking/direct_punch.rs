@@ -59,7 +59,7 @@ pub async fn direct_punching_service(
         HashMap::with_capacity(10);
     let (send_other, recv_other) = channel();
     let (send_my, recv_my) = channel();
-    // println!("before sm spawn");
+    // TODO: maybe only run it when it makes sense?
     spawn(socket_maintainer(
         // host_ip,
         pub_key_pem.clone(),

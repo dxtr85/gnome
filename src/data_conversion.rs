@@ -3,6 +3,7 @@ use std::fmt;
 use std::error::Error;
 use swarm_consensus::BlockID;
 use swarm_consensus::CastID;
+use swarm_consensus::Configuration;
 use swarm_consensus::Data;
 use swarm_consensus::GnomeId;
 use swarm_consensus::Header;
@@ -23,11 +24,12 @@ use bytes::Bytes;
 use bytes::BytesMut;
 use std::net::IpAddr;
 
-// 1234567890123456789012345678901234567890|
-// _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ |
-// HPPPNNNNSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS|
-// H       = header: 0 - Sync
-//                   1 - Block
+// 123456789012345678901234567890123456789012345678
+// _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+// HPPPNNNNSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSRRRRRRRR
+// H       = header: 0    - Sync
+//                   1    - Block
+//                   0111 - Reconfigure
 //  PPP    = payload: 000 - KeepAlive
 //                    100 - Block
 //                    010 - NeighborResponse
@@ -35,9 +37,10 @@ use std::net::IpAddr;
 //                    101 - Unicast   TODO
 //                    110 - Multicast TODO
 //                    011 - Broadcast TODO
-//                    111 - Bye
+//                    111 - Reconfigure (incl Bye)
 //     NNNN = Neighborhood value
 //         SS... = SwarmTime value
+//           RRR = Reconfigure byte
 
 pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
     // println!("Bytes to message: {:?}", bytes);
@@ -48,12 +51,42 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
     let (header, data_idx) = if bytes[0] & 0b1_000_0000 == 128 {
         let block_id: u32 = as_u32_be(&[bytes[5], bytes[6], bytes[7], bytes[8]]);
         (Header::Block(BlockID(block_id)), 9)
+    } else if bytes[0] & 0b0_111_0000 == 112 {
+        if bytes[5] == 255 {
+            (Header::Sync, 5)
+        } else {
+            (Header::Reconfigure, 5)
+        }
     } else {
         (Header::Sync, 5)
     };
     let payload: Payload = if bytes[0] & 0b0_111_0000 == 112 {
-        println!("bytes[0]: {:#b}", bytes[0]);
-        Payload::Bye
+        // println!("bytes[0]: {:#b}", bytes[0]);
+        // let data = as_u32_be(&[
+        //     bytes[data_idx],
+        //     bytes[data_idx + 1],
+        //     bytes[data_idx + 2],
+        //     bytes[data_idx + 3],
+        // ]);
+        // if data == std::u32::MAX {
+        if bytes[data_idx] == 255 {
+            Payload::Bye
+        } else {
+            // println!("Configuration!");
+            let config = match bytes[data_idx] {
+                254 => Configuration::StartBroadcast,
+                253 => Configuration::ChangeBroadcastSource,
+                252 => Configuration::EndBroadcast,
+                251 => Configuration::StartMulticast,
+                250 => Configuration::ChangeMulticastSource,
+                249 => Configuration::EndMulticast,
+                248 => Configuration::CreateGroup,
+                247 => Configuration::DeleteGroup,
+                246 => Configuration::ModifyGroup,
+                other => Configuration::UserDefined(other),
+            };
+            Payload::Reconfigure(config)
+        }
     } else if bytes[0] & 0b0_111_0000 == 80 {
         // println!("UNICAST!!");
         let cid: CastID = CastID(bytes[data_idx]);
@@ -257,7 +290,14 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
         }
         Payload::Multicast(_mid, _data) => 0b0_110_0000,
         Payload::Broadcast(_bid, _data) => 0b0_011_0000,
-        Payload::Bye => 0b0_111_0000,
+        Payload::Bye => {
+            bytes.put_u32(std::u32::MAX);
+            0b0_111_0000
+        }
+        Payload::Reconfigure(config) => {
+            bytes.put_u32(config.as_u32());
+            0b0_111_0000
+        }
         Payload::Block(block_id, data) => {
             if !block_id_inserted {
                 bytes.put_u32(block_id.0);
