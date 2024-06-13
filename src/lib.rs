@@ -25,7 +25,8 @@ pub mod prelude {
         get_key_pair_from_files, get_new_key_pair, store_key_pair_as_pem_files, Decrypter,
         Encrypter,
     };
-    pub use async_std::task::spawn;
+    // pub use async_std::task::spawn;
+    pub use swarm_consensus::CastID;
     pub use swarm_consensus::Data;
     pub use swarm_consensus::GnomeId;
     pub use swarm_consensus::Manager as GManager;
@@ -33,6 +34,7 @@ pub mod prelude {
     pub use swarm_consensus::NetworkSettings;
     pub use swarm_consensus::PortAllocationRule;
     pub use swarm_consensus::Request;
+    pub use swarm_consensus::Response;
 }
 
 pub fn create_manager_and_receiver(

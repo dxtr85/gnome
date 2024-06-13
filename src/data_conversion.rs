@@ -1,3 +1,4 @@
+#![allow(clippy::unusual_byte_groupings)]
 use std::fmt;
 
 use std::error::Error;
@@ -48,6 +49,7 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
     let bytes_len = bytes.len();
     let swarm_time: SwarmTime = SwarmTime(as_u32_be(&[bytes[1], bytes[2], bytes[3], bytes[4]]));
     let neighborhood: Neighborhood = Neighborhood(bytes[0] & 0b0_000_1111);
+    let mut gnome_id: GnomeId = GnomeId(0);
     let (header, data_idx) = if bytes[0] & 0b1_000_0000 == 128 {
         let block_id: u32 = as_u32_be(&[bytes[5], bytes[6], bytes[7], bytes[8]]);
         (Header::Block(BlockID(block_id)), 9)
@@ -55,7 +57,10 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
         if bytes[5] == 255 {
             (Header::Sync, 5)
         } else {
-            (Header::Reconfigure, 5)
+            gnome_id = GnomeId(as_u64_be(&[
+                bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
+            ]));
+            (Header::Reconfigure(bytes[5], gnome_id), 5)
         }
     } else {
         (Header::Sync, 5)
@@ -74,12 +79,30 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
         } else {
             // println!("Configuration!");
             let config = match bytes[data_idx] {
-                254 => Configuration::StartBroadcast,
-                253 => Configuration::ChangeBroadcastSource,
-                252 => Configuration::EndBroadcast,
-                251 => Configuration::StartMulticast,
-                250 => Configuration::ChangeMulticastSource,
-                249 => Configuration::EndMulticast,
+                254 => {
+                    let c_id: CastID = CastID(bytes[data_idx + 9]);
+                    Configuration::StartBroadcast(gnome_id, c_id)
+                }
+                253 => {
+                    let c_id: CastID = CastID(bytes[data_idx + 9]);
+                    Configuration::ChangeBroadcastOrigin(gnome_id, c_id)
+                }
+                252 => {
+                    let c_id: CastID = CastID(bytes[data_idx + 9]);
+                    Configuration::EndBroadcast(c_id)
+                }
+                251 => {
+                    let c_id: CastID = CastID(bytes[data_idx + 9]);
+                    Configuration::StartMulticast(gnome_id, c_id)
+                }
+                250 => {
+                    let c_id: CastID = CastID(bytes[data_idx + 9]);
+                    Configuration::ChangeMulticastOrigin(gnome_id, c_id)
+                }
+                249 => {
+                    let c_id: CastID = CastID(bytes[data_idx + 9]);
+                    Configuration::EndMulticast(c_id)
+                }
                 248 => Configuration::CreateGroup,
                 247 => Configuration::DeleteGroup,
                 246 => Configuration::ModifyGroup,
@@ -113,10 +136,10 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
             254 => {
                 let swarm_id = SwarmID(bytes[data_idx + 1]);
                 let mut cast_ids = [CastID(0); 256];
-                let mut inserted = 0;
-                for c_id in &bytes[data_idx + 2..bytes_len] {
+                // let mut inserted = 0;
+                for (inserted, c_id) in bytes[data_idx + 2..bytes_len].iter().enumerate() {
                     cast_ids[inserted] = CastID(*c_id);
-                    inserted += 1;
+                    // inserted += 1;
                 }
                 NeighborRequest::UnicastRequest(swarm_id, cast_ids)
             }
@@ -130,7 +153,7 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
                         bytes[4 * i + data_idx + 5],
                         bytes[4 * i + data_idx + 6],
                     ]);
-                    data[i as usize] = BlockID(bid);
+                    data[i] = BlockID(bid);
                 }
                 NeighborRequest::PayloadRequest(count, data)
             }
@@ -230,7 +253,24 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
             }
         };
         Payload::Response(nr)
-    // TODO: handle Unicast/Multicast/Broadcast messages
+    } else if bytes[0] & 0b0_111_0000 == 48 {
+        let c_id = CastID(bytes[data_idx]);
+        let data: Data = Data(as_u32_be(&[
+            bytes[data_idx + 1],
+            bytes[data_idx + 2],
+            bytes[data_idx + 3],
+            bytes[data_idx + 4],
+        ]));
+        Payload::Broadcast(c_id, data)
+    } else if bytes[0] & 0b0_111_0000 == 96 {
+        let c_id = CastID(bytes[data_idx]);
+        let data: Data = Data(as_u32_be(&[
+            bytes[data_idx + 1],
+            bytes[data_idx + 2],
+            bytes[data_idx + 3],
+            bytes[data_idx + 4],
+        ]));
+        Payload::Multicast(c_id, data)
     } else {
         Payload::KeepAlive
     };
@@ -247,6 +287,17 @@ fn as_u32_be(array: &[u8; 4]) -> u32 {
         + ((array[1] as u32) << 16)
         + ((array[2] as u32) << 8)
         + (array[3] as u32)
+}
+
+fn as_u64_be(array: &[u8; 8]) -> u64 {
+    ((array[0] as u64) << 56)
+        + ((array[1] as u64) << 48)
+        + ((array[2] as u64) << 40)
+        + ((array[3] as u64) << 32)
+        + ((array[4] as u64) << 24)
+        + ((array[5] as u64) << 16)
+        + ((array[6] as u64) << 8)
+        + (array[7] as u64)
 }
 
 #[derive(Debug)]
@@ -288,13 +339,71 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
             bytes.put_u32(data.0);
             0b0_101_0000
         }
-        Payload::Multicast(_mid, _data) => 0b0_110_0000,
-        Payload::Broadcast(_bid, _data) => 0b0_011_0000,
+        Payload::Multicast(mid, data) => {
+            bytes.put_u8(mid.0);
+            bytes.put_u32(data.0);
+            0b0_110_0000
+        }
+        Payload::Broadcast(bid, data) => {
+            bytes.put_u8(bid.0);
+            bytes.put_u32(data.0);
+            0b0_011_0000
+        }
         Payload::Bye => {
             bytes.put_u32(std::u32::MAX);
             0b0_111_0000
         }
         Payload::Reconfigure(config) => {
+            match config {
+                Configuration::StartBroadcast(g_id, c_id) => {
+                    bytes.put_u8(254);
+                    bytes.put_u64(g_id.0);
+                    bytes.put_u8(c_id.0);
+                }
+                Configuration::ChangeBroadcastOrigin(g_id, c_id) => {
+                    bytes.put_u8(253);
+                    bytes.put_u64(g_id.0);
+                    bytes.put_u8(c_id.0);
+                }
+                Configuration::EndBroadcast(c_id) => {
+                    bytes.put_u8(252);
+                    bytes.put_u8(c_id.0);
+                }
+                Configuration::StartMulticast(g_id, c_id) => {
+                    bytes.put_u8(251);
+                    bytes.put_u64(g_id.0);
+                    bytes.put_u8(c_id.0);
+                }
+                Configuration::ChangeMulticastOrigin(g_id, c_id) => {
+                    bytes.put_u8(250);
+                    bytes.put_u64(g_id.0);
+                    bytes.put_u8(c_id.0);
+                }
+                Configuration::EndMulticast(c_id) => {
+                    bytes.put_u8(249);
+                    bytes.put_u8(c_id.0);
+                }
+                Configuration::CreateGroup => {
+                    bytes.put_u8(248);
+                    // TODO
+                    // bytes.put_u8(c_id.0);
+                }
+                Configuration::DeleteGroup => {
+                    bytes.put_u8(247);
+                    // TODO
+                    // bytes.put_u8(c_id.0);
+                }
+                Configuration::ModifyGroup => {
+                    bytes.put_u8(246);
+                    // TODO
+                    // bytes.put_u8(c_id.0);
+                }
+                Configuration::UserDefined(id) => {
+                    bytes.put_u8(id);
+                    // TODO
+                    // bytes.put_u8(c_id.0);
+                }
+            }
             bytes.put_u32(config.as_u32());
             0b0_111_0000
         }
