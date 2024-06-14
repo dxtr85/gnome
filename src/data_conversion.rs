@@ -1,5 +1,6 @@
 #![allow(clippy::unusual_byte_groupings)]
 use std::fmt;
+use std::ops::Deref;
 
 use std::error::Error;
 use swarm_consensus::BlockID;
@@ -141,7 +142,7 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
                     cast_ids[inserted] = CastID(*c_id);
                     // inserted += 1;
                 }
-                NeighborRequest::UnicastRequest(swarm_id, cast_ids)
+                NeighborRequest::UnicastRequest(swarm_id, Box::new(cast_ids))
             }
             253 => {
                 let count = bytes[data_idx + 2];
@@ -155,7 +156,7 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
                     ]);
                     data[i] = BlockID(bid);
                 }
-                NeighborRequest::PayloadRequest(count, data)
+                NeighborRequest::BlockRequest(count, Box::new(data))
             }
             252 => {
                 let net_set = parse_network_settings(bytes.slice(data_idx + 1..bytes_len));
@@ -212,7 +213,7 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
                     ]);
                     data[i] = BlockID(bid);
                 }
-                NeighborResponse::Listing(count, data)
+                NeighborResponse::Listing(count, Box::new(data))
             }
             254 => {
                 NeighborResponse::Unicast(SwarmID(bytes[data_idx + 1]), CastID(bytes[data_idx + 2]))
@@ -419,7 +420,7 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
                 NeighborResponse::Listing(count, data) => {
                     bytes.put_u8(255);
                     bytes.put_u8(count);
-                    for chunk in data {
+                    for chunk in data.deref() {
                         bytes.put_u32(chunk.0);
                     }
                 }
@@ -449,6 +450,17 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
                     bytes.put_u8(id);
                     insert_network_settings(&mut bytes, network_settings);
                 }
+                NeighborResponse::SwarmSync(b_count, m_count, bcasts, mcasts) => {
+                    bytes.put_u8(248);
+                    bytes.put_u8(b_count);
+                    bytes.put_u8(m_count);
+                    for i in 0..b_count as usize {
+                        bytes.put_u8(bcasts[i].0);
+                    }
+                    for i in 0..m_count as usize {
+                        bytes.put_u8(mcasts[i].0);
+                    }
+                }
                 NeighborResponse::CustomResponse(id, data) => {
                     bytes.put_u8(id);
                     bytes.put_u32(data.0);
@@ -465,14 +477,14 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
                 NeighborRequest::UnicastRequest(swarm_id, cast_ids) => {
                     bytes.put_u8(254);
                     bytes.put_u8(swarm_id.0);
-                    for c_id in cast_ids {
+                    for c_id in cast_ids.deref() {
                         bytes.put_u8(c_id.0);
                     }
                 }
-                NeighborRequest::PayloadRequest(count, data) => {
+                NeighborRequest::BlockRequest(count, data) => {
                     bytes.put_u8(253);
                     bytes.put_u8(count);
-                    for chunk in data {
+                    for chunk in data.deref() {
                         bytes.put_u32(chunk.0);
                     }
                 }
@@ -485,6 +497,9 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
                     bytes.put_u8(id);
                     bytes.put_u64(gnome_id.0);
                     insert_network_settings(&mut bytes, network_settings);
+                }
+                NeighborRequest::SwarmSyncRequest => {
+                    bytes.put_u8(250);
                 }
                 NeighborRequest::CustomRequest(id, data) => {
                     bytes.put_u8(id);

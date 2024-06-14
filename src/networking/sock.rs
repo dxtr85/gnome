@@ -151,7 +151,7 @@ async fn race_tasks(
                                 // }
                                 let _send_result = sender.send(message);
                                 if _send_result.is_err() {
-                                    println!("{:?} send result2: {:?}", message, _send_result);
+                                    println!("send result2: {:?}", _send_result);
                                 }
                             } else {
                                 println!("Did not find sender for {}", id);
