@@ -1,3 +1,4 @@
+use aes_gcm::aead::consts::U288230376151711744;
 // use async_std::task::spawn_blocking;
 // use async_std::task::spawn;
 use prelude::Decrypter;
@@ -52,8 +53,8 @@ pub async fn activate_gnome(
     ip: IpAddr,
     // _broadcast: IpAddr,
     port: u16,
-    buffer_size_bytes: u32,
-    uplink_bandwith_bytes_sec: u32,
+    buffer_size_bytes: u64,
+    uplink_bandwith_bytes_sec: u64,
     receiver: Receiver<NotificationBundle>,
     decrypter: Decrypter,
     pub_key_pem: String,

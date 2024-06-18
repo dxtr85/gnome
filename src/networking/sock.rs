@@ -71,8 +71,8 @@ async fn race_tasks(
 ) {
     let mut senders: HashMap<u8, Sender<Message>> = HashMap::new();
     let mut receivers: HashMap<u8, Receiver<Message>> = HashMap::new();
-    let min_tokens_threshold: u32 = 128;
-    let mut available_tokens: u32 = min_tokens_threshold;
+    let min_tokens_threshold: u64 = 128;
+    let mut available_tokens: u64 = min_tokens_threshold;
     // println!("racing: {:?}", send_recv_pairs);
     for (i, (sender, receiver)) in send_recv_pairs.into_iter().enumerate() {
         senders.insert(i as u8, sender);
@@ -172,7 +172,7 @@ async fn race_tasks(
         } else {
             let (_id, bytes) = result.unwrap();
             let ciphered = Bytes::from(session_key.encrypt(&bytes));
-            let len = 42 + ciphered.len() as u32;
+            let len = 42 + ciphered.len() as u64;
             if len <= available_tokens {
                 let _send_result = socket.send(&ciphered).await;
                 // available_tokens -= len;

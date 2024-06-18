@@ -41,8 +41,8 @@ use swarm_consensus::NotificationBundle;
 pub async fn run_networking_tasks(
     // host_ip: IpAddr,
     server_port: u16,
-    buffer_size_bytes: u32,
-    uplink_bandwith_bytes_sec: u32,
+    buffer_size_bytes: u64,
+    uplink_bandwith_bytes_sec: u64,
     notification_receiver: Receiver<NotificationBundle>,
     decrypter: Decrypter,
     pub_key_pem: String,

@@ -5,25 +5,25 @@ use std::time::Duration;
 
 #[derive(Debug)]
 pub enum Token {
-    Provision(u32),
-    Unused(u32),
-    Request(u32),
+    Provision(u64),
+    Unused(u64),
+    Request(u64),
 }
 
 pub async fn token_dispenser(
-    buffer_size_bytes: u32,
-    bandwith_bytes_sec: u32,
+    buffer_size_bytes: u64,
+    bandwith_bytes_sec: u64,
     // sender: Sender<TokenMessage>,
     reciever: Receiver<(Sender<Token>, Receiver<Token>)>,
-    band_reciever: Receiver<Sender<u32>>,
+    band_reciever: Receiver<Sender<u64>>,
 ) {
     println!("Starting token dispenser service");
     // Cover case when buffer size is less than bandwith
     let buffer_size_bytes = std::cmp::max(bandwith_bytes_sec, buffer_size_bytes);
     let mut available_buffer = buffer_size_bytes;
-    let bytes_per_msec: u32 = bandwith_bytes_sec / 1000;
-    let mut socket_pipes: VecDeque<(Sender<Token>, Receiver<Token>, u32, bool)> = VecDeque::new();
-    let mut bandwith_notification_senders: VecDeque<Sender<u32>> = VecDeque::new();
+    let bytes_per_msec: u64 = bandwith_bytes_sec / 1000;
+    let mut socket_pipes: VecDeque<(Sender<Token>, Receiver<Token>, u64, bool)> = VecDeque::new();
+    let mut bandwith_notification_senders: VecDeque<Sender<u64>> = VecDeque::new();
     let dur = Duration::from_micros(1000);
     // let dur = Duration::from_millis(1000);
     let (timer_sender, timer_reciever) = channel();
@@ -39,15 +39,15 @@ pub async fn token_dispenser(
     }
     task::spawn(timer(dur, timer_sender));
 
-    let mut sent_avail_bandwith: u32 = bandwith_bytes_sec;
+    let mut sent_avail_bandwith: u64 = bandwith_bytes_sec;
     let token_size = 256;
     let min_token_size = 256;
     let min_overhead = 4;
     let max_overhead = 64;
     let mut overhead = 16;
-    let mut used_bandwith_msec: u32 = 0;
-    let mut used_bandwith: VecDeque<u32> = VecDeque::from(vec![0; 100]);
-    let mut used_bandwith_ring: VecDeque<(bool, u32)> = VecDeque::from(vec![(false, 0); 9]);
+    let mut used_bandwith_msec: u64 = 0;
+    let mut used_bandwith: VecDeque<u64> = VecDeque::from(vec![0; 100]);
+    let mut used_bandwith_ring: VecDeque<(bool, u64)> = VecDeque::from(vec![(false, 0); 9]);
     used_bandwith_ring.push_back((true, 0));
     let mut additional_request_received = false;
 
@@ -91,7 +91,7 @@ pub async fn token_dispenser(
                         .fold(value, |acc, (_i, val)| acc + val);
                     let _ = used_bandwith.pop_front();
                     used_bandwith.push_back(sum);
-                    let used_bandwith_one_sec = used_bandwith.iter().sum::<u32>();
+                    let used_bandwith_one_sec = used_bandwith.iter().sum::<u64>();
                     let new_avail_bandwith =
                         bandwith_bytes_sec.saturating_sub(used_bandwith_one_sec);
                     if sent_avail_bandwith.abs_diff(new_avail_bandwith) * 10 > sent_avail_bandwith {
@@ -122,9 +122,9 @@ pub async fn token_dispenser(
             if let Some((s, r, prev_size, additional_request)) = socket_pipes.pop_front() {
                 let mut token_sent = false;
                 let mut broken_pipe = false;
-                let mut req_size = 0;
+                let mut req_size = 0u64;
                 let mut unused_size = 0;
-                let mut new_size: u32 = prev_size;
+                let mut new_size: u64 = prev_size;
                 let mut new_add_req = additional_request;
                 while let Ok(request) = r.try_recv() {
                     match request {

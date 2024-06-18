@@ -27,7 +27,7 @@ pub async fn subscriber(
     sub_receiver: Receiver<Subscription>,
     // sub_sender_two: Sender<Subscription>,
     notification_receiver: Receiver<NotificationBundle>,
-    token_dispenser_send: Sender<Sender<u32>>,
+    token_dispenser_send: Sender<Sender<u64>>,
     holepunch_sender: Sender<String>,
     direct_punch_sender: Sender<(String, Sender<Request>, Receiver<NetworkSettings>)>,
 ) {
