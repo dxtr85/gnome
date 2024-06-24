@@ -255,11 +255,12 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
                 NeighborResponse::ConnectResponse(id, net_set)
             }
             248 => {
-                let b_count = bytes[data_idx + 1];
-                let m_count = bytes[data_idx + 2];
+                let chill_phase = bytes[data_idx + 1];
+                let b_count = bytes[data_idx + 2];
+                let m_count = bytes[data_idx + 3];
                 let mut b_casts = vec![];
                 let mut m_casts = vec![];
-                let data_idx = data_idx + 3;
+                let data_idx = data_idx + 4;
                 let mut i: usize = 0;
                 while i < b_count as usize {
                     b_casts.push(CastID(bytes[data_idx + i]));
@@ -271,7 +272,7 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
                     m_casts.push(CastID(bytes[data_idx + i]));
                     i += 1;
                 }
-                NeighborResponse::SwarmSync(b_casts, m_casts)
+                NeighborResponse::SwarmSync(chill_phase, b_casts, m_casts)
             }
             247 => {
                 let is_bcast = bytes[data_idx + 1] > 0;
@@ -504,8 +505,9 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
                     bytes.put_u8(id);
                     insert_network_settings(&mut bytes, network_settings);
                 }
-                NeighborResponse::SwarmSync(bcasts, mcasts) => {
+                NeighborResponse::SwarmSync(chill_phase, bcasts, mcasts) => {
                     bytes.put_u8(248);
+                    bytes.put_u8(chill_phase);
                     bytes.put_u8(bcasts.len() as u8);
                     bytes.put_u8(mcasts.len() as u8);
                     for bcast in bcasts {
