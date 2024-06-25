@@ -96,6 +96,25 @@ pub async fn receive_remote_swarm_names(
     };
 }
 
+// TODO: We need a way to dynamically extend/shrink ch_pairs once created!!!
+//       This is in order for client to join new swarms.
+// We can do it like this:
+// Every Gnome has a Sender channel via which he can request networking task
+// to extend supported Swarms by one.
+// Once networking task receives such a requests it installs provided Receivers and
+// Senders into hashmaps.
+// Once installed networking task sends a prepared message to it's remote.
+// That message should contain means to identify for which Swarm this UPD channel
+// has been created and also some fixed value to indicate we want remote to
+// create a corresponding pair.
+// Fixed value serves the case when for some reason remote decided to close existing
+// channel and did not inform us. If a Datagram without fixed value is received
+// and there is no corresponding local channel to send it through, we can ignore it.
+// If we receive a Datagram with fixed value and there is no local channel to support,
+// we create all necessary Send/Receive pairs and notify any Gnome we are already
+// connected through. A Gnome should notify a Manager or User about a new Neighbor
+// that has been connected.
+//
 pub fn create_a_neighbor_for_each_swarm(
     common_names: Vec<String>,
     sender: Sender<Subscription>,

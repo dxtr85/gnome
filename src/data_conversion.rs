@@ -31,7 +31,8 @@ use std::net::IpAddr;
 // HPPPNNNNSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSRRRRRRRR
 // H       = header: 0    - Sync
 //                   1    - Block
-//                   0111 - Reconfigure
+//                   1111 - RESERVED for Swarm identification within UDP channel
+//                   0111 - Reconfigure (including Bye)
 //  PPP    = payload: 000 - KeepAlive
 //                    100 - Block
 //                    010 - NeighborResponse
@@ -39,10 +40,31 @@ use std::net::IpAddr;
 //                    101 - Unicast   TODO
 //                    110 - Multicast TODO
 //                    011 - Broadcast TODO
-//                    111 - Reconfigure (incl Bye)
 //     NNNN = Neighborhood value
 //         SS... = SwarmTime value
-//           RRR = Reconfigure byte
+//           RRR = Reconfigure byte (when payload = Reconfigure)
+
+// TODO: In future we should prepend our header with additional byte(and second optional)
+// to always send local Swarm identification (0-63) and info whether it is
+// a regular Message or one of Casts (Uni/Multi/Broad).
+// In case it is a Cast, next byte is CastID:
+// TTIIIIII[CCCCCCCC] (and later HPPPNNNNSS... but only for Regular Message)
+// TT - Datagram Type 00 - Regular Message
+//                    01 - Unicast
+//                    10 - Multicast
+//                    11 - Broadcast
+//   IIIIII - local Swarm identification in order to support up to 64 different Swarms
+//            on a single UPD socket
+//         CCCCCCCC - optional CastID, when TT is not Regular Message
+//
+// When this is implemented casting messages can become independent from Sync mechanism.
+// Then we can define a separate channel for Casts per Swarm to be handled independently.
+// Also for casts there is only need for CastID and Data, rest does not need to be sent
+// and in case upper abstraction layer requires it, can be filled with defaults.
+// This can be easily mitigated by creating a separate CastMessage enum.
+// Also PPP field can have additional 3 payload types, since Casts are freed.
+// Since having a single Swarm is expected to be an extreme rarity, this change should
+// get implemented soon.
 
 pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
     // println!("Bytes to message: {:?}", bytes);
