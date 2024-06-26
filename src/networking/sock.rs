@@ -5,7 +5,7 @@ use crate::networking::token::Token;
 use async_std::net::UdpSocket;
 use async_std::task;
 // TODO: get rid of bytes crate
-use bytes::{BufMut, Bytes, BytesMut};
+// use bytes::BufMut;
 use core::panic;
 use futures::{
     future::FutureExt, // for `.fuse()`
@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
 use swarm_consensus::Message;
 
-async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<(u8, Bytes), String> {
+async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<Vec<u8>, String> {
     // println!("read_bytes_from_socket");
     // TODO: increase size of buffer everywhere
     let mut buf = [0u8; 1100];
@@ -27,7 +27,7 @@ async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<(u8, Bytes), Strin
         // if buf[0] & 0b1_111_0000 == 240 {
         //     Ok((buf[1], Bytes::from(Vec::from(&buf[2..count - 2]))))
         // } else {
-        Ok((0, Bytes::from(Vec::from(&buf[..count]))))
+        Ok(Vec::from(&buf[..count]))
         // }
     } else {
         println!("SKTd{:?}", recv_result);
@@ -37,24 +37,39 @@ async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<(u8, Bytes), Strin
 
 async fn read_bytes_from_local_stream(
     receivers: &mut HashMap<u8, Receiver<Message>>,
-) -> Result<(u8, Bytes), String> {
+) -> Result<Vec<u8>, String> {
     // println!("read_bytes_from_local_stream");
     loop {
         for (id, receiver) in receivers.iter_mut() {
             let next_option = receiver.try_recv();
             if let Ok(message) = next_option {
-                let bytes = message_to_bytes(message);
+                // TODO: here we need to add a Datagram header
+                // indicating type of message and id
+                let dgram_header = id
+                    + if message.is_unicast() {
+                        64
+                    } else if message.is_multicast() {
+                        128
+                    } else if message.is_broadcast() {
+                        192
+                    } else {
+                        0
+                    };
+                let mut bytes = message_to_bytes(message);
+                let mut merged_bytes = Vec::with_capacity(bytes.len() + 1);
+                merged_bytes.push(dgram_header);
+                merged_bytes.append(&mut bytes);
                 // println!(">>>>> {:?}", bytes);
 
-                if *id == 0 {
-                    return Ok((*id, bytes));
-                } else {
-                    let mut extended_bytes = BytesMut::with_capacity(bytes.len() + 2);
-                    extended_bytes.put_u8(240);
-                    extended_bytes.put_u8(*id);
-                    extended_bytes.put(bytes);
-                    return Ok((*id, Bytes::from(extended_bytes)));
-                }
+                // if *id == 0 {
+                return Ok(merged_bytes);
+                // } else {
+                //     let mut extended_bytes = BytesMut::with_capacity(bytes.len() + 2);
+                //     extended_bytes.put_u8(240);
+                //     extended_bytes.put_u8(*id);
+                //     extended_bytes.put(bytes);
+                //     return Ok((*id, Bytes::from(extended_bytes)));
+                // }
             }
         }
         task::yield_now().await;
@@ -68,6 +83,7 @@ async fn race_tasks(
     send_recv_pairs: Vec<(Sender<Message>, Receiver<Message>)>,
     token_sender: Sender<Token>,
     token_reciever: Receiver<Token>,
+    extend_receiver: Receiver<(String, Sender<Message>, Receiver<Message>)>,
 ) {
     let mut senders: HashMap<u8, Sender<Message>> = HashMap::new();
     let mut receivers: HashMap<u8, Receiver<Message>> = HashMap::new();
@@ -81,6 +97,22 @@ async fn race_tasks(
     let mut buf = [0u8; 1100];
     // if let Some((sender, mut receiver)) = send_recv_pairs.pop() {
     loop {
+        if let Ok((swarm_name, snd, recv)) = extend_receiver.try_recv() {
+            //TODO: extend senders and receivers, force send message
+            // informing remote about new swarm neighbor
+            for i in 0u8..64 {
+                if !senders.contains_key(&i) {
+                    senders.insert(i, snd);
+                    receivers.insert(i, recv);
+                    // TODO: define a preamble containing i and some recognizable pattern
+                    // in order to be sent in newly defined channel
+                    let bytes = swarm_name.as_bytes();
+                    let ciphered = session_key.encrypt(&bytes);
+                    let _send_result = socket.send(&ciphered).await;
+                    break;
+                }
+            }
+        }
         if let Ok(token_msg) = token_reciever.try_recv() {
             match token_msg {
                 Token::Provision(count) => {
@@ -129,50 +161,55 @@ async fn race_tasks(
                     // buf = BytesMut::zeroed(1100);
                     if let Ok(deciph) = decr_res {
                         // println!("Decrypted: {:?}", deciph);
-                        let deciph = Bytes::from(deciph);
-                        let mut byte_iterator = deciph.into_iter();
-                        let first_byte = byte_iterator.next().unwrap();
-                        let (id, deciphered) = if first_byte & 0b1_111_0000 == 240 {
-                            (byte_iterator.next().unwrap(), byte_iterator.collect())
+                        // let deciph = Bytes::from(deciph);
+                        // let mut byte_iterator = deciph.into_iter();
+                        // let dgram_header = byte_iterator.next().unwrap();
+                        let dgram_header = deciph.first().unwrap();
+                        let id = dgram_header & 0b00111111;
+                        if dgram_header & 0b11000000 == 192 {
+                            // TODO: broadcast
+                            println!("received a broadcast");
+                        } else if dgram_header & 0b11000000 == 128 {
+                            // TODO: multicast
+                            println!("received a multicast");
+                        } else if dgram_header & 0b11000000 == 64 {
+                            // TODO: unicast
+                            println!("received a unicast");
                         } else {
-                            let mut second = vec![first_byte];
-                            for bte in byte_iterator {
-                                second.push(bte);
-                            }
-                            (0, second.into_iter().collect())
-                        };
-                        // let deciphered = byte_iterator.collect();
-                        // println!("Decrypted msg: {:?}", deciphered);
-                        if let Ok(message) = bytes_to_message(&deciphered) {
-                            // println!("decode OK: {:?}", message);
-                            if let Some(sender) = senders.get(&id) {
-                                // if message.is_bye() {
-                                //     println!("Sending: {:?}", message);
-                                // }
-                                let _send_result = sender.send(message);
-                                if _send_result.is_err() {
-                                    println!("send result2: {:?}", _send_result);
+                            // TODO: regular message
+                            let deciphered = &deciph[1..];
+                            // println!("received a regular message: {:?}", deciphered);
+                            if let Ok(message) = bytes_to_message(deciphered) {
+                                // println!("decode OK: {:?}", message);
+                                if let Some(sender) = senders.get(&id) {
+                                    let _send_result = sender.send(message);
+                                    if _send_result.is_err() {
+                                        // TODO: if failed maybe we are no longer interested?
+                                        // Maybe send back a bye if possible?
+                                        // Remove given Sender/Receiver pair
+                                        println!("send result2: {:?}", _send_result);
+                                    }
+                                } else {
+                                    // TODO: maybe we should instantiate a new
+                                    // Neighbor for a new swarm?
+                                    // For this we need Sender<Subscription> ?
+                                    println!("Did not find sender for {}", id);
                                 }
                             } else {
-                                println!("Did not find sender for {}", id);
+                                println!("Failed to decode incoming stream");
                             }
-                        } else {
-                            println!("Failed to decode incoming stream");
                         }
                     } else {
                         println!("Failed to decipher incoming stream {}", count);
                     }
                 }
-                // } else {
-                //     println!("SRCV Peeked != recv");
-                // }
             } else {
                 println!("SRCV Unable to recv supposedly ready data");
             }
         } else {
-            let (_id, bytes) = result.unwrap();
-            let ciphered = Bytes::from(session_key.encrypt(&bytes));
-            let len = 42 + ciphered.len() as u64;
+            let bytes = result.unwrap();
+            let ciphered = session_key.encrypt(&bytes);
+            let len = 43 + ciphered.len() as u64;
             if len <= available_tokens {
                 let _send_result = socket.send(&ciphered).await;
                 // available_tokens -= len;
@@ -213,6 +250,7 @@ pub async fn serve_socket(
     send_recv_pairs: Vec<(Sender<Message>, Receiver<Message>)>,
     token_sender: Sender<Token>,
     token_reciever: Receiver<Token>,
+    extend_receiver: Receiver<(String, Sender<Message>, Receiver<Message>)>,
 ) {
     println!("SRVC Racing tasks");
     race_tasks(
@@ -221,6 +259,7 @@ pub async fn serve_socket(
         send_recv_pairs,
         token_sender,
         token_reciever,
+        extend_receiver,
     )
     .await;
     println!("SRVC Racing tasks over");

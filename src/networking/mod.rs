@@ -79,6 +79,7 @@ pub async fn run_networking_tasks(
     let mut swarm_names = vec![];
     sub_recv_one =
         collect_subscribed_swarm_names(&mut swarm_names, sub_send_two.clone(), sub_recv_one).await;
+    swarm_names.sort();
     spawn(run_client(
         swarm_names,
         sub_send_two.clone(),

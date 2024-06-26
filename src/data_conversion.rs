@@ -21,9 +21,9 @@ use swarm_consensus::PortAllocationRule;
 use swarm_consensus::SwarmID;
 use swarm_consensus::SwarmTime;
 
-use bytes::BufMut;
-use bytes::Bytes;
-use bytes::BytesMut;
+// use bytes::BufMut;
+// use bytes::Bytes;
+// use bytes::BytesMut;
 use std::net::IpAddr;
 
 // 123456789012345678901234567890123456789012345678
@@ -66,7 +66,7 @@ use std::net::IpAddr;
 // Since having a single Swarm is expected to be an extreme rarity, this change should
 // get implemented soon.
 
-pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
+pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
     // println!("Bytes to message: {:?}", bytes);
     // println!("decoding: {:#08b} {:?}", bytes[0], bytes);
     let bytes_len = bytes.len();
@@ -181,7 +181,7 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
                 NeighborRequest::BlockRequest(count, Box::new(data))
             }
             252 => {
-                let net_set = parse_network_settings(bytes.slice(data_idx + 1..bytes_len));
+                let net_set = parse_network_settings(&bytes[data_idx + 1..bytes_len]);
                 NeighborRequest::ForwardConnectRequest(net_set)
             }
             251 => {
@@ -194,7 +194,7 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
                 g_id += ((bytes[data_idx + 7]) as u64) << 16;
                 g_id += ((bytes[data_idx + 8]) as u64) << 8;
                 g_id += (bytes[data_idx + 9]) as u64;
-                let net_set = parse_network_settings(bytes.slice(data_idx + 10..bytes_len));
+                let net_set = parse_network_settings(&bytes[data_idx + 10..bytes_len]);
                 NeighborRequest::ConnectRequest(id, GnomeId(g_id), net_set)
             }
             250 => NeighborRequest::SwarmSyncRequest,
@@ -263,7 +263,7 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
                 NeighborResponse::Block(BlockID(b_id), Data(data))
             }
             252 => {
-                let net_set = parse_network_settings(bytes.slice(data_idx + 1..bytes_len));
+                let net_set = parse_network_settings(&bytes[data_idx + 1..bytes_len]);
                 NeighborResponse::ForwardConnectResponse(net_set)
             }
             251 => NeighborResponse::ForwardConnectFailed,
@@ -273,7 +273,7 @@ pub fn bytes_to_message(bytes: &Bytes) -> Result<Message, ConversionError> {
             }
             249 => {
                 let id = bytes[data_idx + 1];
-                let net_set = parse_network_settings(bytes.slice(data_idx + 2..bytes_len));
+                let net_set = parse_network_settings(&bytes[data_idx + 2..bytes_len]);
                 NeighborResponse::ConnectResponse(id, net_set)
             }
             248 => {
@@ -390,167 +390,203 @@ impl fmt::Display for ConversionError {
 
 impl Error for ConversionError {}
 
-pub fn message_to_bytes(msg: Message) -> Bytes {
+fn put_u16(vec: &mut Vec<u8>, value: u16) {
+    for a_byte in value.to_be_bytes() {
+        vec.push(a_byte);
+    }
+}
+fn put_u32(vec: &mut Vec<u8>, value: u32) {
+    for a_byte in value.to_be_bytes() {
+        vec.push(a_byte);
+    }
+}
+fn put_u64(vec: &mut Vec<u8>, value: u64) {
+    for a_byte in value.to_be_bytes() {
+        vec.push(a_byte);
+    }
+}
+pub fn message_to_bytes(msg: Message) -> Vec<u8> {
     // println!("Message to bytes: {:?}", msg);
-    let mut bytes = BytesMut::with_capacity(1033);
+    let mut bytes = Vec::with_capacity(1033);
     let nhood = msg.neighborhood.0;
     if nhood > 15 {
         panic!("Can't handle this!");
     }
-    bytes.put_u8(nhood);
-    bytes.put_u32(msg.swarm_time.0);
+    bytes.push(nhood);
+    put_u32(&mut bytes, msg.swarm_time.0);
+    // bytes.append(&mut msg.swarm_time.to_bytes());
 
     let mut block_id_inserted = false;
     if let Header::Block(block_id) = msg.header {
         bytes[0] |= 0b1_000_0000;
-        bytes.put_u32(block_id.0);
+        put_u32(&mut bytes, block_id.0);
         block_id_inserted = true;
     }
     bytes[0] |= match msg.payload {
         Payload::KeepAlive(bandwith) => {
-            bytes.put_u64(bandwith);
+            put_u64(&mut bytes, bandwith);
+            // bytes.put_u64(bandwith);
             0b0_000_0000
         }
         Payload::Unicast(cid, data) => {
             println!("Unicast into bytes");
-            bytes.put_u8(cid.0);
-            bytes.put_u32(data.0);
+            bytes.push(cid.0);
+            put_u32(&mut bytes, data.0);
+            // bytes.put_u32(data.0);
             0b0_101_0000
         }
         Payload::Multicast(mid, data) => {
-            bytes.put_u8(mid.0);
-            bytes.put_u32(data.0);
+            bytes.push(mid.0);
+            put_u32(&mut bytes, data.0);
+            // bytes.put_u32(data.0);
             0b0_110_0000
         }
         Payload::Broadcast(bid, data) => {
-            bytes.put_u8(bid.0);
-            bytes.put_u32(data.0);
+            bytes.push(bid.0);
+            put_u32(&mut bytes, data.0);
+            // bytes.put_u32(data.0);
             0b0_011_0000
         }
         Payload::Bye => {
-            bytes.put_u32(std::u32::MAX);
+            bytes.push(255);
+            bytes.push(255);
+            bytes.push(255);
+            bytes.push(255);
+            // bytes.put_u32(std::u32::MAX);
             0b0_111_0000
         }
         Payload::Reconfigure(config) => {
             match config {
                 Configuration::StartBroadcast(g_id, c_id) => {
-                    bytes.put_u8(254);
-                    bytes.put_u64(g_id.0);
-                    bytes.put_u8(c_id.0);
+                    bytes.push(254);
+                    put_u64(&mut bytes, g_id.0);
+                    // bytes.put_u64(g_id.0);
+                    bytes.push(c_id.0);
                 }
                 Configuration::ChangeBroadcastOrigin(g_id, c_id) => {
-                    bytes.put_u8(253);
-                    bytes.put_u64(g_id.0);
-                    bytes.put_u8(c_id.0);
+                    bytes.push(253);
+                    put_u64(&mut bytes, g_id.0);
+                    // bytes.put_u64(g_id.0);
+                    bytes.push(c_id.0);
                 }
                 Configuration::EndBroadcast(c_id) => {
-                    bytes.put_u8(252);
-                    bytes.put_u8(c_id.0);
+                    bytes.push(252);
+                    bytes.push(c_id.0);
                 }
                 Configuration::StartMulticast(g_id, c_id) => {
-                    bytes.put_u8(251);
-                    bytes.put_u64(g_id.0);
-                    bytes.put_u8(c_id.0);
+                    bytes.push(251);
+                    put_u64(&mut bytes, g_id.0);
+                    // bytes.put_u64(g_id.0);
+                    bytes.push(c_id.0);
                 }
                 Configuration::ChangeMulticastOrigin(g_id, c_id) => {
-                    bytes.put_u8(250);
-                    bytes.put_u64(g_id.0);
-                    bytes.put_u8(c_id.0);
+                    bytes.push(250);
+                    put_u64(&mut bytes, g_id.0);
+                    // bytes.put_u64(g_id.0);
+                    bytes.push(c_id.0);
                 }
                 Configuration::EndMulticast(c_id) => {
-                    bytes.put_u8(249);
-                    bytes.put_u8(c_id.0);
+                    bytes.push(249);
+                    bytes.push(c_id.0);
                 }
                 Configuration::CreateGroup => {
-                    bytes.put_u8(248);
+                    bytes.push(248);
                     // TODO
                     // bytes.put_u8(c_id.0);
                 }
                 Configuration::DeleteGroup => {
-                    bytes.put_u8(247);
+                    bytes.push(247);
                     // TODO
                     // bytes.put_u8(c_id.0);
                 }
                 Configuration::ModifyGroup => {
-                    bytes.put_u8(246);
+                    bytes.push(246);
                     // TODO
                     // bytes.put_u8(c_id.0);
                 }
                 Configuration::UserDefined(id) => {
-                    bytes.put_u8(id);
+                    bytes.push(id);
                     // TODO
                     // bytes.put_u8(c_id.0);
                 }
             }
-            bytes.put_u32(config.as_u32());
+            put_u32(&mut bytes, config.as_u32());
+            // bytes.put_u32(config.as_u32());
             0b0_111_0000
         }
         Payload::Block(block_id, data) => {
             if !block_id_inserted {
-                bytes.put_u32(block_id.0);
+                put_u32(&mut bytes, block_id.0);
+                // bytes.put_u32(block_id.0);
             };
-            bytes.put_u32(data.0);
+            put_u32(&mut bytes, data.0);
+            // bytes.put_u32(data.0);
             0b0_100_0000
         }
         Payload::Response(neighbor_response) => {
             match neighbor_response {
                 NeighborResponse::Listing(count, data) => {
-                    bytes.put_u8(255);
-                    bytes.put_u8(count);
+                    bytes.push(255);
+                    bytes.push(count);
                     for chunk in data.deref() {
-                        bytes.put_u32(chunk.0);
+                        put_u32(&mut bytes, chunk.0);
+                        // bytes.put_u32(chunk.0);
                     }
                 }
                 NeighborResponse::Unicast(swarm_id, cast_id) => {
-                    bytes.put_u8(254);
-                    bytes.put_u8(swarm_id.0);
-                    bytes.put_u8(cast_id.0);
+                    bytes.push(254);
+                    bytes.push(swarm_id.0);
+                    bytes.push(cast_id.0);
                 }
                 NeighborResponse::Block(b_id, data) => {
-                    bytes.put_u8(253);
-                    bytes.put_u32(b_id.0);
-                    bytes.put_u32(data.0);
+                    bytes.push(253);
+                    put_u32(&mut bytes, b_id.0);
+                    // bytes.put_u32(b_id.0);
+                    put_u32(&mut bytes, data.0);
+                    // bytes.put_u32(data.0);
                 }
                 NeighborResponse::ForwardConnectResponse(network_settings) => {
-                    bytes.put_u8(252);
+                    bytes.push(252);
                     insert_network_settings(&mut bytes, network_settings);
                 }
                 NeighborResponse::ForwardConnectFailed => {
-                    bytes.put_u8(251);
+                    bytes.push(251);
                 }
                 NeighborResponse::AlreadyConnected(id) => {
-                    bytes.put_u8(250);
-                    bytes.put_u8(id);
+                    bytes.push(250);
+                    bytes.push(id);
                 }
                 NeighborResponse::ConnectResponse(id, network_settings) => {
-                    bytes.put_u8(249);
-                    bytes.put_u8(id);
+                    bytes.push(249);
+                    bytes.push(id);
                     insert_network_settings(&mut bytes, network_settings);
                 }
                 NeighborResponse::SwarmSync(chill_phase, bcasts, mcasts) => {
-                    bytes.put_u8(248);
-                    bytes.put_u8(chill_phase);
-                    bytes.put_u8(bcasts.len() as u8);
-                    bytes.put_u8(mcasts.len() as u8);
+                    bytes.push(248);
+                    bytes.push(chill_phase);
+                    bytes.push(bcasts.len() as u8);
+                    bytes.push(mcasts.len() as u8);
                     for bcast in bcasts {
-                        bytes.put_u8(bcast.0);
+                        bytes.push(bcast.0);
                     }
                     for mcast in mcasts {
-                        bytes.put_u8(mcast.0);
+                        bytes.push(mcast.0);
                     }
                 }
-                NeighborResponse::Subscribed(is_bcast, cast_id, origin_id, _source_opt) => {
-                    bytes.put_u8(247);
+                NeighborResponse::Subscribed(is_bcast, _cast_id, origin_id, _source_opt) => {
+                    bytes.push(247);
                     if is_bcast {
-                        bytes.put_u8(1);
+                        bytes.push(1);
                     } else {
-                        bytes.put_u8(0);
+                        bytes.push(0);
                     }
-                    bytes.put_u64(origin_id.0);
+                    put_u64(&mut bytes, origin_id.0);
+                    // bytes.put_u64(origin_id.0);
                 }
                 NeighborResponse::CustomResponse(id, data) => {
-                    bytes.put_u8(id);
-                    bytes.put_u32(data.0);
+                    bytes.push(id);
+                    put_u32(&mut bytes, data.0);
+                    // bytes.put_u32(data.0);
                 } // _ => todo!(),
             }
             0b0_010_0000
@@ -558,78 +594,86 @@ pub fn message_to_bytes(msg: Message) -> Bytes {
         Payload::Request(nr) => {
             match nr {
                 NeighborRequest::ListingRequest(st) => {
-                    bytes.put_u8(255);
-                    bytes.put_u32(st.0);
+                    bytes.push(255);
+                    put_u32(&mut bytes, st.0);
+                    // bytes.put_u32(st.0);
                 }
                 NeighborRequest::UnicastRequest(swarm_id, cast_ids) => {
-                    bytes.put_u8(254);
-                    bytes.put_u8(swarm_id.0);
+                    bytes.push(254);
+                    bytes.push(swarm_id.0);
                     for c_id in cast_ids.deref() {
-                        bytes.put_u8(c_id.0);
+                        bytes.push(c_id.0);
                     }
                 }
                 NeighborRequest::BlockRequest(count, data) => {
-                    bytes.put_u8(253);
-                    bytes.put_u8(count);
+                    bytes.push(253);
+                    bytes.push(count);
                     for chunk in data.deref() {
-                        bytes.put_u32(chunk.0);
+                        put_u32(&mut bytes, chunk.0);
+                        // bytes.put_u32(chunk.0);
                     }
                 }
                 NeighborRequest::ForwardConnectRequest(network_settings) => {
-                    bytes.put_u8(252);
+                    bytes.push(252);
                     insert_network_settings(&mut bytes, network_settings);
                 }
                 NeighborRequest::ConnectRequest(id, gnome_id, network_settings) => {
-                    bytes.put_u8(251);
-                    bytes.put_u8(id);
-                    bytes.put_u64(gnome_id.0);
+                    bytes.push(251);
+                    bytes.push(id);
+                    put_u64(&mut bytes, gnome_id.0);
+                    // bytes.put_u64(gnome_id.0);
                     insert_network_settings(&mut bytes, network_settings);
                 }
                 NeighborRequest::SwarmSyncRequest => {
-                    bytes.put_u8(250);
+                    bytes.push(250);
                 }
                 NeighborRequest::SubscribeRequest(is_bcast, cast_id) => {
-                    bytes.put_u8(249);
+                    bytes.push(249);
                     if is_bcast {
-                        bytes.put_u8(1);
+                        bytes.push(1);
                     } else {
-                        bytes.put_u8(0);
+                        bytes.push(0);
                     }
-                    bytes.put_u8(cast_id.0);
+                    bytes.push(cast_id.0);
                 }
                 NeighborRequest::CustomRequest(id, data) => {
-                    bytes.put_u8(id);
-                    bytes.put_u32(data.0);
+                    bytes.push(id);
+                    put_u32(&mut bytes, data.0);
+                    // bytes.put_u32(data.0);
                 }
             }
             0b0_001_0000
         }
     };
     // println!("encoded: {:#08b} {:?}", bytes[0], bytes);
-    bytes.split().into()
+    // bytes.split().into()
+    bytes
 }
 
-fn insert_network_settings(bytes: &mut BytesMut, network_settings: NetworkSettings) {
-    bytes.put_u8(network_settings.nat_type as u8);
-    bytes.put_u16(network_settings.pub_port);
-    bytes.put_u8(network_settings.port_allocation.0 as u8);
-    bytes.put_i8(network_settings.port_allocation.1);
+fn insert_network_settings(bytes: &mut Vec<u8>, network_settings: NetworkSettings) {
+    bytes.push(network_settings.nat_type as u8);
+    put_u16(bytes, network_settings.pub_port);
+    // bytes.put_u16(network_settings.pub_port);
+    bytes.push(network_settings.port_allocation.0 as u8);
+    // TODO: fix this!
+    // bytes.put_i8(network_settings.port_allocation.1);
+    bytes.push(network_settings.port_allocation.1 as u8);
     let pub_ip = network_settings.pub_ip;
     match pub_ip {
         std::net::IpAddr::V4(ip4) => {
             for b in ip4.octets() {
-                bytes.put_u8(b);
+                bytes.push(b);
             }
         }
         std::net::IpAddr::V6(ip4) => {
             for b in ip4.octets() {
-                bytes.put_u8(b);
+                bytes.push(b);
             }
         }
     }
 }
-fn parse_network_settings(bytes: Bytes) -> NetworkSettings {
-    let mut bytes_iter = bytes.into_iter();
+fn parse_network_settings(bytes: &[u8]) -> NetworkSettings {
+    let mut bytes_iter = bytes.iter();
     let raw_nat_type = bytes_iter.next().unwrap();
     let nat_type = match raw_nat_type {
         0 => Nat::Unknown,
@@ -646,8 +690,8 @@ fn parse_network_settings(bytes: Bytes) -> NetworkSettings {
     };
 
     let mut port_bytes: [u8; 2] = [0, 0];
-    port_bytes[0] = bytes_iter.next().unwrap();
-    port_bytes[1] = bytes_iter.next().unwrap();
+    port_bytes[0] = *bytes_iter.next().unwrap();
+    port_bytes[1] = *bytes_iter.next().unwrap();
     let pub_port: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
 
     let port_allocation_rule = match bytes_iter.next().unwrap() {
@@ -657,14 +701,17 @@ fn parse_network_settings(bytes: Bytes) -> NetworkSettings {
         4 => PortAllocationRule::PortSensitive,
         _ => PortAllocationRule::Random,
     };
-    let delta_port = bytes_iter.next().unwrap() as i8;
+    let delta_port = *bytes_iter.next().unwrap() as i8;
     // port_bytes[0] = bytes_iter.next().unwrap();
     // port_bytes[1] = bytes_iter.next().unwrap();
     // let port_range_min: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
     // port_bytes[0] = bytes_iter.next().unwrap();
     // port_bytes[1] = bytes_iter.next().unwrap();
     // let port_range_max: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
-    let ip_bytes: Vec<u8> = bytes_iter.collect();
+    let mut ip_bytes: Vec<u8> = vec![];
+    for a_byte in bytes_iter {
+        ip_bytes.push(*a_byte);
+    }
     let bytes_len = ip_bytes.len();
     let pub_ip = if bytes_len == 4 {
         let array: [u8; 4] = ip_bytes.try_into().unwrap();

@@ -4,7 +4,7 @@ use crate::networking::stun::{
 use crate::networking::subscription::Subscription;
 use async_std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use async_std::task::{sleep, yield_now};
-use bytes::{BufMut, BytesMut};
+// use bytes::{BufMut, BytesMut};
 use futures::{
     future::FutureExt, // for `.fuse()`
     pin_mut,
@@ -53,9 +53,11 @@ pub async fn send_subscribed_swarm_names(
     // let mut buf = BytesMut::with_capacity(1030);
     let mut buf = Vec::new();
     for name in names {
-        buf.put(name.as_bytes());
+        for a_byte in name.as_bytes() {
+            buf.push(*a_byte);
+        }
         // TODO split with some other value
-        buf.put_u8(255);
+        buf.push(255);
     }
     // let bytes = buf.col();
     println!("After split: {:?}", &buf);
@@ -104,7 +106,7 @@ pub async fn receive_remote_swarm_names(
 // Once networking task receives such a requests it installs provided Receivers and
 // Senders into hashmaps.
 // Once installed networking task sends a prepared message to it's remote.
-// That message should contain means to identify for which Swarm this UPD channel
+// That message should contain means to identify for which Swarm this UDP channel
 // has been created and also some fixed value to indicate we want remote to
 // create a corresponding pair.
 // Fixed value serves the case when for some reason remote decided to close existing
@@ -120,6 +122,7 @@ pub fn create_a_neighbor_for_each_swarm(
     sender: Sender<Subscription>,
     remote_gnome_id: GnomeId,
     ch_pairs: &mut Vec<(Sender<Message>, Receiver<Message>)>,
+    shared_sender: Sender<(String, Sender<Message>, Receiver<Message>)>,
 ) {
     // println!("Neighbor: {}", neighbor_id);
     // println!("komon names: {:?}", common_names);
@@ -191,7 +194,7 @@ pub async fn wait_for_bytes(socket: &UdpSocket) {
     loop {
         let recv_res = socket.recv_from(&mut bytes).await;
         // println!("Recv: {:?}", recv_res);
-        if let Ok((count, from)) = recv_res {
+        if let Ok((count, _from)) = recv_res {
             // println!("Recv: {} from {:?}", bytes[0], from);
             if count == 1 && bytes[0] == 1 {
                 return;

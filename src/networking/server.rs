@@ -52,6 +52,7 @@ pub async fn run_server(
             collect_subscribed_swarm_names(&mut swarm_names, sub_sender.clone(), sub_receiver)
                 .await;
 
+        swarm_names.sort();
         spawn(prepare_and_serve(
             dedicated_socket,
             remote_gnome_id,
@@ -222,11 +223,18 @@ async fn prepare_and_serve(
 
     let mut common_names = vec![];
 
+    send_subscribed_swarm_names(&dedicated_socket, &swarm_names).await;
     distil_common_names(&mut common_names, swarm_names, remote_names);
-    send_subscribed_swarm_names(&dedicated_socket, &common_names).await;
 
+    let (shared_sender, swarm_extend_receiver) = channel();
     let mut ch_pairs = vec![];
-    create_a_neighbor_for_each_swarm(common_names, sub_sender, remote_gnome_id, &mut ch_pairs);
+    create_a_neighbor_for_each_swarm(
+        common_names,
+        sub_sender,
+        remote_gnome_id,
+        &mut ch_pairs,
+        shared_sender,
+    );
 
     let (token_send, token_recv) = channel();
     let (token_send_two, token_recv_two) = channel();
@@ -237,6 +245,7 @@ async fn prepare_and_serve(
         ch_pairs,
         token_send_two,
         token_recv,
+        swarm_extend_receiver,
     )
     .await;
 }

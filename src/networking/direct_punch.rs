@@ -147,6 +147,7 @@ async fn socket_maintainer(
             // TODO: discover with stun server
             println!("recvd other!");
             let _ = send_my.send(my_settings);
+            swarm_names.sort();
             spawn(punch_and_communicate(
                 socket,
                 bind_addr,

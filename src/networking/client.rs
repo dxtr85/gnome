@@ -283,9 +283,16 @@ pub async fn prepare_and_serve(
         println!("No common interests with {}", remote_gnome_id);
         return;
     }
+    let (shared_sender, swarm_extend_receiver) = channel();
 
     let mut ch_pairs = vec![];
-    create_a_neighbor_for_each_swarm(common_names, sender, remote_gnome_id, &mut ch_pairs);
+    create_a_neighbor_for_each_swarm(
+        common_names,
+        sender,
+        remote_gnome_id,
+        &mut ch_pairs,
+        shared_sender,
+    );
 
     // spawn a task to serve socket
     let (token_send, token_recv) = channel();
@@ -297,6 +304,7 @@ pub async fn prepare_and_serve(
         ch_pairs,
         token_send_two,
         token_recv,
+        swarm_extend_receiver,
     )
     .await;
 }
