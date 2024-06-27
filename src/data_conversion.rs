@@ -16,6 +16,7 @@ use swarm_consensus::NeighborResponse;
 use swarm_consensus::Neighborhood;
 use swarm_consensus::NetworkSettings;
 // use swarm_consensus::NetworkSettings;
+use swarm_consensus::CastMessage;
 use swarm_consensus::Payload;
 use swarm_consensus::PortAllocationRule;
 use swarm_consensus::SwarmID;
@@ -355,6 +356,26 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
         header,
         payload,
     })
+}
+pub fn bytes_to_cast_message(bytes: &[u8]) -> Result<CastMessage, ConversionError> {
+    let dgram_header = bytes[0];
+    let c_id = CastID(bytes[1]);
+    let data = Data(as_u32_be(&[bytes[2], bytes[3], bytes[4], bytes[5]]));
+    if dgram_header & 0b11000000 == 192 {
+        // TODO: broadcast
+        // println!("received a broadcast");
+        Ok(CastMessage::new_broadcast(c_id, data))
+    } else if dgram_header & 0b11000000 == 128 {
+        // TODO: multicast
+        println!("received a multicast");
+        Ok(CastMessage::new_multicast(c_id, data))
+    } else if dgram_header & 0b11000000 == 64 {
+        // TODO: unicast
+        println!("received a unicast");
+        Ok(CastMessage::new_unicast(c_id, data))
+    } else {
+        Err(ConversionError)
+    }
 }
 
 fn as_u32_be(array: &[u8; 4]) -> u32 {

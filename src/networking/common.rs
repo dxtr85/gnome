@@ -15,7 +15,8 @@ use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
 use swarm_consensus::{
-    GnomeId, Message, Nat, Neighbor, NetworkSettings, PortAllocationRule, SwarmTime,
+    CastMessage, GnomeId, Message, Nat, Neighbor, NetworkSettings, PortAllocationRule, SwarmTime,
+    WrappedMessage,
 };
 
 pub async fn collect_subscribed_swarm_names(
@@ -121,19 +122,29 @@ pub fn create_a_neighbor_for_each_swarm(
     common_names: Vec<String>,
     sender: Sender<Subscription>,
     remote_gnome_id: GnomeId,
-    ch_pairs: &mut Vec<(Sender<Message>, Receiver<Message>)>,
-    shared_sender: Sender<(String, Sender<Message>, Receiver<Message>)>,
+    ch_pairs: &mut Vec<(
+        Sender<Message>,
+        Sender<CastMessage>,
+        Receiver<WrappedMessage>,
+    )>,
+    shared_sender: Sender<(
+        String,
+        Sender<Message>,
+        Sender<CastMessage>,
+        Receiver<WrappedMessage>,
+    )>,
 ) {
     // println!("Neighbor: {}", neighbor_id);
     // println!("komon names: {:?}", common_names);
     for name in common_names {
         let (s1, r1) = channel();
         let (s2, r2) = channel();
+        let (s3, r3) = channel();
         let neighbor =
-            Neighbor::from_id_channel_time(remote_gnome_id, r2, s1, SwarmTime(0), SwarmTime(7));
+            Neighbor::from_id_channel_time(remote_gnome_id, r1, r2, s3, SwarmTime(0), SwarmTime(7));
         println!("Request include neighbor");
         let _ = sender.send(Subscription::IncludeNeighbor(name, neighbor));
-        ch_pairs.push((s2, r1));
+        ch_pairs.push((s1, s2, r3));
     }
 }
 // We need to write a procedure that establishes

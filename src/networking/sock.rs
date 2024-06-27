@@ -1,4 +1,5 @@
 use crate::crypto::SessionKey;
+use crate::data_conversion::bytes_to_cast_message;
 use crate::data_conversion::bytes_to_message;
 use crate::data_conversion::message_to_bytes;
 use crate::networking::token::Token;
@@ -14,7 +15,7 @@ use futures::{
 };
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
-use swarm_consensus::Message;
+use swarm_consensus::{CastMessage, Message, WrappedMessage};
 
 async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<Vec<u8>, String> {
     // println!("read_bytes_from_socket");
@@ -36,7 +37,7 @@ async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<Vec<u8>, String> {
 }
 
 async fn read_bytes_from_local_stream(
-    receivers: &mut HashMap<u8, Receiver<Message>>,
+    receivers: &mut HashMap<u8, Receiver<WrappedMessage>>,
 ) -> Result<Vec<u8>, String> {
     // println!("read_bytes_from_local_stream");
     loop {
@@ -45,24 +46,37 @@ async fn read_bytes_from_local_stream(
             if let Ok(message) = next_option {
                 // TODO: here we need to add a Datagram header
                 // indicating type of message and id
-                let dgram_header = id
-                    + if message.is_unicast() {
-                        64
-                    } else if message.is_multicast() {
-                        128
-                    } else if message.is_broadcast() {
-                        192
-                    } else {
-                        0
-                    };
-                let mut bytes = message_to_bytes(message);
-                let mut merged_bytes = Vec::with_capacity(bytes.len() + 1);
-                merged_bytes.push(dgram_header);
-                merged_bytes.append(&mut bytes);
+                let mut dgram_header = *id;
+                match message {
+                    WrappedMessage::Cast(c_msg) => {
+                        dgram_header += if c_msg.is_unicast() {
+                            64
+                        } else if c_msg.is_multicast() {
+                            128
+                        } else {
+                            192
+                        };
+                        let data = c_msg.data();
+                        let c_id = c_msg.id();
+                        let mut merged_bytes = Vec::with_capacity(6);
+                        merged_bytes.push(dgram_header);
+                        merged_bytes.push(c_id.0);
+                        for a_byte in data.0.to_be_bytes() {
+                            merged_bytes.push(a_byte);
+                        }
+                        return Ok(merged_bytes);
+                    }
+                    WrappedMessage::Regular(message) => {
+                        let mut bytes = message_to_bytes(message);
+                        let mut merged_bytes = Vec::with_capacity(bytes.len() + 1);
+                        merged_bytes.push(dgram_header);
+                        merged_bytes.append(&mut bytes);
+                        return Ok(merged_bytes);
+                    }
+                }
                 // println!(">>>>> {:?}", bytes);
 
                 // if *id == 0 {
-                return Ok(merged_bytes);
                 // } else {
                 //     let mut extended_bytes = BytesMut::with_capacity(bytes.len() + 2);
                 //     extended_bytes.put_u8(240);
@@ -80,29 +94,38 @@ async fn read_bytes_from_local_stream(
 async fn race_tasks(
     session_key: SessionKey,
     socket: UdpSocket,
-    send_recv_pairs: Vec<(Sender<Message>, Receiver<Message>)>,
+    send_recv_pairs: Vec<(
+        Sender<Message>,
+        Sender<CastMessage>,
+        Receiver<WrappedMessage>,
+    )>,
     token_sender: Sender<Token>,
     token_reciever: Receiver<Token>,
-    extend_receiver: Receiver<(String, Sender<Message>, Receiver<Message>)>,
+    extend_receiver: Receiver<(
+        String,
+        Sender<Message>,
+        Sender<CastMessage>,
+        Receiver<WrappedMessage>,
+    )>,
 ) {
-    let mut senders: HashMap<u8, Sender<Message>> = HashMap::new();
-    let mut receivers: HashMap<u8, Receiver<Message>> = HashMap::new();
+    let mut senders: HashMap<u8, (Sender<Message>, Sender<CastMessage>)> = HashMap::new();
+    let mut receivers: HashMap<u8, Receiver<WrappedMessage>> = HashMap::new();
     let min_tokens_threshold: u64 = 128;
     let mut available_tokens: u64 = min_tokens_threshold;
     // println!("racing: {:?}", send_recv_pairs);
-    for (i, (sender, receiver)) in send_recv_pairs.into_iter().enumerate() {
-        senders.insert(i as u8, sender);
+    for (i, (sender, c_sender, receiver)) in send_recv_pairs.into_iter().enumerate() {
+        senders.insert(i as u8, (sender, c_sender));
         receivers.insert(i as u8, receiver);
     }
     let mut buf = [0u8; 1100];
     // if let Some((sender, mut receiver)) = send_recv_pairs.pop() {
     loop {
-        if let Ok((swarm_name, snd, recv)) = extend_receiver.try_recv() {
+        if let Ok((swarm_name, snd, cast_snd, recv)) = extend_receiver.try_recv() {
             //TODO: extend senders and receivers, force send message
             // informing remote about new swarm neighbor
             for i in 0u8..64 {
                 if !senders.contains_key(&i) {
-                    senders.insert(i, snd);
+                    senders.insert(i, (snd, cast_snd));
                     receivers.insert(i, recv);
                     // TODO: define a preamble containing i and some recognizable pattern
                     // in order to be sent in newly defined channel
@@ -142,7 +165,7 @@ async fn race_tasks(
         if let Err(_err) = result {
             println!("SRVC Error received: {:?}", _err);
             // TODO: should end serving this socket
-            for sender in senders.values() {
+            for (sender, _c_snd) in senders.values() {
                 let _send_result = sender.send(Message::bye());
             }
             break;
@@ -166,22 +189,13 @@ async fn race_tasks(
                         // let dgram_header = byte_iterator.next().unwrap();
                         let dgram_header = deciph.first().unwrap();
                         let id = dgram_header & 0b00111111;
-                        if dgram_header & 0b11000000 == 192 {
-                            // TODO: broadcast
-                            println!("received a broadcast");
-                        } else if dgram_header & 0b11000000 == 128 {
-                            // TODO: multicast
-                            println!("received a multicast");
-                        } else if dgram_header & 0b11000000 == 64 {
-                            // TODO: unicast
-                            println!("received a unicast");
-                        } else {
-                            // TODO: regular message
-                            let deciphered = &deciph[1..];
-                            // println!("received a regular message: {:?}", deciphered);
-                            if let Ok(message) = bytes_to_message(deciphered) {
-                                // println!("decode OK: {:?}", message);
-                                if let Some(sender) = senders.get(&id) {
+                        if let Some((sender, cast_sender)) = senders.get(&id) {
+                            if dgram_header & 0b11000000 == 0 {
+                                // TODO: regular message
+                                let deciphered = &deciph[1..];
+                                // println!("received a regular message: {:?}", deciphered);
+                                if let Ok(message) = bytes_to_message(deciphered) {
+                                    // println!("decode OK: {:?}", message);
                                     let _send_result = sender.send(message);
                                     if _send_result.is_err() {
                                         // TODO: if failed maybe we are no longer interested?
@@ -190,14 +204,25 @@ async fn race_tasks(
                                         println!("send result2: {:?}", _send_result);
                                     }
                                 } else {
-                                    // TODO: maybe we should instantiate a new
-                                    // Neighbor for a new swarm?
-                                    // For this we need Sender<Subscription> ?
-                                    println!("Did not find sender for {}", id);
+                                    println!("Failed to decode incoming stream");
+                                }
+                            } else if let Ok(message) = bytes_to_cast_message(&deciph) {
+                                // println!("decode OK: {:?}", message);
+                                let _send_result = cast_sender.send(message);
+                                if _send_result.is_err() {
+                                    // TODO: if failed maybe we are no longer interested?
+                                    // Maybe send back a bye if possible?
+                                    // Remove given Sender/Receiver pair
+                                    println!("send result2: {:?}", _send_result);
                                 }
                             } else {
                                 println!("Failed to decode incoming stream");
                             }
+                        } else {
+                            // TODO: maybe we should instantiate a new
+                            // Neighbor for a new swarm?
+                            // For this we need Sender<Subscription> ?
+                            println!("Did not find sender for {}", id);
                         }
                     } else {
                         println!("Failed to decipher incoming stream {}", count);
@@ -247,10 +272,19 @@ async fn race_tasks(
 pub async fn serve_socket(
     session_key: SessionKey,
     socket: UdpSocket,
-    send_recv_pairs: Vec<(Sender<Message>, Receiver<Message>)>,
+    send_recv_pairs: Vec<(
+        Sender<Message>,
+        Sender<CastMessage>,
+        Receiver<WrappedMessage>,
+    )>,
     token_sender: Sender<Token>,
     token_reciever: Receiver<Token>,
-    extend_receiver: Receiver<(String, Sender<Message>, Receiver<Message>)>,
+    extend_receiver: Receiver<(
+        String,
+        Sender<Message>,
+        Sender<CastMessage>,
+        Receiver<WrappedMessage>,
+    )>,
 ) {
     println!("SRVC Racing tasks");
     race_tasks(
