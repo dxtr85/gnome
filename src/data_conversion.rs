@@ -146,75 +146,8 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
         Payload::Unicast(cid, data)
     } else if bytes[0] & 0b0_111_0000 == 16 {
         println!("len: {}", bytes_len);
-        let request_type: u8 = bytes[data_idx];
-        let nr = match request_type {
-            255 => {
-                let st_value: u32 = as_u32_be(&[
-                    bytes[data_idx + 1],
-                    bytes[data_idx + 2],
-                    bytes[data_idx + 3],
-                    bytes[data_idx + 4],
-                ]);
-                NeighborRequest::ListingRequest(SwarmTime(st_value))
-            }
-            254 => {
-                let swarm_id = SwarmID(bytes[data_idx + 1]);
-                let mut cast_ids = [CastID(0); 256];
-                // let mut inserted = 0;
-                for (inserted, c_id) in bytes[data_idx + 2..bytes_len].iter().enumerate() {
-                    cast_ids[inserted] = CastID(*c_id);
-                    // inserted += 1;
-                }
-                NeighborRequest::UnicastRequest(swarm_id, Box::new(cast_ids))
-            }
-            253 => {
-                let count = bytes[data_idx + 2];
-                let mut data = [BlockID(0); 128];
-                for i in 0..count as usize {
-                    let bid = as_u32_be(&[
-                        bytes[4 * i + data_idx + 3],
-                        bytes[4 * i + data_idx + 4],
-                        bytes[4 * i + data_idx + 5],
-                        bytes[4 * i + data_idx + 6],
-                    ]);
-                    data[i] = BlockID(bid);
-                }
-                NeighborRequest::BlockRequest(count, Box::new(data))
-            }
-            252 => {
-                let net_set = parse_network_settings(&bytes[data_idx + 1..bytes_len]);
-                NeighborRequest::ForwardConnectRequest(net_set)
-            }
-            251 => {
-                let id = bytes[data_idx + 1];
-                let mut g_id: u64 = ((bytes[data_idx + 2]) as u64) << 56;
-                g_id += ((bytes[data_idx + 3]) as u64) << 48;
-                g_id += ((bytes[data_idx + 4]) as u64) << 40;
-                g_id += ((bytes[data_idx + 5]) as u64) << 32;
-                g_id += ((bytes[data_idx + 6]) as u64) << 24;
-                g_id += ((bytes[data_idx + 7]) as u64) << 16;
-                g_id += ((bytes[data_idx + 8]) as u64) << 8;
-                g_id += (bytes[data_idx + 9]) as u64;
-                let net_set = parse_network_settings(&bytes[data_idx + 10..bytes_len]);
-                NeighborRequest::ConnectRequest(id, GnomeId(g_id), net_set)
-            }
-            250 => NeighborRequest::SwarmSyncRequest,
-            249 => {
-                let is_bcast = bytes[data_idx + 1] > 0;
-                let cast_id = CastID(bytes[data_idx + 2]);
-                NeighborRequest::SubscribeRequest(is_bcast, cast_id)
-            }
-            other => {
-                // TODO
-                let data: u32 = as_u32_be(&[
-                    bytes[data_idx + 2],
-                    bytes[data_idx + 3],
-                    bytes[data_idx + 4],
-                    bytes[data_idx + 5],
-                ]);
-                NeighborRequest::CustomRequest(other, Data(data))
-            }
-        };
+        // let request_type: u8 = bytes[data_idx];
+        let nr = bytes_to_neighbor_request(&bytes[data_idx..]);
         Payload::Request(nr)
     } else if bytes[0] & 0b0_111_0000 == 64 {
         // let bid: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
@@ -228,96 +161,7 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
         ]));
         Payload::Block(BlockID(bid), data)
     } else if bytes[0] & 0b0_111_0000 == 32 {
-        let response_type = bytes[data_idx];
-        let nr = match response_type {
-            255 => {
-                let count = bytes[data_idx + 1];
-                let mut data = vec![];
-                for i in 0..count as usize {
-                    let bid: u32 = as_u32_be(&[
-                        bytes[4 * i + data_idx + 2],
-                        bytes[4 * i + data_idx + 3],
-                        bytes[4 * i + data_idx + 4],
-                        bytes[4 * i + data_idx + 5],
-                    ]);
-                    data.push(BlockID(bid));
-                }
-                NeighborResponse::Listing(count, data)
-            }
-            254 => {
-                NeighborResponse::Unicast(SwarmID(bytes[data_idx + 1]), CastID(bytes[data_idx + 2]))
-            }
-            253 => {
-                let b_id: u32 = as_u32_be(&[
-                    bytes[data_idx + 1],
-                    bytes[data_idx + 2],
-                    bytes[data_idx + 3],
-                    bytes[data_idx + 4],
-                ]);
-
-                let data: u32 = as_u32_be(&[
-                    bytes[data_idx + 5],
-                    bytes[data_idx + 6],
-                    bytes[data_idx + 7],
-                    bytes[data_idx + 8],
-                ]);
-                NeighborResponse::Block(BlockID(b_id), Data(data))
-            }
-            252 => {
-                let net_set = parse_network_settings(&bytes[data_idx + 1..bytes_len]);
-                NeighborResponse::ForwardConnectResponse(net_set)
-            }
-            251 => NeighborResponse::ForwardConnectFailed,
-            250 => {
-                let id = bytes[data_idx + 1];
-                NeighborResponse::AlreadyConnected(id)
-            }
-            249 => {
-                let id = bytes[data_idx + 1];
-                let net_set = parse_network_settings(&bytes[data_idx + 2..bytes_len]);
-                NeighborResponse::ConnectResponse(id, net_set)
-            }
-            248 => {
-                let chill_phase = bytes[data_idx + 1];
-                let b_count = bytes[data_idx + 2];
-                let m_count = bytes[data_idx + 3];
-                let mut b_casts = vec![];
-                let mut m_casts = vec![];
-                let data_idx = data_idx + 4;
-                let mut i: usize = 0;
-                while i < b_count as usize {
-                    b_casts.push(CastID(bytes[data_idx + i]));
-                    i += 1;
-                }
-                let data_idx = data_idx + b_count as usize;
-                i = 0;
-                while i < m_count as usize {
-                    m_casts.push(CastID(bytes[data_idx + i]));
-                    i += 1;
-                }
-                NeighborResponse::SwarmSync(chill_phase, b_casts, m_casts)
-            }
-            247 => {
-                let is_bcast = bytes[data_idx + 1] > 0;
-                let cast_id = CastID(bytes[data_idx + 2]);
-                let data_idx = data_idx + 3;
-                let origin_id: GnomeId = GnomeId(as_u64_be(&[
-                    bytes[data_idx],
-                    bytes[data_idx + 1],
-                    bytes[data_idx + 2],
-                    bytes[data_idx + 3],
-                    bytes[data_idx + 4],
-                    bytes[data_idx + 5],
-                    bytes[data_idx + 6],
-                    bytes[data_idx + 7],
-                ]));
-                NeighborResponse::Subscribed(is_bcast, cast_id, origin_id, None)
-            }
-            _other => {
-                // TODO
-                NeighborResponse::CustomResponse(bytes[data_idx + 1], Data(0))
-            }
-        };
+        let nr = bytes_to_neighbor_response(&bytes[1..]);
         Payload::Response(nr)
     } else if bytes[0] & 0b0_111_0000 == 48 {
         let c_id = CastID(bytes[data_idx]);
@@ -371,7 +215,7 @@ pub fn bytes_to_cast_message(bytes: &[u8]) -> Result<CastMessage, ConversionErro
         Ok(CastMessage::new_multicast(c_id, data))
     } else if dgram_header & 0b11000000 == 64 {
         // TODO: unicast
-        println!("received a unicast");
+        // println!("received a unicast");
         Ok(CastMessage::new_unicast(c_id, data))
     } else {
         Err(ConversionError)
@@ -545,130 +389,306 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
             0b0_100_0000
         }
         Payload::Response(neighbor_response) => {
-            match neighbor_response {
-                NeighborResponse::Listing(count, data) => {
-                    bytes.push(255);
-                    bytes.push(count);
-                    for chunk in data.deref() {
-                        put_u32(&mut bytes, chunk.0);
-                        // bytes.put_u32(chunk.0);
-                    }
-                }
-                NeighborResponse::Unicast(swarm_id, cast_id) => {
-                    bytes.push(254);
-                    bytes.push(swarm_id.0);
-                    bytes.push(cast_id.0);
-                }
-                NeighborResponse::Block(b_id, data) => {
-                    bytes.push(253);
-                    put_u32(&mut bytes, b_id.0);
-                    // bytes.put_u32(b_id.0);
-                    put_u32(&mut bytes, data.0);
-                    // bytes.put_u32(data.0);
-                }
-                NeighborResponse::ForwardConnectResponse(network_settings) => {
-                    bytes.push(252);
-                    insert_network_settings(&mut bytes, network_settings);
-                }
-                NeighborResponse::ForwardConnectFailed => {
-                    bytes.push(251);
-                }
-                NeighborResponse::AlreadyConnected(id) => {
-                    bytes.push(250);
-                    bytes.push(id);
-                }
-                NeighborResponse::ConnectResponse(id, network_settings) => {
-                    bytes.push(249);
-                    bytes.push(id);
-                    insert_network_settings(&mut bytes, network_settings);
-                }
-                NeighborResponse::SwarmSync(chill_phase, bcasts, mcasts) => {
-                    bytes.push(248);
-                    bytes.push(chill_phase);
-                    bytes.push(bcasts.len() as u8);
-                    bytes.push(mcasts.len() as u8);
-                    for bcast in bcasts {
-                        bytes.push(bcast.0);
-                    }
-                    for mcast in mcasts {
-                        bytes.push(mcast.0);
-                    }
-                }
-                NeighborResponse::Subscribed(is_bcast, _cast_id, origin_id, _source_opt) => {
-                    bytes.push(247);
-                    if is_bcast {
-                        bytes.push(1);
-                    } else {
-                        bytes.push(0);
-                    }
-                    put_u64(&mut bytes, origin_id.0);
-                    // bytes.put_u64(origin_id.0);
-                }
-                NeighborResponse::CustomResponse(id, data) => {
-                    bytes.push(id);
-                    put_u32(&mut bytes, data.0);
-                    // bytes.put_u32(data.0);
-                } // _ => todo!(),
-            }
+            neighbor_response_to_bytes(neighbor_response, &mut bytes);
             0b0_010_0000
         }
-        Payload::Request(nr) => {
-            match nr {
-                NeighborRequest::ListingRequest(st) => {
-                    bytes.push(255);
-                    put_u32(&mut bytes, st.0);
-                    // bytes.put_u32(st.0);
-                }
-                NeighborRequest::UnicastRequest(swarm_id, cast_ids) => {
-                    bytes.push(254);
-                    bytes.push(swarm_id.0);
-                    for c_id in cast_ids.deref() {
-                        bytes.push(c_id.0);
-                    }
-                }
-                NeighborRequest::BlockRequest(count, data) => {
-                    bytes.push(253);
-                    bytes.push(count);
-                    for chunk in data.deref() {
-                        put_u32(&mut bytes, chunk.0);
-                        // bytes.put_u32(chunk.0);
-                    }
-                }
-                NeighborRequest::ForwardConnectRequest(network_settings) => {
-                    bytes.push(252);
-                    insert_network_settings(&mut bytes, network_settings);
-                }
-                NeighborRequest::ConnectRequest(id, gnome_id, network_settings) => {
-                    bytes.push(251);
-                    bytes.push(id);
-                    put_u64(&mut bytes, gnome_id.0);
-                    // bytes.put_u64(gnome_id.0);
-                    insert_network_settings(&mut bytes, network_settings);
-                }
-                NeighborRequest::SwarmSyncRequest => {
-                    bytes.push(250);
-                }
-                NeighborRequest::SubscribeRequest(is_bcast, cast_id) => {
-                    bytes.push(249);
-                    if is_bcast {
-                        bytes.push(1);
-                    } else {
-                        bytes.push(0);
-                    }
-                    bytes.push(cast_id.0);
-                }
-                NeighborRequest::CustomRequest(id, data) => {
-                    bytes.push(id);
-                    put_u32(&mut bytes, data.0);
-                    // bytes.put_u32(data.0);
-                }
-            }
+        Payload::Request(n_req) => {
+            neighbor_request_to_bytes(n_req, &mut bytes);
             0b0_001_0000
         }
     };
     // println!("encoded: {:#08b} {:?}", bytes[0], bytes);
     // bytes.split().into()
     bytes
+}
+
+pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, mut bytes: &mut Vec<u8>) {
+    match n_resp {
+        NeighborResponse::Listing(count, data) => {
+            bytes.push(255);
+            bytes.push(count);
+            for chunk in data.deref() {
+                put_u32(&mut bytes, chunk.0);
+                // bytes.put_u32(chunk.0);
+            }
+        }
+        NeighborResponse::Unicast(swarm_id, cast_id) => {
+            bytes.push(254);
+            bytes.push(swarm_id.0);
+            bytes.push(cast_id.0);
+        }
+        NeighborResponse::Block(b_id, data) => {
+            bytes.push(253);
+            put_u32(&mut bytes, b_id.0);
+            // bytes.put_u32(b_id.0);
+            put_u32(&mut bytes, data.0);
+            // bytes.put_u32(data.0);
+        }
+        NeighborResponse::ForwardConnectResponse(network_settings) => {
+            bytes.push(252);
+            insert_network_settings(&mut bytes, network_settings);
+        }
+        NeighborResponse::ForwardConnectFailed => {
+            bytes.push(251);
+        }
+        NeighborResponse::AlreadyConnected(id) => {
+            bytes.push(250);
+            bytes.push(id);
+        }
+        NeighborResponse::ConnectResponse(id, network_settings) => {
+            bytes.push(249);
+            bytes.push(id);
+            insert_network_settings(&mut bytes, network_settings);
+        }
+        NeighborResponse::SwarmSync(chill_phase, bcasts, mcasts) => {
+            bytes.push(248);
+            bytes.push(chill_phase);
+            bytes.push(bcasts.len() as u8);
+            bytes.push(mcasts.len() as u8);
+            for bcast in bcasts {
+                bytes.push(bcast.0);
+            }
+            for mcast in mcasts {
+                bytes.push(mcast.0);
+            }
+        }
+        NeighborResponse::Subscribed(is_bcast, _cast_id, origin_id, _source_opt) => {
+            bytes.push(247);
+            if is_bcast {
+                bytes.push(1);
+            } else {
+                bytes.push(0);
+            }
+            put_u64(&mut bytes, origin_id.0);
+            // bytes.put_u64(origin_id.0);
+        }
+        NeighborResponse::CustomResponse(id, data) => {
+            bytes.push(id);
+            put_u32(&mut bytes, data.0);
+            // bytes.put_u32(data.0);
+        } // _ => todo!(),
+    }
+}
+
+pub fn neighbor_request_to_bytes(n_req: NeighborRequest, mut bytes: &mut Vec<u8>) {
+    match n_req {
+        NeighborRequest::ListingRequest(st) => {
+            bytes.push(255);
+            put_u32(bytes, st.0);
+            // bytes.put_u32(st.0);
+        }
+        NeighborRequest::UnicastRequest(swarm_id, cast_ids) => {
+            bytes.push(254);
+            bytes.push(swarm_id.0);
+            for c_id in cast_ids.deref() {
+                bytes.push(c_id.0);
+            }
+        }
+        NeighborRequest::BlockRequest(count, data) => {
+            bytes.push(253);
+            bytes.push(count);
+            for chunk in data.deref() {
+                put_u32(&mut bytes, chunk.0);
+                // bytes.put_u32(chunk.0);
+            }
+        }
+        NeighborRequest::ForwardConnectRequest(network_settings) => {
+            bytes.push(252);
+            insert_network_settings(&mut bytes, network_settings);
+        }
+        NeighborRequest::ConnectRequest(id, gnome_id, network_settings) => {
+            bytes.push(251);
+            bytes.push(id);
+            put_u64(&mut bytes, gnome_id.0);
+            // bytes.put_u64(gnome_id.0);
+            insert_network_settings(&mut bytes, network_settings);
+        }
+        NeighborRequest::SwarmSyncRequest => {
+            bytes.push(250);
+        }
+        NeighborRequest::SubscribeRequest(is_bcast, cast_id) => {
+            bytes.push(249);
+            if is_bcast {
+                bytes.push(1);
+            } else {
+                bytes.push(0);
+            }
+            bytes.push(cast_id.0);
+        }
+        NeighborRequest::CustomRequest(id, data) => {
+            bytes.push(id);
+            put_u32(&mut bytes, data.0);
+            // bytes.put_u32(data.0);
+        }
+    }
+}
+pub fn bytes_to_neighbor_request(bytes: &[u8]) -> NeighborRequest {
+    let data_idx = 0;
+    let bytes_len = bytes.len();
+    let nr = match bytes[0] {
+        255 => {
+            let st_value: u32 = as_u32_be(&[
+                bytes[data_idx + 1],
+                bytes[data_idx + 2],
+                bytes[data_idx + 3],
+                bytes[data_idx + 4],
+            ]);
+            NeighborRequest::ListingRequest(SwarmTime(st_value))
+        }
+        254 => {
+            let swarm_id = SwarmID(bytes[data_idx + 1]);
+            let mut cast_ids = [CastID(0); 256];
+            // let mut inserted = 0;
+            for (inserted, c_id) in bytes[data_idx + 2..bytes_len].iter().enumerate() {
+                cast_ids[inserted] = CastID(*c_id);
+                // inserted += 1;
+            }
+            NeighborRequest::UnicastRequest(swarm_id, Box::new(cast_ids))
+        }
+        253 => {
+            let count = bytes[data_idx + 2];
+            let mut data = [BlockID(0); 128];
+            for i in 0..count as usize {
+                let bid = as_u32_be(&[
+                    bytes[4 * i + data_idx + 3],
+                    bytes[4 * i + data_idx + 4],
+                    bytes[4 * i + data_idx + 5],
+                    bytes[4 * i + data_idx + 6],
+                ]);
+                data[i] = BlockID(bid);
+            }
+            NeighborRequest::BlockRequest(count, Box::new(data))
+        }
+        252 => {
+            let net_set = parse_network_settings(&bytes[data_idx + 1..bytes_len]);
+            NeighborRequest::ForwardConnectRequest(net_set)
+        }
+        251 => {
+            let id = bytes[data_idx + 1];
+            let mut g_id: u64 = ((bytes[data_idx + 2]) as u64) << 56;
+            g_id += ((bytes[data_idx + 3]) as u64) << 48;
+            g_id += ((bytes[data_idx + 4]) as u64) << 40;
+            g_id += ((bytes[data_idx + 5]) as u64) << 32;
+            g_id += ((bytes[data_idx + 6]) as u64) << 24;
+            g_id += ((bytes[data_idx + 7]) as u64) << 16;
+            g_id += ((bytes[data_idx + 8]) as u64) << 8;
+            g_id += (bytes[data_idx + 9]) as u64;
+            let net_set = parse_network_settings(&bytes[data_idx + 10..bytes_len]);
+            NeighborRequest::ConnectRequest(id, GnomeId(g_id), net_set)
+        }
+        250 => NeighborRequest::SwarmSyncRequest,
+        249 => {
+            let is_bcast = bytes[data_idx + 1] > 0;
+            let cast_id = CastID(bytes[data_idx + 2]);
+            NeighborRequest::SubscribeRequest(is_bcast, cast_id)
+        }
+        other => {
+            // TODO
+            let data: u32 = as_u32_be(&[
+                bytes[data_idx + 2],
+                bytes[data_idx + 3],
+                bytes[data_idx + 4],
+                bytes[data_idx + 5],
+            ]);
+            NeighborRequest::CustomRequest(other, Data(data))
+        }
+    };
+    nr
+}
+
+pub fn bytes_to_neighbor_response(bytes: &[u8]) -> NeighborResponse {
+    let data_idx = 0;
+    let bytes_len = bytes.len();
+
+    let response_type = bytes[data_idx];
+    let nr = match response_type {
+        255 => {
+            let count = bytes[data_idx + 1];
+            let mut data = vec![];
+            for i in 0..count as usize {
+                let bid: u32 = as_u32_be(&[
+                    bytes[4 * i + data_idx + 2],
+                    bytes[4 * i + data_idx + 3],
+                    bytes[4 * i + data_idx + 4],
+                    bytes[4 * i + data_idx + 5],
+                ]);
+                data.push(BlockID(bid));
+            }
+            NeighborResponse::Listing(count, data)
+        }
+        254 => NeighborResponse::Unicast(SwarmID(bytes[data_idx + 1]), CastID(bytes[data_idx + 2])),
+        253 => {
+            let b_id: u32 = as_u32_be(&[
+                bytes[data_idx + 1],
+                bytes[data_idx + 2],
+                bytes[data_idx + 3],
+                bytes[data_idx + 4],
+            ]);
+
+            let data: u32 = as_u32_be(&[
+                bytes[data_idx + 5],
+                bytes[data_idx + 6],
+                bytes[data_idx + 7],
+                bytes[data_idx + 8],
+            ]);
+            NeighborResponse::Block(BlockID(b_id), Data(data))
+        }
+        252 => {
+            let net_set = parse_network_settings(&bytes[data_idx + 1..bytes_len]);
+            NeighborResponse::ForwardConnectResponse(net_set)
+        }
+        251 => NeighborResponse::ForwardConnectFailed,
+        250 => {
+            let id = bytes[data_idx + 1];
+            NeighborResponse::AlreadyConnected(id)
+        }
+        249 => {
+            let id = bytes[data_idx + 1];
+            let net_set = parse_network_settings(&bytes[data_idx + 2..bytes_len]);
+            NeighborResponse::ConnectResponse(id, net_set)
+        }
+        248 => {
+            let chill_phase = bytes[data_idx + 1];
+            let b_count = bytes[data_idx + 2];
+            let m_count = bytes[data_idx + 3];
+            let mut b_casts = vec![];
+            let mut m_casts = vec![];
+            let data_idx = data_idx + 4;
+            let mut i: usize = 0;
+            while i < b_count as usize {
+                b_casts.push(CastID(bytes[data_idx + i]));
+                i += 1;
+            }
+            let data_idx = data_idx + b_count as usize;
+            i = 0;
+            while i < m_count as usize {
+                m_casts.push(CastID(bytes[data_idx + i]));
+                i += 1;
+            }
+            NeighborResponse::SwarmSync(chill_phase, b_casts, m_casts)
+        }
+        247 => {
+            let is_bcast = bytes[data_idx + 1] > 0;
+            let cast_id = CastID(bytes[data_idx + 2]);
+            let data_idx = data_idx + 3;
+            let origin_id: GnomeId = GnomeId(as_u64_be(&[
+                bytes[data_idx],
+                bytes[data_idx + 1],
+                bytes[data_idx + 2],
+                bytes[data_idx + 3],
+                bytes[data_idx + 4],
+                bytes[data_idx + 5],
+                bytes[data_idx + 6],
+                bytes[data_idx + 7],
+            ]));
+            NeighborResponse::Subscribed(is_bcast, cast_id, origin_id, None)
+        }
+        _other => {
+            // TODO
+            NeighborResponse::CustomResponse(bytes[data_idx + 1], Data(0))
+        }
+    };
+    nr
 }
 
 fn insert_network_settings(bytes: &mut Vec<u8>, network_settings: NetworkSettings) {

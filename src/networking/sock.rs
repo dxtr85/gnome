@@ -1,7 +1,11 @@
 use crate::crypto::SessionKey;
 use crate::data_conversion::bytes_to_cast_message;
 use crate::data_conversion::bytes_to_message;
+use crate::data_conversion::bytes_to_neighbor_request;
+use crate::data_conversion::bytes_to_neighbor_response;
 use crate::data_conversion::message_to_bytes;
+use crate::data_conversion::neighbor_request_to_bytes;
+use crate::data_conversion::neighbor_response_to_bytes;
 use crate::networking::token::Token;
 use async_std::net::UdpSocket;
 use async_std::task;
@@ -15,7 +19,7 @@ use futures::{
 };
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
-use swarm_consensus::{CastMessage, Message, WrappedMessage};
+use swarm_consensus::{CastContent, CastMessage, Message, WrappedMessage};
 
 async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<Vec<u8>, String> {
     // println!("read_bytes_from_socket");
@@ -56,13 +60,24 @@ async fn read_bytes_from_local_stream(
                         } else {
                             192
                         };
-                        let data = c_msg.data();
+                        // println!("Cast: {:?}", c_msg);
                         let c_id = c_msg.id();
-                        let mut merged_bytes = Vec::with_capacity(6);
+                        let mut merged_bytes = Vec::with_capacity(10);
                         merged_bytes.push(dgram_header);
                         merged_bytes.push(c_id.0);
-                        for a_byte in data.0.to_be_bytes() {
-                            merged_bytes.push(a_byte);
+                        match c_msg.content {
+                            CastContent::Data(data) => {
+                                // let data = c_msg.get_data().unwrap();
+                                for a_byte in data.0.to_be_bytes() {
+                                    merged_bytes.push(a_byte);
+                                }
+                            }
+                            CastContent::Request(n_req) => {
+                                neighbor_request_to_bytes(n_req, &mut merged_bytes);
+                            }
+                            CastContent::Response(n_resp) => {
+                                neighbor_response_to_bytes(n_resp, &mut merged_bytes);
+                            }
                         }
                         return Ok(merged_bytes);
                     }
@@ -188,8 +203,8 @@ async fn race_tasks(
                         // let mut byte_iterator = deciph.into_iter();
                         // let dgram_header = byte_iterator.next().unwrap();
                         let dgram_header = deciph.first().unwrap();
-                        let id = dgram_header & 0b00111111;
-                        if let Some((sender, cast_sender)) = senders.get(&id) {
+                        let swarm_id = dgram_header & 0b00111111;
+                        if let Some((sender, cast_sender)) = senders.get(&swarm_id) {
                             if dgram_header & 0b11000000 == 0 {
                                 // TODO: regular message
                                 let deciphered = &deciph[1..];
@@ -206,6 +221,42 @@ async fn race_tasks(
                                 } else {
                                     println!("Failed to decode incoming stream");
                                 }
+                            } else if dgram_header & 0b11000000 == 64 {
+                                let c_id = deciph[1];
+                                match c_id {
+                                    255 => {
+                                        // TODO N_Req
+                                        let n_req = bytes_to_neighbor_request(&deciph[2..]);
+                                        let message = CastMessage::new_request(n_req);
+                                        let _send_result = cast_sender.send(message);
+                                        if _send_result.is_err() {
+                                            println!("Unable to pass NeighborRequest to gnome");
+                                        }
+                                    }
+                                    254 => {
+                                        // TODO N_Resp
+                                        let n_resp = bytes_to_neighbor_response(&deciph[2..]);
+                                        let message = CastMessage::new_response(n_resp);
+                                        let _send_result = cast_sender.send(message);
+                                        if _send_result.is_err() {
+                                            println!("Unable to pass NeighborResponseto gnome");
+                                        }
+                                    }
+                                    _ => {
+                                        if let Ok(message) = bytes_to_cast_message(&deciph) {
+                                            // println!("decode OK: {:?}", message);
+                                            let _send_result = cast_sender.send(message);
+                                            if _send_result.is_err() {
+                                                // TODO: if failed maybe we are no longer interested?
+                                                // Maybe send back a bye if possible?
+                                                // Remove given Sender/Receiver pair
+                                                println!("send result2: {:?}", _send_result);
+                                            }
+                                        }
+                                    }
+                                }
+                                // } else {
+                                //     println!("Failed to decode incoming stream");
                             } else if let Ok(message) = bytes_to_cast_message(&deciph) {
                                 // println!("decode OK: {:?}", message);
                                 let _send_result = cast_sender.send(message);
@@ -215,14 +266,15 @@ async fn race_tasks(
                                     // Remove given Sender/Receiver pair
                                     println!("send result2: {:?}", _send_result);
                                 }
+                                // }
                             } else {
-                                println!("Failed to decode incoming stream");
+                                println!("Unable to decode message");
                             }
                         } else {
                             // TODO: maybe we should instantiate a new
                             // Neighbor for a new swarm?
                             // For this we need Sender<Subscription> ?
-                            println!("Did not find sender for {}", id);
+                            println!("Did not find sender for {}", swarm_id);
                         }
                     } else {
                         println!("Failed to decipher incoming stream {}", count);
