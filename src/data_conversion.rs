@@ -222,6 +222,9 @@ pub fn bytes_to_cast_message(bytes: &[u8]) -> Result<CastMessage, ConversionErro
     }
 }
 
+fn as_u16_be(array: &[u8; 2]) -> u16 {
+    ((array[0] as u16) << 8) + (array[1] as u16)
+}
 fn as_u32_be(array: &[u8; 4]) -> u32 {
     ((array[0] as u32) << 24)
         + ((array[1] as u32) << 16)
@@ -441,7 +444,8 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, mut bytes: &mut Vec<
         }
         NeighborResponse::SwarmSync(chill_phase, swarm_time, bcasts, mcasts) => {
             bytes.push(248);
-            bytes.push(chill_phase);
+            put_u16(bytes, chill_phase);
+            // bytes.push(chill_phase);
             put_u32(bytes, swarm_time.0);
             bytes.push(bcasts.len() as u8);
             bytes.push(mcasts.len() as u8);
@@ -652,20 +656,20 @@ pub fn bytes_to_neighbor_response(bytes: &[u8]) -> NeighborResponse {
             NeighborResponse::ConnectResponse(id, net_set)
         }
         248 => {
-            let chill_phase = bytes[data_idx + 1];
+            let chill_phase = as_u16_be(&[bytes[data_idx + 1], bytes[data_idx + 2]]);
             let swarm_time: SwarmTime = SwarmTime(as_u32_be(&[
-                bytes[data_idx + 2],
                 bytes[data_idx + 3],
                 bytes[data_idx + 4],
                 bytes[data_idx + 5],
+                bytes[data_idx + 6],
             ]));
-            let b_count = bytes[data_idx + 6];
-            let m_count = bytes[data_idx + 7];
+            let b_count = bytes[data_idx + 7];
+            let m_count = bytes[data_idx + 8];
             let mut b_casts = vec![];
             let mut m_casts = vec![];
-            let data_idx = data_idx + 8;
+            let data_idx = data_idx + 9;
             let mut i: usize = 0;
-            while i < b_count as usize {
+            while i < (b_count * 9) as usize {
                 let b_id = CastID(bytes[data_idx + i]);
                 let origin = GnomeId(as_u64_be(&[
                     bytes[data_idx + i + 1],
@@ -680,7 +684,7 @@ pub fn bytes_to_neighbor_response(bytes: &[u8]) -> NeighborResponse {
                 b_casts.push((b_id, origin));
                 i += 9;
             }
-            let data_idx = data_idx + b_count as usize;
+            let data_idx = data_idx + (b_count as usize * 9);
             i = 0;
             while i < m_count as usize {
                 let m_id = CastID(bytes[data_idx + i]);
