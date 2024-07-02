@@ -21,10 +21,13 @@ use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
 use swarm_consensus::{CastContent, CastMessage, Message, WrappedMessage};
 
-async fn read_bytes_from_socket(socket: &UdpSocket) -> Result<Vec<u8>, String> {
+async fn read_bytes_from_socket(
+    socket: &UdpSocket,
+    buf: &mut [u8; 1100],
+) -> Result<Vec<u8>, String> {
     // println!("read_bytes_from_socket");
     // TODO: increase size of buffer everywhere
-    let mut buf = [0u8; 1100];
+    // let mut buf = [0u8; 1100];
     let recv_result = socket.peek(&mut buf[..]).await;
     if let Ok(count) = recv_result {
         // println!("<<<<< {:?}", String::from_utf8_lossy(&buf[..count]));
@@ -133,6 +136,7 @@ async fn race_tasks(
         receivers.insert(i as u8, receiver);
     }
     let mut buf = [0u8; 1100];
+    let mut buf2 = [0u8; 1100];
     // if let Some((sender, mut receiver)) = send_recv_pairs.pop() {
     loop {
         if let Ok((swarm_name, snd, cast_snd, recv)) = extend_receiver.try_recv() {
@@ -167,7 +171,7 @@ async fn race_tasks(
             println!("Requesting more tokens");
             let _ = token_sender.send(Token::Request(2 * min_tokens_threshold));
         }
-        let t1 = read_bytes_from_socket(&socket).fuse();
+        let t1 = read_bytes_from_socket(&socket, &mut buf2).fuse();
         // TODO: serv pairs of sender-receiver
         let t2 = read_bytes_from_local_stream(&mut receivers).fuse();
 
