@@ -1,5 +1,6 @@
 use super::serve_socket;
 use super::Token;
+use crate::crypto::Encrypter;
 use crate::crypto::{generate_symmetric_key, SessionKey};
 use crate::networking::common::collect_subscribed_swarm_names;
 use crate::networking::common::create_a_neighbor_for_each_swarm;
@@ -7,7 +8,6 @@ use crate::networking::common::distil_common_names;
 use crate::networking::common::receive_remote_swarm_names;
 use crate::networking::common::send_subscribed_swarm_names;
 use crate::networking::subscription::Subscription;
-use crate::prelude::Encrypter;
 use async_std::net::UdpSocket;
 use async_std::task::spawn;
 use std::net::SocketAddr;
@@ -230,10 +230,10 @@ async fn prepare_and_serve(
     let mut ch_pairs = vec![];
     create_a_neighbor_for_each_swarm(
         common_names,
-        sub_sender,
+        sub_sender.clone(),
         remote_gnome_id,
         &mut ch_pairs,
-        shared_sender,
+        shared_sender.clone(),
     );
 
     let (token_send, token_recv) = channel();
@@ -245,6 +245,8 @@ async fn prepare_and_serve(
         ch_pairs,
         token_send_two,
         token_recv,
+        sub_sender,
+        shared_sender,
         swarm_extend_receiver,
     )
     .await;

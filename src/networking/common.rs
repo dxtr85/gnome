@@ -140,8 +140,15 @@ pub fn create_a_neighbor_for_each_swarm(
         let (s1, r1) = channel();
         let (s2, r2) = channel();
         let (s3, r3) = channel();
-        let neighbor =
-            Neighbor::from_id_channel_time(remote_gnome_id, r1, r2, s3, SwarmTime(0), SwarmTime(7));
+        let neighbor = Neighbor::from_id_channel_time(
+            remote_gnome_id,
+            r1,
+            r2,
+            s3,
+            shared_sender.clone(),
+            SwarmTime(0),
+            SwarmTime(7),
+        );
         println!("Request include neighbor");
         let _ = sender.send(Subscription::IncludeNeighbor(name, neighbor));
         ch_pairs.push((s1, s2, r3));

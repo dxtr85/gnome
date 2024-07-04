@@ -523,9 +523,18 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, mut bytes: &mut Vec<u8>
             }
             bytes.push(cast_id.0);
         }
+        NeighborRequest::CreateNeighbor(g_id, swarm_name) => {
+            bytes.push(248);
+            for byte in g_id.0.to_be_bytes() {
+                bytes.push(byte);
+            }
+            for byte in swarm_name.bytes() {
+                bytes.push(byte);
+            }
+        }
         NeighborRequest::CustomRequest(id, data) => {
             bytes.push(id);
-            put_u32(&mut bytes, data.0);
+            put_u32(bytes, data.0);
             // bytes.put_u32(data.0);
         }
     }
@@ -533,7 +542,7 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, mut bytes: &mut Vec<u8>
 pub fn bytes_to_neighbor_request(bytes: &[u8]) -> NeighborRequest {
     let data_idx = 0;
     let bytes_len = bytes.len();
-    let nr = match bytes[0] {
+    match bytes[0] {
         255 => {
             let st_value: u32 = as_u32_be(&[
                 bytes[data_idx + 1],
@@ -590,6 +599,20 @@ pub fn bytes_to_neighbor_request(bytes: &[u8]) -> NeighborRequest {
             let cast_id = CastID(bytes[data_idx + 2]);
             NeighborRequest::SubscribeRequest(is_bcast, cast_id)
         }
+        248 => {
+            let gnome_id = GnomeId(as_u64_be(&[
+                bytes[data_idx],
+                bytes[data_idx + 1],
+                bytes[data_idx + 2],
+                bytes[data_idx + 3],
+                bytes[data_idx + 4],
+                bytes[data_idx + 5],
+                bytes[data_idx + 6],
+                bytes[data_idx + 7],
+            ]));
+            let swarm_name = String::from_utf8(bytes[data_idx + 8..bytes_len].to_vec()).unwrap();
+            NeighborRequest::CreateNeighbor(gnome_id, swarm_name)
+        }
         other => {
             // TODO
             let data: u32 = as_u32_be(&[
@@ -600,8 +623,8 @@ pub fn bytes_to_neighbor_request(bytes: &[u8]) -> NeighborRequest {
             ]);
             NeighborRequest::CustomRequest(other, Data(data))
         }
-    };
-    nr
+    }
+    // nr
 }
 
 pub fn bytes_to_neighbor_response(bytes: &[u8]) -> NeighborResponse {

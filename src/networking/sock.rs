@@ -6,9 +6,12 @@ use crate::data_conversion::bytes_to_neighbor_response;
 use crate::data_conversion::message_to_bytes;
 use crate::data_conversion::neighbor_request_to_bytes;
 use crate::data_conversion::neighbor_response_to_bytes;
+use crate::networking::subscription::Subscription;
 use crate::networking::token::Token;
+
 use async_std::net::UdpSocket;
 use async_std::task;
+use swarm_consensus::NeighborRequest;
 // TODO: get rid of bytes crate
 // use bytes::BufMut;
 use core::panic;
@@ -18,8 +21,8 @@ use futures::{
     select,
 };
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender};
-use swarm_consensus::{CastContent, CastMessage, Message, WrappedMessage};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
 
 async fn read_bytes_from_socket(
     socket: &UdpSocket,
@@ -119,6 +122,13 @@ async fn race_tasks(
     )>,
     token_sender: Sender<Token>,
     token_reciever: Receiver<Token>,
+    sub_sender: Sender<Subscription>,
+    shared_sender: Sender<(
+        String,
+        Sender<Message>,
+        Sender<CastMessage>,
+        Receiver<WrappedMessage>,
+    )>,
     extend_receiver: Receiver<(
         String,
         Sender<Message>,
@@ -143,13 +153,15 @@ async fn race_tasks(
             //TODO: extend senders and receivers, force send message
             // informing remote about new swarm neighbor
             for i in 0u8..64 {
-                if !senders.contains_key(&i) {
-                    senders.insert(i, (snd, cast_snd));
+                if let std::collections::hash_map::Entry::Vacant(e) = senders.entry(i) {
+                    // !senders.contains_key(&i) {
+                    // senders.insert(i, (snd, cast_snd));
+                    e.insert((snd, cast_snd));
                     receivers.insert(i, recv);
                     // TODO: define a preamble containing i and some recognizable pattern
                     // in order to be sent in newly defined channel
                     let bytes = swarm_name.as_bytes();
-                    let ciphered = session_key.encrypt(&bytes);
+                    let ciphered = session_key.encrypt(bytes);
                     let _send_result = socket.send(&ciphered).await;
                     break;
                 }
@@ -278,7 +290,26 @@ async fn race_tasks(
                             // TODO: maybe we should instantiate a new
                             // Neighbor for a new swarm?
                             // For this we need Sender<Subscription> ?
-                            println!("Did not find sender for {}", swarm_id);
+                            if let NeighborRequest::CreateNeighbor(remote_gnome_id, swarm_name) =
+                                bytes_to_neighbor_request(&deciph[2..])
+                            {
+                                let (s1, r1) = channel();
+                                let (s2, r2) = channel();
+                                let (s3, r3) = channel();
+                                let neighbor = Neighbor::from_id_channel_time(
+                                    remote_gnome_id,
+                                    r1,
+                                    r2,
+                                    s3,
+                                    shared_sender.clone(),
+                                    SwarmTime(0),
+                                    SwarmTime(7),
+                                );
+                                let _ = shared_sender.send((swarm_name.clone(), s1, s2, r3));
+
+                                let _ = sub_sender
+                                    .send(Subscription::IncludeNeighbor(swarm_name, neighbor));
+                            }
                         }
                     } else {
                         println!("Failed to decipher incoming stream {}", count);
@@ -335,6 +366,13 @@ pub async fn serve_socket(
     )>,
     token_sender: Sender<Token>,
     token_reciever: Receiver<Token>,
+    sender: Sender<Subscription>,
+    shared_sender: Sender<(
+        String,
+        Sender<Message>,
+        Sender<CastMessage>,
+        Receiver<WrappedMessage>,
+    )>,
     extend_receiver: Receiver<(
         String,
         Sender<Message>,
@@ -349,6 +387,8 @@ pub async fn serve_socket(
         send_recv_pairs,
         token_sender,
         token_reciever,
+        sender,
+        shared_sender,
         extend_receiver,
     )
     .await;
