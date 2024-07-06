@@ -49,7 +49,7 @@ pub async fn subscriber(
                 swarms.insert(notif_bundle.swarm_name.clone(), notif_bundle.request_sender);
                 names.push(notif_bundle.swarm_name.clone());
                 // TODO: inform existing sockets about new subscription
-                println!("Added swarm: {}", notif_bundle.swarm_name);
+                println!("Added swarm in networking: {}", notif_bundle.swarm_name);
                 // TODO: serve err results
                 let _ = sub_sender.send(Subscription::Added(notif_bundle.swarm_name.clone()));
                 if notify_holepunch {

@@ -70,7 +70,7 @@ use std::net::IpAddr;
 pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
     // println!("Bytes to message: {:?}", bytes);
     // println!("decoding: {:#08b} {:?}", bytes[0], bytes);
-    let bytes_len = bytes.len();
+    // let bytes_len = bytes.len();
     let swarm_time: SwarmTime = SwarmTime(as_u32_be(&[bytes[1], bytes[2], bytes[3], bytes[4]]));
     let neighborhood: Neighborhood = Neighborhood(bytes[0] & 0b0_000_1111);
     let mut gnome_id: GnomeId = GnomeId(0);
@@ -532,6 +532,12 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, mut bytes: &mut Vec<u8>
                 bytes.push(byte);
             }
         }
+        NeighborRequest::SwarmJoinedInfo(swarm_name) => {
+            bytes.push(247);
+            for byte in swarm_name.bytes() {
+                bytes.push(byte);
+            }
+        }
         NeighborRequest::CustomRequest(id, data) => {
             bytes.push(id);
             put_u32(bytes, data.0);
@@ -601,7 +607,6 @@ pub fn bytes_to_neighbor_request(bytes: &[u8]) -> NeighborRequest {
         }
         248 => {
             let gnome_id = GnomeId(as_u64_be(&[
-                bytes[data_idx],
                 bytes[data_idx + 1],
                 bytes[data_idx + 2],
                 bytes[data_idx + 3],
@@ -609,11 +614,17 @@ pub fn bytes_to_neighbor_request(bytes: &[u8]) -> NeighborRequest {
                 bytes[data_idx + 5],
                 bytes[data_idx + 6],
                 bytes[data_idx + 7],
+                bytes[data_idx + 8],
             ]));
-            let swarm_name = String::from_utf8(bytes[data_idx + 8..bytes_len].to_vec()).unwrap();
+            let swarm_name = String::from_utf8(bytes[data_idx + 9..bytes_len].to_vec()).unwrap();
             NeighborRequest::CreateNeighbor(gnome_id, swarm_name)
         }
+        247 => {
+            let swarm_name = String::from_utf8(bytes[data_idx + 1..bytes_len].to_vec()).unwrap();
+            NeighborRequest::SwarmJoinedInfo(swarm_name)
+        }
         other => {
+            println!("Other message: {:?}", bytes);
             // TODO
             let data: u32 = as_u32_be(&[
                 bytes[data_idx + 2],

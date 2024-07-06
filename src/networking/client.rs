@@ -278,7 +278,7 @@ pub async fn prepare_and_serve(
     }
 
     let mut common_names = vec![];
-    distil_common_names(&mut common_names, swarm_names, remote_names);
+    distil_common_names(&mut common_names, swarm_names, &remote_names);
     if common_names.is_empty() {
         println!("No common interests with {}", remote_gnome_id);
         return;
@@ -288,6 +288,7 @@ pub async fn prepare_and_serve(
     let mut ch_pairs = vec![];
     create_a_neighbor_for_each_swarm(
         common_names,
+        remote_names,
         sender.clone(),
         remote_gnome_id,
         &mut ch_pairs,

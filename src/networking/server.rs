@@ -224,12 +224,13 @@ async fn prepare_and_serve(
     let mut common_names = vec![];
 
     send_subscribed_swarm_names(&dedicated_socket, &swarm_names).await;
-    distil_common_names(&mut common_names, swarm_names, remote_names);
+    distil_common_names(&mut common_names, swarm_names, &remote_names);
 
     let (shared_sender, swarm_extend_receiver) = channel();
     let mut ch_pairs = vec![];
     create_a_neighbor_for_each_swarm(
         common_names,
+        remote_names,
         sub_sender.clone(),
         remote_gnome_id,
         &mut ch_pairs,

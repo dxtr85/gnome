@@ -72,7 +72,7 @@ pub async fn send_subscribed_swarm_names(
 pub fn distil_common_names(
     common_names: &mut Vec<String>,
     names: Vec<String>,
-    remote_names: Vec<String>,
+    remote_names: &Vec<String>,
 ) {
     for name in remote_names {
         // let name = String::from_utf8(bts).unwrap();
@@ -120,6 +120,7 @@ pub async fn receive_remote_swarm_names(
 //
 pub fn create_a_neighbor_for_each_swarm(
     common_names: Vec<String>,
+    remote_names: Vec<String>,
     sender: Sender<Subscription>,
     remote_gnome_id: GnomeId,
     ch_pairs: &mut Vec<(
@@ -148,6 +149,7 @@ pub fn create_a_neighbor_for_each_swarm(
             shared_sender.clone(),
             SwarmTime(0),
             SwarmTime(7),
+            remote_names.clone(),
         );
         println!("Request include neighbor");
         let _ = sender.send(Subscription::IncludeNeighbor(name, neighbor));

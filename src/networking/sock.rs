@@ -58,6 +58,7 @@ async fn read_bytes_from_local_stream(
                 // indicating type of message and id
                 let mut dgram_header = *id;
                 match message {
+                    WrappedMessage::NoOp => return Ok(vec![]),
                     WrappedMessage::Cast(c_msg) => {
                         dgram_header += if c_msg.is_unicast() {
                             64
@@ -149,7 +150,9 @@ async fn race_tasks(
     let mut buf2 = [0u8; 1100];
     // if let Some((sender, mut receiver)) = send_recv_pairs.pop() {
     loop {
+        // print!("l");
         if let Ok((swarm_name, snd, cast_snd, recv)) = extend_receiver.try_recv() {
+            println!("Extend req: {}", swarm_name);
             //TODO: extend senders and receivers, force send message
             // informing remote about new swarm neighbor
             for i in 0u8..64 {
@@ -160,9 +163,9 @@ async fn race_tasks(
                     receivers.insert(i, recv);
                     // TODO: define a preamble containing i and some recognizable pattern
                     // in order to be sent in newly defined channel
-                    let bytes = swarm_name.as_bytes();
-                    let ciphered = session_key.encrypt(bytes);
-                    let _send_result = socket.send(&ciphered).await;
+                    // let bytes = swarm_name.as_bytes();
+                    // let ciphered = session_key.encrypt(bytes);
+                    // let _send_result = socket.send(&ciphered).await;
                     break;
                 }
             }
@@ -287,12 +290,16 @@ async fn race_tasks(
                                 println!("Unable to decode message");
                             }
                         } else {
+                            println!("Got a message on new channel...");
                             // TODO: maybe we should instantiate a new
                             // Neighbor for a new swarm?
                             // For this we need Sender<Subscription> ?
+                            let neighbor_request = bytes_to_neighbor_request(&deciph[2..]);
+                            // println!("NR: {:?}", neighbor_request);
                             if let NeighborRequest::CreateNeighbor(remote_gnome_id, swarm_name) =
-                                bytes_to_neighbor_request(&deciph[2..])
+                                neighbor_request
                             {
+                                println!("Create neighbor");
                                 let (s1, r1) = channel();
                                 let (s2, r2) = channel();
                                 let (s3, r3) = channel();
@@ -304,9 +311,11 @@ async fn race_tasks(
                                     shared_sender.clone(),
                                     SwarmTime(0),
                                     SwarmTime(7),
+                                    vec![],
                                 );
                                 let _ = shared_sender.send((swarm_name.clone(), s1, s2, r3));
 
+                                // TODO: we need to pass this neighbor up
                                 let _ = sub_sender
                                     .send(Subscription::IncludeNeighbor(swarm_name, neighbor));
                             }
@@ -320,6 +329,9 @@ async fn race_tasks(
             }
         } else {
             let bytes = result.unwrap();
+            if bytes.is_empty() {
+                continue;
+            }
             let ciphered = session_key.encrypt(&bytes);
             let len = 43 + ciphered.len() as u64;
             if len <= available_tokens {

@@ -1,10 +1,9 @@
 use async_std::task::spawn;
-use async_std::task::yield_now;
-use std::fs;
+use std::fs::read_to_string;
 pub use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
-use std::time::Duration;
+// use std::time::Duration;
 use swarm_consensus::GnomeId;
 use swarm_consensus::NetworkSettings;
 mod crypto;
@@ -21,8 +20,8 @@ use networking::run_networking_tasks;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::Receiver;
 use swarm_consensus::NotificationBundle;
-use swarm_consensus::Request;
-use swarm_consensus::Response;
+// use swarm_consensus::Request;
+// use swarm_consensus::Response;
 
 pub mod prelude {
     pub use crate::init;
@@ -46,7 +45,7 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
     let mut gnome_id = GnomeId(0);
     // println!("num of args: {}", num);
     // let server_ip: IpAddr = "192.168.0.106".parse().unwrap();
-    let server_ip: IpAddr = "100.116.51.23".parse().unwrap();
+    // let server_ip: IpAddr = "100.116.51.23".parse().unwrap();
     // let broadcast_ip: IpAddr = "192.168.0.255".parse().unwrap();
     let server_port: u16 = 1026;
     // let nic_buffer_size: u32 = 500000;
@@ -58,7 +57,7 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
     let pub_path = PathBuf::from(work_dir.clone()).join("id_rsa.pub");
     let pub_key_pem; //= String::new();
     if pub_path.exists() && priv_path.exists() {
-        pub_key_pem = fs::read_to_string(pub_path.clone()).unwrap();
+        pub_key_pem = read_to_string(pub_path.clone()).unwrap();
         let res = Encrypter::create_from_data(&pub_key_pem);
         if let Ok(encr) = res {
             gnome_id = GnomeId(encr.hash());
@@ -70,7 +69,7 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
         let res = store_key_pair_as_pem_files(&priv_key, &pub_key, PathBuf::from(work_dir));
         println!("Store key pair result: {:?} {:?}", res, priv_key);
         decrypter = Some(Decrypter::create(priv_key));
-        pub_key_pem = fs::read_to_string(pub_path.clone()).unwrap();
+        pub_key_pem = read_to_string(pub_path.clone()).unwrap();
         let res = Encrypter::create_from_data(&pub_key_pem);
         if let Ok(encr) = res {
             gnome_id = GnomeId(encr.hash());
@@ -89,12 +88,18 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
         // gmgr.join_a_swarm("trzat".to_string(), Some(neighbor_network_settings), None)
         gmgr.join_a_swarm("/".to_string(), None, None)
     {
+        let _ = resp_sender.send(ManagerResponse::SwarmJoined(
+            swarm_id,
+            "/".to_string(),
+            user_req,
+            user_res,
+        ));
         println!("Joined `/` swarm");
     }
 
-    let join = spawn(activate_gnome(
+    let _join = spawn(activate_gnome(
         // gnome_id,
-        server_ip,
+        // server_ip,
         // broadcast_ip,
         server_port,
         nic_buffer_size,
@@ -103,35 +108,42 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
         decrypter.unwrap(),
         pub_key_pem,
     ));
-    // TODO spawn a loop with manager inside handling both user requests and
+    // TODO: spawn a loop with manager inside handling both user requests and
     //      swarm management
-    spawn(async move {
-        loop {
-            if let Ok(request) = req_receiver.try_recv() {
-                match request {
-                    ManagerRequest::JoinSwarm(swarm_name) => {
-                        if let Ok((swarm_id, (user_req, user_res))) =
-                            // gmgr.join_a_swarm("trzat".to_string(), Some(neighbor_network_settings), None)
-                            gmgr.join_a_swarm(swarm_name.clone(), None, None)
-                        {
-                            let _ = resp_sender.send(ManagerResponse::SwarmJoined(
-                                swarm_id, swarm_name, user_req, user_res,
-                            ));
-                        } else {
-                            println!("Unable to join a swarm.");
-                        }
-                    }
-                    ManagerRequest::Disconnect => {
-                        // TODO: do all necessary stuff
-                        break;
-                    }
-                }
-            }
-            yield_now().await;
-        }
-        gmgr.finish();
-        join.await;
-    });
+    //      Here we need to store information about swarms that our neighbors
+    //      are subscribed to, probably as a hashmap of swarm_name -> Vec<SwarmID>.
+    //      Now user will be able to see what swarms he is able to join immediately.
+    //      For this we need to create a two way communication channel between manager/loop
+    //      and each gnome individually.
+    //      Now manager can ask a gnome to provide Neighbors for requested swarm_name.
+    //      Gnome will send NeighborRequest to his neighbors.
+    //      For each collected Response gnome will send it back to Manager.
+    //      Manager will collect those responses from gnome and instantiate
+    //      a new gnome for swarm name requested by User with initial pool of Neighbors
+    //      collected from existing gnome(s).
+    //
+    // TODO: In future we might need to create a mechanism to avoid bandwith drainage.
+    //       In case we run out of available bandwith we need to start conserving it.
+    //       To do so we have to limit the number of swarms we are being part of.
+    //       But user wants to stay in sync with all the swarms!
+    //       In order to keep user happy and still have some bandwith available
+    //       we need to introduce some sort of swarm_ring, maybe in form of VecDeque.
+    //       Now we need to define a min_bandwith threshold - at this level we have
+    //       to increase the number of swarms that are being served under swarm_ring.
+    //       Being in swarm_ring means that you only stay in a given swarm until you
+    //       become synced (or some defined timeout has passed).
+    //       Once given swarm is synced it is being moved back to swarm_ring's end.
+    //       We only move swarms into ring to stay above min_bandwith.
+    //       If available_bandwith is way above min_off then we can decide
+    //       to gradually move a swarm out of swarm_ring into regular swarm that
+    //       is constantly updated.
+    //       So swarm_ring has three modes of operation: increasing available bandwith,
+    //       decreasing it, or leaving it as-is, if we are not using enough of it.
+    //       Probably a sane default threshold should be min: 20%, min_off: 30%
+    //       of total bandwith available.
+    //       If we are between min and min_off we can stay in this configuration.
+    //
+    spawn(gmgr.do_your_job(req_receiver, resp_sender));
     (req_sender, resp_receiver)
 }
 fn start(
@@ -154,7 +166,7 @@ pub fn create_manager_and_receiver(
 
 async fn activate_gnome(
     // _gnome_id: GnomeId,
-    ip: IpAddr,
+    // ip: IpAddr,
     // _broadcast: IpAddr,
     port: u16,
     buffer_size_bytes: u64,
