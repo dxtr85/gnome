@@ -51,6 +51,12 @@ pub async fn token_dispenser(
     used_bandwith_ring.push_back((true, 0));
     let mut additional_request_received = false;
 
+    // TODO: this needs rework
+    // TODO: we might need to provide this service with
+    //       shared_sender, since in order for race_tasks
+    //       to start new iteration WrappedMessage::NoOp needs
+    //       to be sent
+    //       but then we need a shared_sender for every socket...
     loop {
         let mut send_tokens = false;
 
@@ -77,7 +83,7 @@ pub async fn token_dispenser(
             //     }
             // }
         }
-        if let Ok(_) = timer_reciever.try_recv() {
+        if timer_reciever.try_recv().is_ok() {
             available_buffer = std::cmp::min(buffer_size_bytes, available_buffer + bytes_per_msec);
             // println!("AvaBuf: {} {}", available_buffer, bytes_per_msec);
             send_tokens = true;

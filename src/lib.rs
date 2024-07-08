@@ -97,7 +97,8 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
         println!("Joined `/` swarm");
     }
 
-    let _join = spawn(activate_gnome(
+    // let _join = spawn(activate_gnome(
+    let _join = spawn(run_networking_tasks(
         // gnome_id,
         // server_ip,
         // broadcast_ip,
@@ -146,13 +147,13 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
     spawn(gmgr.do_your_job(req_receiver, resp_sender));
     (req_sender, resp_receiver)
 }
-fn start(
-    gnome_id: GnomeId,
-    network_settings: Option<NetworkSettings>,
-    sender: Sender<NotificationBundle>,
-) -> Manager {
-    Manager::new(gnome_id, network_settings, sender)
-}
+// fn start(
+//     gnome_id: GnomeId,
+//     network_settings: Option<NetworkSettings>,
+//     sender: Sender<NotificationBundle>,
+// ) -> Manager {
+//     Manager::new(gnome_id, network_settings, sender)
+// }
 
 pub fn create_manager_and_receiver(
     gnome_id: GnomeId,
@@ -160,34 +161,40 @@ pub fn create_manager_and_receiver(
 ) -> (Manager, Receiver<NotificationBundle>) {
     let (networking_sender, networking_receiver) = channel();
     // let network_settings = None;
-    let mgr = start(gnome_id, network_settings, networking_sender);
+    // let mgr = start(gnome_id, network_settings, networking_sender);
+    let mgr = Manager::new(gnome_id, network_settings, networking_sender);
     (mgr, networking_receiver)
 }
 
-async fn activate_gnome(
-    // _gnome_id: GnomeId,
-    // ip: IpAddr,
-    // _broadcast: IpAddr,
-    port: u16,
-    buffer_size_bytes: u64,
-    uplink_bandwith_bytes_sec: u64,
-    receiver: Receiver<NotificationBundle>,
-    decrypter: Decrypter,
-    pub_key_pem: String,
-) {
-    run_networking_tasks(
-        // gnome_id,
-        // ip,
-        // broadcast,
-        port,
-        buffer_size_bytes,
-        uplink_bandwith_bytes_sec,
-        receiver,
-        decrypter,
-        pub_key_pem,
-    )
-    .await;
-}
+// async fn activate_gnome(
+//     // _gnome_id: GnomeId,
+//     // ip: IpAddr,
+//     // _broadcast: IpAddr,
+//     port: u16,
+//     // TODO: we need to be able to modify uplink_bandwith_bytes_sec
+//     //       on the go as we decrease/increase number of swarms
+//     //       we are participating to
+//     // I'm probably wrong, since this will only be used when user decides to
+//     // modify his initial uplink bandwith
+//     buffer_size_bytes: u64,
+//     uplink_bandwith_bytes_sec: u64,
+//     receiver: Receiver<NotificationBundle>,
+//     decrypter: Decrypter,
+//     pub_key_pem: String,
+// ) {
+//     run_networking_tasks(
+//         // gnome_id,
+//         // ip,
+//         // broadcast,
+//         port,
+//         buffer_size_bytes,
+//         uplink_bandwith_bytes_sec,
+//         receiver,
+//         decrypter,
+//         pub_key_pem,
+//     )
+//     .await;
+// }
 
 // #[async_std::main]
 // async fn main() {

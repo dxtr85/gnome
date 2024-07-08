@@ -75,12 +75,15 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
     let neighborhood: Neighborhood = Neighborhood(bytes[0] & 0b0_000_1111);
     let mut gnome_id: GnomeId = GnomeId(0);
     let (header, data_idx) = if bytes[0] & 0b1_000_0000 == 128 {
-        let block_id: u32 = as_u32_be(&[bytes[5], bytes[6], bytes[7], bytes[8]]);
-        (Header::Block(BlockID(block_id)), 9)
+        let block_id: u64 = as_u64_be(&[
+            bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12],
+        ]);
+        (Header::Block(BlockID(block_id)), 13)
     } else if bytes[0] & 0b0_111_0000 == 112 {
         if bytes[5] == 255 {
             (Header::Sync, 5)
         } else {
+            // TODO: is data_idx correct here?
             gnome_id = GnomeId(as_u64_be(&[
                 bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
             ]));
@@ -152,13 +155,15 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
     } else if bytes[0] & 0b0_111_0000 == 64 {
         // let bid: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
         // let data = Data(as_u32_be(&[bytes[10], bytes[11], bytes[12], bytes[13]]));
-        let bid: u32 = as_u32_be(&[bytes[5], bytes[6], bytes[7], bytes[8]]);
-        let data = Data(as_u32_be(&[
-            bytes[data_idx],
-            bytes[data_idx + 1],
-            bytes[data_idx + 2],
-            bytes[data_idx + 3],
-        ]));
+        let bid: u64 = as_u64_be(&[
+            bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12],
+        ]);
+        let data = Data::new(Vec::from(&bytes[data_idx..])).unwrap();
+        //     bytes[data_idx],
+        //     bytes[data_idx + 1],
+        //     bytes[data_idx + 2],
+        //     bytes[data_idx + 3],
+        // ]));
         Payload::Block(BlockID(bid), data)
     // } else if bytes[0] & 0b0_111_0000 == 32 {
     //     let nr = bytes_to_neighbor_response(&bytes[1..]);
@@ -204,7 +209,7 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
 pub fn bytes_to_cast_message(bytes: &[u8]) -> Result<CastMessage, ConversionError> {
     let dgram_header = bytes[0];
     let c_id = CastID(bytes[1]);
-    let data = Data(as_u32_be(&[bytes[2], bytes[3], bytes[4], bytes[5]]));
+    let data = Data::new(Vec::from(&bytes[2..])).unwrap();
     if dgram_header & 0b11000000 == 192 {
         // TODO: broadcast
         // println!("received a broadcast");
@@ -287,7 +292,7 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
     let mut block_id_inserted = false;
     if let Header::Block(block_id) = msg.header {
         bytes[0] |= 0b1_000_0000;
-        put_u32(&mut bytes, block_id.0);
+        put_u64(&mut bytes, block_id.0);
         block_id_inserted = true;
     }
     bytes[0] |= match msg.payload {
@@ -384,10 +389,13 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
         }
         Payload::Block(block_id, data) => {
             if !block_id_inserted {
-                put_u32(&mut bytes, block_id.0);
+                put_u64(&mut bytes, block_id.0);
                 // bytes.put_u32(block_id.0);
             };
-            put_u32(&mut bytes, data.0);
+            // put_u32(&mut bytes, data.0);
+            for byte in data.bytes() {
+                bytes.push(byte);
+            }
             // bytes.put_u32(data.0);
             0b0_100_0000
         } // Payload::Response(neighbor_response) => {
@@ -410,7 +418,7 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, mut bytes: &mut Vec<
             bytes.push(255);
             bytes.push(count);
             for chunk in data.deref() {
-                put_u32(&mut bytes, chunk.0);
+                put_u64(&mut bytes, chunk.0);
                 // bytes.put_u32(chunk.0);
             }
         }
@@ -421,10 +429,13 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, mut bytes: &mut Vec<
         }
         NeighborResponse::Block(b_id, data) => {
             bytes.push(253);
-            put_u32(&mut bytes, b_id.0);
+            put_u64(&mut bytes, b_id.0);
             // bytes.put_u32(b_id.0);
-            put_u32(&mut bytes, data.0);
+            // put_u32(&mut bytes, data.0);
             // bytes.put_u32(data.0);
+            for byte in data.bytes() {
+                bytes.push(byte);
+            }
         }
         NeighborResponse::ForwardConnectResponse(network_settings) => {
             bytes.push(252);
@@ -472,7 +483,9 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, mut bytes: &mut Vec<
         }
         NeighborResponse::CustomResponse(id, data) => {
             bytes.push(id);
-            put_u32(bytes, data.0);
+            for byte in data.bytes() {
+                bytes.push(byte);
+            }
             // bytes.put_u32(data.0);
         } // _ => todo!(),
     }
@@ -496,7 +509,7 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, mut bytes: &mut Vec<u8>
             bytes.push(253);
             bytes.push(count);
             for chunk in data.deref() {
-                put_u32(bytes, chunk.0);
+                put_u64(bytes, chunk.0);
                 // bytes.put_u32(chunk.0);
             }
         }
@@ -540,7 +553,10 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, mut bytes: &mut Vec<u8>
         }
         NeighborRequest::CustomRequest(id, data) => {
             bytes.push(id);
-            put_u32(bytes, data.0);
+            for byte in data.bytes() {
+                bytes.push(byte);
+            }
+            // put_u32(bytes, data.0);
             // bytes.put_u32(data.0);
         }
     }
@@ -572,11 +588,15 @@ pub fn bytes_to_neighbor_request(bytes: &[u8]) -> NeighborRequest {
             let count = bytes[data_idx + 2];
             let mut data = [BlockID(0); 128];
             for i in 0..count as usize {
-                let bid = as_u32_be(&[
-                    bytes[4 * i + data_idx + 3],
-                    bytes[4 * i + data_idx + 4],
-                    bytes[4 * i + data_idx + 5],
-                    bytes[4 * i + data_idx + 6],
+                let bid = as_u64_be(&[
+                    bytes[8 * i + data_idx + 3],
+                    bytes[8 * i + data_idx + 4],
+                    bytes[8 * i + data_idx + 5],
+                    bytes[8 * i + data_idx + 6],
+                    bytes[8 * i + data_idx + 7],
+                    bytes[8 * i + data_idx + 8],
+                    bytes[8 * i + data_idx + 9],
+                    bytes[8 * i + data_idx + 10],
                 ]);
                 data[i] = BlockID(bid);
             }
@@ -626,13 +646,13 @@ pub fn bytes_to_neighbor_request(bytes: &[u8]) -> NeighborRequest {
         other => {
             println!("Other message: {:?}", bytes);
             // TODO
-            let data: u32 = as_u32_be(&[
-                bytes[data_idx + 2],
-                bytes[data_idx + 3],
-                bytes[data_idx + 4],
-                bytes[data_idx + 5],
-            ]);
-            NeighborRequest::CustomRequest(other, Data(data))
+            let dta = Vec::from(&bytes[data_idx + 2..]);
+            // ,
+            //     bytes[data_idx + 3],
+            //     bytes[data_idx + 4],
+            //     bytes[data_idx + 5],
+            // ]);
+            NeighborRequest::CustomRequest(other, Data::new(dta).unwrap())
         }
     }
     // nr
@@ -648,11 +668,15 @@ pub fn bytes_to_neighbor_response(bytes: &[u8]) -> NeighborResponse {
             let count = bytes[data_idx + 1];
             let mut data = vec![];
             for i in 0..count as usize {
-                let bid: u32 = as_u32_be(&[
-                    bytes[4 * i + data_idx + 2],
-                    bytes[4 * i + data_idx + 3],
-                    bytes[4 * i + data_idx + 4],
-                    bytes[4 * i + data_idx + 5],
+                let bid: u64 = as_u64_be(&[
+                    bytes[8 * i + data_idx + 2],
+                    bytes[8 * i + data_idx + 3],
+                    bytes[8 * i + data_idx + 4],
+                    bytes[8 * i + data_idx + 5],
+                    bytes[8 * i + data_idx + 6],
+                    bytes[8 * i + data_idx + 7],
+                    bytes[8 * i + data_idx + 8],
+                    bytes[8 * i + data_idx + 9],
                 ]);
                 data.push(BlockID(bid));
             }
@@ -660,20 +684,19 @@ pub fn bytes_to_neighbor_response(bytes: &[u8]) -> NeighborResponse {
         }
         254 => NeighborResponse::Unicast(SwarmID(bytes[data_idx + 1]), CastID(bytes[data_idx + 2])),
         253 => {
-            let b_id: u32 = as_u32_be(&[
+            let b_id: u64 = as_u64_be(&[
                 bytes[data_idx + 1],
                 bytes[data_idx + 2],
                 bytes[data_idx + 3],
                 bytes[data_idx + 4],
-            ]);
-
-            let data: u32 = as_u32_be(&[
                 bytes[data_idx + 5],
                 bytes[data_idx + 6],
                 bytes[data_idx + 7],
                 bytes[data_idx + 8],
             ]);
-            NeighborResponse::Block(BlockID(b_id), Data(data))
+
+            let data = Vec::from(&bytes[data_idx + 9..]);
+            NeighborResponse::Block(BlockID(b_id), Data::new(data).unwrap())
         }
         252 => {
             let net_set = parse_network_settings(&bytes[data_idx + 1..bytes_len]);
@@ -755,7 +778,10 @@ pub fn bytes_to_neighbor_response(bytes: &[u8]) -> NeighborResponse {
         }
         _other => {
             // TODO
-            NeighborResponse::CustomResponse(bytes[data_idx + 1], Data(0))
+            NeighborResponse::CustomResponse(
+                bytes[data_idx + 1],
+                Data::new(Vec::from(&bytes[data_idx + 2..])).unwrap(),
+            )
         }
     }
     // nr

@@ -75,7 +75,7 @@ async fn read_bytes_from_local_stream(
                         match c_msg.content {
                             CastContent::Data(data) => {
                                 // let data = c_msg.get_data().unwrap();
-                                for a_byte in data.0.to_be_bytes() {
+                                for a_byte in data.bytes() {
                                     merged_bytes.push(a_byte);
                                 }
                             }
