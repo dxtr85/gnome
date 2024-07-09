@@ -4,11 +4,17 @@ use aes_gcm::{
 };
 use rand::random;
 use rsa::{
-    pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey},
-    pkcs1::{EncodeRsaPrivateKey, EncodeRsaPublicKey},
+    pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey, EncodeRsaPrivateKey, EncodeRsaPublicKey},
+    pkcs1v15::{Signature, SigningKey, VerifyingKey},
     pkcs8::LineEnding,
-    Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey,
+    sha2::{Digest, Sha256},
+    signature::Verifier,
+    // traits::SignatureScheme,
+    Pkcs1v15Encrypt,
+    RsaPrivateKey,
+    RsaPublicKey,
 };
+
 use std::{
     fs::OpenOptions,
     hash::{DefaultHasher, Hash, Hasher},
@@ -49,6 +55,28 @@ impl Encrypter {
             Err("Unable to encrypt data".to_string())
         }
     }
+    pub fn verify(&self, data: &[u8], signature: &[u8]) -> bool {
+        // println!("OrigSig: {:?}", signature);
+        // println!("StrgSig: {:?}", s_string);
+        // let signature_two = Signature::try_from(s_string.into_bytes()).unwrap();
+        // let mut bytes: Vec<u8> = vec![];
+        // for i in (0..s_string.len()).step_by(2) {
+        //     bytes.push(u8::from_str_radix(&s_string[i..i + 2], 16).unwrap());
+        //     // .collect();
+        // }
+        let signature_three = Signature::try_from(signature).unwrap();
+
+        // println!("ConvSig: {:?}", signature_two);
+        let verifier: VerifyingKey<Sha256> = VerifyingKey::new(self.0.clone());
+        // let mut rng = OsRng;
+        // let res = verifier.verify(data, &signature).is_ok();
+        // println!("Verify result: {:?}", res);
+        // let res = verifier.verify(data, &signature_two).is_ok();
+        // println!("Verify result: {:?}", res);
+        verifier.verify(data, &signature_three).is_ok()
+        // println!("Verify result: {:?}", res);
+        // res
+    }
 }
 #[derive(Clone)]
 pub struct Decrypter(RsaPrivateKey);
@@ -73,6 +101,29 @@ impl Decrypter {
         } else {
             Err("Unable to decrypt data".to_string())
         }
+    }
+
+    pub fn sign(&self, data: &[u8]) -> Result<Vec<u8>, ()> {
+        let signer: SigningKey<Sha256> = SigningKey::new(self.0.clone());
+        // let mut rng = OsRng;
+        let mut digest = <Sha256 as Digest>::new();
+        digest.update(data);
+        use rsa::signature::DigestSigner;
+        // let signature_result = signer.sign_digest(digest);
+        let signature_result = signer.sign_digest(digest);
+        let signature_string = signature_result.to_string();
+        let mut bytes: Vec<u8> = vec![];
+        for i in (0..signature_string.len()).step_by(2) {
+            bytes.push(u8::from_str_radix(&signature_string[i..i + 2], 16).unwrap());
+        }
+        Ok(bytes)
+        // Ok(signature_result)
+        // if let Ok(signature) = signature_result {
+        //     Ok(signature)
+        // } else {
+        //     println!("Unable to sign: {:?}", signature_result);
+        //     Err(())
+        // }
     }
 }
 

@@ -43,7 +43,7 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
     let (resp_sender, resp_receiver) = channel();
 
     let mut gnome_id = GnomeId(0);
-    // println!("num of args: {}", num);
+    // println!("num of args: ");
     // let server_ip: IpAddr = "192.168.0.106".parse().unwrap();
     // let server_ip: IpAddr = "100.116.51.23".parse().unwrap();
     // let broadcast_ip: IpAddr = "192.168.0.255".parse().unwrap();
@@ -57,12 +57,23 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
     let pub_path = PathBuf::from(work_dir.clone()).join("id_rsa.pub");
     let pub_key_pem; //= String::new();
     if pub_path.exists() && priv_path.exists() {
+        // println!("both exist");
         pub_key_pem = read_to_string(pub_path.clone()).unwrap();
         let res = Encrypter::create_from_data(&pub_key_pem);
         if let Ok(encr) = res {
             gnome_id = GnomeId(encr.hash());
         }
         if let Some((priv_key, _pub_key)) = get_key_pair_from_files(priv_path, pub_path) {
+            // println!("This is to verify signing works");
+            // let decr = Decrypter::create(priv_key.clone());
+            // let encr = Encrypter::create(_pub_key);
+            // if let Ok(signature) = decr.sign("Test message".as_bytes()) {
+            //     if encr.verify("Test message".as_bytes(), signature.as_slice()) {
+            //         println!("Message verified! (sig len: {})", signature.len());
+            //     } else {
+            //         println!("Failed to verify message");
+            //     }
+            // }
             decrypter = Some(Decrypter::create(priv_key));
         }
     } else if let Some((priv_key, pub_key)) = get_new_key_pair(512) {
@@ -72,6 +83,14 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
         pub_key_pem = read_to_string(pub_path.clone()).unwrap();
         let res = Encrypter::create_from_data(&pub_key_pem);
         if let Ok(encr) = res {
+            // println!("This is to verify signing works");
+            // if let Ok(signature) = decrypter.clone().unwrap().sign("Test message".as_bytes()) {
+            //     if encr.verify("Test message".as_bytes(), &signature) {
+            //         panic!("Message verified!");
+            //     } else {
+            //         panic!("Failed to verify message");
+            //     }
+            // }
             gnome_id = GnomeId(encr.hash());
         }
         // encrypter = Some(Encrypter::create(pub_key));

@@ -9,7 +9,7 @@ edition = "2021"
 swarm-consensus = {path = "/home/dxtr/projects/swarm-consensus"}
 # bytes = "1.5.0"
 futures = "0.3.30"
-rsa = "0.10.0-pre.1"
+rsa = {version="0.10.0-pre.1",features=["sha2"]}
 rand = "0.8.5"
 aes-gcm = "0.10.3"
 
