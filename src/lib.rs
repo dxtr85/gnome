@@ -1,4 +1,6 @@
 use async_std::task::spawn;
+use rsa::pkcs1::RsaPublicKey;
+use rsa::pkcs8::der::Decode;
 use std::fs::read_to_string;
 pub use std::net::IpAddr;
 use std::path::PathBuf;
@@ -56,11 +58,20 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
     let priv_path = PathBuf::from(work_dir.clone()).join("id_rsa");
     let pub_path = PathBuf::from(work_dir.clone()).join("id_rsa.pub");
     let pub_key_pem; //= String::new();
+    let mut pub_key_der = vec![];
+    let priv_key_pem;
     if pub_path.exists() && priv_path.exists() {
         // println!("both exist");
         pub_key_pem = read_to_string(pub_path.clone()).unwrap();
+        priv_key_pem = read_to_string(priv_path.clone()).unwrap();
         let res = Encrypter::create_from_data(&pub_key_pem);
         if let Ok(encr) = res {
+            pub_key_der = encr.pub_key_der();
+            // println!("DER: {:?}", pub_key_der);
+            let ki = RsaPublicKey::from_der(&pub_key_der);
+            if ki.is_err() {
+                println!("key err: {:?}", ki);
+            }
             gnome_id = GnomeId(encr.hash());
         }
         if let Some((priv_key, _pub_key)) = get_key_pair_from_files(priv_path, pub_path) {
@@ -81,8 +92,10 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
         println!("Store key pair result: {:?} {:?}", res, priv_key);
         decrypter = Some(Decrypter::create(priv_key));
         pub_key_pem = read_to_string(pub_path.clone()).unwrap();
+        priv_key_pem = read_to_string(priv_path.clone()).unwrap();
         let res = Encrypter::create_from_data(&pub_key_pem);
         if let Ok(encr) = res {
+            pub_key_der = encr.pub_key_der();
             // println!("This is to verify signing works");
             // if let Ok(signature) = decrypter.clone().unwrap().sign("Test message".as_bytes()) {
             //     if encr.verify("Test message".as_bytes(), &signature) {
@@ -101,7 +114,7 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
     // println!("Pub key: {:?}", res);
     let (mut gmgr, networking_receiver) =
         // create_manager_and_receiver(gnome_id, Some(network_settings));
-        create_manager_and_receiver(gnome_id, None);
+        create_manager_and_receiver(gnome_id,pub_key_der,priv_key_pem, None, decrypter.clone().unwrap());
 
     if let Ok((swarm_id, (user_req, user_res))) =
         // gmgr.join_a_swarm("trzat".to_string(), Some(neighbor_network_settings), None)
@@ -176,12 +189,22 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
 
 pub fn create_manager_and_receiver(
     gnome_id: GnomeId,
+    pub_key_der: Vec<u8>,
+    priv_key_pem: String,
     network_settings: Option<NetworkSettings>,
+    decrypter: Decrypter,
 ) -> (Manager, Receiver<NotificationBundle>) {
     let (networking_sender, networking_receiver) = channel();
     // let network_settings = None;
     // let mgr = start(gnome_id, network_settings, networking_sender);
-    let mgr = Manager::new(gnome_id, network_settings, networking_sender);
+    let mgr = Manager::new(
+        gnome_id,
+        pub_key_der,
+        priv_key_pem,
+        network_settings,
+        networking_sender,
+        decrypter,
+    );
     (mgr, networking_receiver)
 }
 

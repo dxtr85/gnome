@@ -45,7 +45,7 @@ pub async fn run_server(
             // println!("Failed to establish secure connection with Neighbor");
             continue;
         }
-        let dedicated_socket = optional_sock.unwrap();
+        let (dedicated_socket, remote_pub_key_pem) = optional_sock.unwrap();
 
         let mut swarm_names = Vec::new();
         sub_receiver =
@@ -60,6 +60,8 @@ pub async fn run_server(
             sub_sender.clone(),
             swarm_names,
             token_pipes_sender.clone(),
+            // encrypter,
+            remote_pub_key_pem,
         ));
         println!("--------------------------------------");
     }
@@ -71,7 +73,8 @@ async fn establish_secure_connection(
     remote_gnome_id: &mut GnomeId,
     session_key: &mut SessionKey,
     pub_key_pem: &str,
-) -> Option<UdpSocket> {
+    // ) -> Option<(UdpSocket, Encrypter)> {
+) -> Option<(UdpSocket, String)> {
     let mut bytes = [0u8; 1100];
     let mut count;
     let mut remote_addr;
@@ -148,7 +151,7 @@ async fn establish_secure_connection(
 
     *remote_gnome_id = GnomeId(encr.hash());
     println!("Remote GnomeId: {}", remote_gnome_id);
-    Some(dedicated_socket)
+    Some((dedicated_socket, id_pub_key_pem.to_string()))
 }
 
 // async fn create_dedicated_socket(
@@ -216,6 +219,8 @@ async fn prepare_and_serve(
     sub_sender: Sender<Subscription>,
     swarm_names: Vec<String>,
     token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    // encrypter: Encrypter,
+    pub_key_pem: String,
 ) {
     println!("Waiting for data from remote...");
     let mut remote_names = vec![];
@@ -235,6 +240,8 @@ async fn prepare_and_serve(
         remote_gnome_id,
         &mut ch_pairs,
         shared_sender.clone(),
+        // encrypter,
+        pub_key_pem,
     );
 
     let (token_send, token_recv) = channel();

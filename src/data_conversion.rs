@@ -19,6 +19,7 @@ use swarm_consensus::NetworkSettings;
 use swarm_consensus::CastMessage;
 use swarm_consensus::Payload;
 use swarm_consensus::PortAllocationRule;
+use swarm_consensus::Signature;
 use swarm_consensus::SwarmID;
 use swarm_consensus::SwarmTime;
 
@@ -74,7 +75,7 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
     let swarm_time: SwarmTime = SwarmTime(as_u32_be(&[bytes[1], bytes[2], bytes[3], bytes[4]]));
     let neighborhood: Neighborhood = Neighborhood(bytes[0] & 0b0_000_1111);
     let mut gnome_id: GnomeId = GnomeId(0);
-    let (header, data_idx) = if bytes[0] & 0b1_000_0000 == 128 {
+    let (header, mut data_idx) = if bytes[0] & 0b1_000_0000 == 128 {
         let block_id: u64 = as_u64_be(&[
             bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12],
         ]);
@@ -84,9 +85,11 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
             (Header::Sync, 5)
         } else {
             // TODO: is data_idx correct here?
-            gnome_id = GnomeId(as_u64_be(&[
-                bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
-            ]));
+            // TODO: gnome_id should not be defined here
+            // gnome_id = GnomeId(as_u64_be(&[
+            //     bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
+            // ]));
+            println!("Reconf byte: {}", bytes[5]);
             (Header::Reconfigure(bytes[5], gnome_id), 5)
         }
     } else {
@@ -104,30 +107,95 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
         if bytes[data_idx] == 255 {
             Payload::Bye
         } else {
+            let sig_type = bytes[data_idx + 1];
+            let signature = if sig_type == 0 {
+                println!("Regular sig");
+                let mut sig_bytes = vec![];
+                for i in data_idx + 2..data_idx + 66 {
+                    sig_bytes.push(bytes[i]);
+                }
+                data_idx += 66;
+                Signature::Regular(sig_bytes)
+            } else if sig_type == 255 {
+                println!("Extended sig,all bytes len: {}", bytes.len());
+                let mut pub_key = Vec::with_capacity(74);
+                for i in data_idx + 2..data_idx + 76 {
+                    pub_key.push(bytes[i]);
+                }
+                let mut sig_bytes = Vec::with_capacity(64);
+                for i in data_idx + 76..data_idx + 140 {
+                    sig_bytes.push(bytes[i]);
+                }
+                data_idx += 140;
+                Signature::Extended(pub_key, sig_bytes)
+            } else {
+                panic!("Unexpected value: {}", sig_type);
+            };
             // println!("Configuration!");
-            let config = match bytes[data_idx] {
+            let config = match bytes[5] {
                 254 => {
-                    let c_id: CastID = CastID(bytes[data_idx + 9]);
+                    gnome_id = GnomeId(as_u64_be(&[
+                        bytes[data_idx],
+                        bytes[data_idx + 1],
+                        bytes[data_idx + 2],
+                        bytes[data_idx + 3],
+                        bytes[data_idx + 4],
+                        bytes[data_idx + 5],
+                        bytes[data_idx + 6],
+                        bytes[data_idx + 7],
+                    ]));
+                    let c_id: CastID = CastID(bytes[data_idx + 8]);
+                    // println!("StartBroadcast config {}, {:?}", gnome_id, c_id);
                     Configuration::StartBroadcast(gnome_id, c_id)
                 }
                 253 => {
-                    let c_id: CastID = CastID(bytes[data_idx + 9]);
+                    gnome_id = GnomeId(as_u64_be(&[
+                        bytes[data_idx],
+                        bytes[data_idx + 1],
+                        bytes[data_idx + 2],
+                        bytes[data_idx + 3],
+                        bytes[data_idx + 4],
+                        bytes[data_idx + 5],
+                        bytes[data_idx + 6],
+                        bytes[data_idx + 7],
+                    ]));
+                    let c_id: CastID = CastID(bytes[data_idx + 8]);
                     Configuration::ChangeBroadcastOrigin(gnome_id, c_id)
                 }
                 252 => {
-                    let c_id: CastID = CastID(bytes[data_idx + 9]);
+                    let c_id: CastID = CastID(bytes[data_idx]);
                     Configuration::EndBroadcast(c_id)
                 }
                 251 => {
-                    let c_id: CastID = CastID(bytes[data_idx + 9]);
+                    gnome_id = GnomeId(as_u64_be(&[
+                        bytes[data_idx],
+                        bytes[data_idx + 1],
+                        bytes[data_idx + 2],
+                        bytes[data_idx + 3],
+                        bytes[data_idx + 4],
+                        bytes[data_idx + 5],
+                        bytes[data_idx + 6],
+                        bytes[data_idx + 7],
+                    ]));
+                    let c_id: CastID = CastID(bytes[data_idx + 8]);
                     Configuration::StartMulticast(gnome_id, c_id)
                 }
                 250 => {
-                    let c_id: CastID = CastID(bytes[data_idx + 9]);
+                    gnome_id = GnomeId(as_u64_be(&[
+                        bytes[data_idx],
+                        bytes[data_idx + 1],
+                        bytes[data_idx + 2],
+                        bytes[data_idx + 3],
+                        bytes[data_idx + 4],
+                        bytes[data_idx + 5],
+                        bytes[data_idx + 6],
+                        bytes[data_idx + 7],
+                    ]));
+                    let c_id: CastID = CastID(bytes[data_idx + 8]);
                     Configuration::ChangeMulticastOrigin(gnome_id, c_id)
                 }
                 249 => {
-                    let c_id: CastID = CastID(bytes[data_idx + 9]);
+                    let c_id: CastID = CastID(bytes[data_idx]);
                     Configuration::EndMulticast(c_id)
                 }
                 248 => Configuration::CreateGroup,
@@ -135,7 +203,7 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
                 246 => Configuration::ModifyGroup,
                 other => Configuration::UserDefined(other),
             };
-            Payload::Reconfigure(config)
+            Payload::Reconfigure(signature, config)
         }
     // } else if bytes[0] & 0b0_111_0000 == 80 {
     //     // println!("UNICAST!!");
@@ -158,13 +226,34 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
         let bid: u64 = as_u64_be(&[
             bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12],
         ]);
+        let sig_type = bytes[data_idx];
+        let signature = if sig_type == 0 {
+            println!("Regular sig");
+            let mut sig_bytes = vec![];
+            for i in data_idx + 1..data_idx + 65 {
+                sig_bytes.push(bytes[i]);
+            }
+            data_idx += 65;
+            Signature::Regular(sig_bytes)
+        } else if sig_type == 255 {
+            // println!("Extended sig,all bytes len: {}", bytes.len());
+            let mut pub_key = Vec::with_capacity(74);
+            for i in data_idx + 1..data_idx + 75 {
+                pub_key.push(bytes[i]);
+            }
+            let mut sig_bytes = Vec::with_capacity(64);
+            for i in data_idx + 75..data_idx + 139 {
+                sig_bytes.push(bytes[i]);
+            }
+            data_idx += 139;
+            Signature::Extended(pub_key, sig_bytes)
+        } else {
+            panic!("Unexpected value: {}", sig_type);
+        };
+        // println!("Data idx: {:?}", &bytes[data_idx..]);
+        // println!("len: {}", bytes.len());
         let data = Data::new(Vec::from(&bytes[data_idx..])).unwrap();
-        //     bytes[data_idx],
-        //     bytes[data_idx + 1],
-        //     bytes[data_idx + 2],
-        //     bytes[data_idx + 3],
-        // ]));
-        Payload::Block(BlockID(bid), data)
+        Payload::Block(BlockID(bid), signature, data)
     // } else if bytes[0] & 0b0_111_0000 == 32 {
     //     let nr = bytes_to_neighbor_response(&bytes[1..]);
     //     Payload::Response(nr)
@@ -301,25 +390,6 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
             // bytes.put_u64(bandwith);
             0b0_000_0000
         }
-        // Payload::Unicast(cid, data) => {
-        //     println!("Unicast into bytes");
-        //     bytes.push(cid.0);
-        //     put_u32(&mut bytes, data.0);
-        //     // bytes.put_u32(data.0);
-        //     0b0_101_0000
-        // }
-        // Payload::Multicast(mid, data) => {
-        //     bytes.push(mid.0);
-        //     put_u32(&mut bytes, data.0);
-        //     // bytes.put_u32(data.0);
-        //     0b0_110_0000
-        // }
-        // Payload::Broadcast(bid, data) => {
-        //     bytes.push(bid.0);
-        //     put_u32(&mut bytes, data.0);
-        //     // bytes.put_u32(data.0);
-        //     0b0_011_0000
-        // }
         Payload::Bye => {
             bytes.push(255);
             bytes.push(255);
@@ -328,70 +398,83 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
             // bytes.put_u32(std::u32::MAX);
             0b0_111_0000
         }
-        Payload::Reconfigure(config) => {
+        Payload::Reconfigure(signature, config) => {
+            bytes.push(config.header_byte());
+            bytes.push(signature.header_byte());
+            for sign_byte in signature.bytes() {
+                bytes.push(sign_byte);
+            }
+            // TODO: maybe use config.content_bytes()?
             match config {
                 Configuration::StartBroadcast(g_id, c_id) => {
-                    bytes.push(254);
+                    // bytes.push(254);
                     put_u64(&mut bytes, g_id.0);
                     // bytes.put_u64(g_id.0);
+                    println!("Cast ID: {}", c_id.0);
                     bytes.push(c_id.0);
                 }
                 Configuration::ChangeBroadcastOrigin(g_id, c_id) => {
-                    bytes.push(253);
+                    // bytes.push(253);
                     put_u64(&mut bytes, g_id.0);
                     // bytes.put_u64(g_id.0);
                     bytes.push(c_id.0);
                 }
                 Configuration::EndBroadcast(c_id) => {
-                    bytes.push(252);
+                    // bytes.push(252);
                     bytes.push(c_id.0);
                 }
                 Configuration::StartMulticast(g_id, c_id) => {
-                    bytes.push(251);
+                    // bytes.push(251);
                     put_u64(&mut bytes, g_id.0);
                     // bytes.put_u64(g_id.0);
                     bytes.push(c_id.0);
                 }
                 Configuration::ChangeMulticastOrigin(g_id, c_id) => {
-                    bytes.push(250);
+                    // bytes.push(250);
                     put_u64(&mut bytes, g_id.0);
                     // bytes.put_u64(g_id.0);
                     bytes.push(c_id.0);
                 }
                 Configuration::EndMulticast(c_id) => {
-                    bytes.push(249);
+                    // bytes.push(249);
                     bytes.push(c_id.0);
                 }
                 Configuration::CreateGroup => {
-                    bytes.push(248);
+                    // bytes.push(248);
                     // TODO
                     // bytes.put_u8(c_id.0);
                 }
                 Configuration::DeleteGroup => {
-                    bytes.push(247);
+                    // bytes.push(247);
                     // TODO
                     // bytes.put_u8(c_id.0);
                 }
                 Configuration::ModifyGroup => {
-                    bytes.push(246);
+                    // bytes.push(246);
                     // TODO
                     // bytes.put_u8(c_id.0);
                 }
                 Configuration::UserDefined(id) => {
-                    bytes.push(id);
+                    // bytes.push(id);
                     // TODO
                     // bytes.put_u8(c_id.0);
                 }
             }
+            // TODO: make sure this put_u32 is needed
             put_u32(&mut bytes, config.as_u32());
             // bytes.put_u32(config.as_u32());
             0b0_111_0000
         }
-        Payload::Block(block_id, data) => {
+        Payload::Block(block_id, signature, data) => {
+            // println!("PB: {}", signature.len());
             if !block_id_inserted {
                 put_u64(&mut bytes, block_id.0);
                 // bytes.put_u32(block_id.0);
             };
+            bytes.push(signature.header_byte());
+            for sign_byte in signature.bytes() {
+                bytes.push(sign_byte);
+            }
             // put_u32(&mut bytes, data.0);
             for byte in data.bytes() {
                 bytes.push(byte);

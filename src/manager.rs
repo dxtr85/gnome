@@ -1,8 +1,21 @@
+use crate::crypto::Decrypter;
 use async_std::task::yield_now;
 use swarm_consensus::NetworkSettings;
+use swarm_consensus::SwarmTime;
 // use crate::gnome::NetworkSettings;
 // use crate::swarm::{Swarm, SwarmID};
 use crate::NotificationBundle;
+use rsa::{
+    pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey, EncodeRsaPrivateKey, EncodeRsaPublicKey},
+    pkcs1v15::{Signature, SigningKey, VerifyingKey},
+    pkcs8::LineEnding,
+    sha2::{Digest, Sha256},
+    signature::Verifier,
+    // traits::SignatureScheme,
+    Pkcs1v15Encrypt,
+    RsaPrivateKey,
+    RsaPublicKey,
+};
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use swarm_consensus::GnomeToManager;
@@ -20,6 +33,8 @@ pub enum ManagerResponse {
 }
 pub struct Manager {
     gnome_id: GnomeId,
+    pub_key_der: Vec<u8>,
+    priv_key_pem: String,
     sender: Sender<GnomeToManager>,
     receiver: Receiver<GnomeToManager>,
     swarms: HashMap<SwarmID, Sender<ManagerToGnome>>,
@@ -27,18 +42,70 @@ pub struct Manager {
     name_to_id: HashMap<String, SwarmID>,
     network_settings: NetworkSettings,
     to_networking: Sender<NotificationBundle>,
+    decrypter: Decrypter,
 }
+
+//TODO: Manager should hold Gnome's pub_key_pem in order to provide it
+//      when required (when we want to equip him with a Capability).
+//TODO: decrypter has a sign method that can be used to create signed messages.
+//      Those can be verified by calling Encrypter::verify
+//      on corresponding to given Decrypter entity.
+//      We should do signing and verification within gnome crate, since
+//      swarm-consensus crate should stay dependence-free.
+//      We need to introduce Capabilities (can be defined in swarm-consensus).
+//      Gnome will ask Manager to create a signed message,
+//      Manager will send back a signed message and Gnome will propagate it
+//
+//      Upon receiving a SignedMessage from a Neighbor Gnome needs to verify it.
+//      Gnome will check if given remote GnomeId instance has capabilities
+//      required for building SignedMessage.
+//      If not - message gets discarded, otherwise
+//      Gnome looks up supposed message author's pub_key_pem in swarm's data structure
+//
+//      Then Gnome will ask Manager to verify a signed message by providing:
+//      - message,
+//      - signature,
+//      - pub_key_pem.
+//      Manager will create Encrypter from received data and
+//      confirm or deny validity of given message.
+//      (We do not want any dependencies in swarm-consensus crate.)
+//
+//      If message is Valid - Gnome proceeds, otherwise message is discarded.
+//
+//      Neighbors should not store pub_key_pems. We can have a Capability only
+//      for our (selected) Neighbors and store their pub_key_pems there.
+//      But only in case we need to send SignedMessages between direct peers.
+//      In case we want to create a ChainedUnicast stream for communication
+//      between two gnomes that are not direct Neighbors we will need a Capability
+//      for such known Gnome in order to verify this was indeed sent by him.
+//
+//      Signing and verification can be also useful for Multicasting in order
+//      to prevent spoofing.
+//      Swarm reconfiguration should be done only with SignedMessages.
+//      Sending a message uplink to broadcast's origin in order for him to
+//      transmit this message via broadcast channel can be also done via
+//      SignedMessage.
+//
+//      In order to make the Capabilities system work we need to create a mapping
+//      between SignedMessage and a list of Capabilities required from a Gnome
+//      that wants to instantiate such message.
+//      When a SignedMessage is accepted, it is passed to user.
 
 impl Manager {
     pub fn new(
         gnome_id: GnomeId,
+        pub_key_der: Vec<u8>,
+        priv_key_pem: String,
         network_settings: Option<NetworkSettings>,
         to_networking: Sender<NotificationBundle>,
+        decrypter: Decrypter,
     ) -> Manager {
         let network_settings = network_settings.unwrap_or_default();
         let (sender, receiver) = channel();
         Manager {
             gnome_id,
+            pub_key_der,
+            priv_key_pem,
             sender,
             receiver,
             swarms: HashMap::new(),
@@ -46,6 +113,7 @@ impl Manager {
             name_to_id: HashMap::new(),
             network_settings,
             to_networking, // Send a message to networking about new swarm subscription, and where to send Neighbors
+            decrypter,
         }
     }
 
@@ -207,16 +275,102 @@ impl Manager {
             }
             let mgr_sender = self.sender.clone();
             let (send, recv) = channel();
+
+            fn verify(
+                key: &Vec<u8>,
+                swarm_time: SwarmTime,
+                data: &mut Vec<u8>,
+                signature: &[u8],
+            ) -> bool {
+                println!("Verify time: {:?}", swarm_time);
+                // println!("PubKey DER: '{:?}' {}", key, key.len());
+                let res = DecodeRsaPublicKey::from_pkcs1_der(key);
+                // println!("decode res: {:?}", res);
+                // let res = DecodeRsaPublicKey::from_pkcs1_pem(&key[..key.len() - 4]);
+                if let Ok(pub_key) = res {
+                    // println!("PubKey decoded!");
+                    let signature_three = Signature::try_from(signature).unwrap();
+
+                    let verifier: VerifyingKey<Sha256> = VerifyingKey::new(pub_key);
+                    // Include timestamp before signing
+                    let mut last_byte = 0;
+                    for st_byte in swarm_time.0.to_be_bytes() {
+                        data.push(st_byte);
+                        last_byte = st_byte;
+                    }
+                    let mut result = verifier.verify(data, &signature_three);
+                    // TODO: dirty hack to check against two more neighboring SwarmTimes
+                    if result.is_err() {
+                        last_byte += 1;
+                        data.pop();
+                        data.push(last_byte);
+                        result = verifier.verify(data, &signature_three);
+                    }
+                    if result.is_err() {
+                        last_byte -= 2;
+                        data.pop();
+                        data.push(last_byte);
+                        result = verifier.verify(data, &signature_three);
+                    }
+                    // println!("verify: {:?}", result);
+                    // Remove timestamp
+                    data.pop();
+                    data.pop();
+                    data.pop();
+                    data.pop();
+                    result.is_ok()
+                } else {
+                    println!("Unable to decode PubKey");
+                    false
+                }
+            }
+
+            fn sign(
+                priv_key_pem: &str,
+                swarm_time: SwarmTime,
+                data: &mut Vec<u8>,
+            ) -> Result<Vec<u8>, ()> {
+                println!("Sign time: {:?}", swarm_time);
+                if let Ok(priv_key) = DecodeRsaPrivateKey::from_pkcs1_pem(priv_key_pem) {
+                    let signer: SigningKey<Sha256> = SigningKey::new(priv_key);
+                    // Include timestamp before signing
+                    for st_byte in swarm_time.0.to_be_bytes() {
+                        data.push(st_byte);
+                    }
+                    // let mut rng = OsRng;
+                    let mut digest = <Sha256 as Digest>::new();
+                    digest.update(&data);
+                    use rsa::signature::DigestSigner;
+                    let signature_result = signer.sign_digest(digest);
+                    let signature_string = signature_result.to_string();
+                    let mut bytes: Vec<u8> = vec![];
+                    for i in (0..signature_string.len()).step_by(2) {
+                        bytes.push(u8::from_str_radix(&signature_string[i..i + 2], 16).unwrap());
+                    }
+                    // Remove timestamp
+                    data.pop();
+                    data.pop();
+                    data.pop();
+                    data.pop();
+                    Ok(bytes)
+                } else {
+                    Err(())
+                }
+            };
             let (sender, receiver) = Swarm::join(
                 name.clone(),
                 swarm_id,
                 self.gnome_id,
+                self.pub_key_der.clone(),
+                self.priv_key_pem.clone(),
                 neighbors,
                 mgr_sender,
                 recv,
                 band_recv,
                 net_settings_send,
                 self.network_settings,
+                verify,
+                sign,
             );
             // println!("swarm '{}' created ", name);
             // let sender = swarm.sender.clone();

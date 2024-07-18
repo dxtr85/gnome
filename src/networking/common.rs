@@ -1,3 +1,4 @@
+use crate::crypto::Encrypter;
 use crate::networking::stun::{
     build_request, stun_decode, stun_send, StunChangeRequest, StunMessage,
 };
@@ -134,6 +135,8 @@ pub fn create_a_neighbor_for_each_swarm(
         Sender<CastMessage>,
         Receiver<WrappedMessage>,
     )>,
+    // encrypter: Encrypter,
+    pub_key_pem: String,
 ) {
     // println!("Neighbor: {}", neighbor_id);
     // println!("komon names: {:?}", common_names);
@@ -150,6 +153,7 @@ pub fn create_a_neighbor_for_each_swarm(
             SwarmTime(0),
             SwarmTime(7),
             remote_names.clone(),
+            // pub_key_pem.clone(),
         );
         println!("Request include neighbor");
         let _ = sender.send(Subscription::IncludeNeighbor(name, neighbor));

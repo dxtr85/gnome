@@ -35,6 +35,9 @@ impl Encrypter {
         hasher.finish()
     }
 
+    pub fn pub_key_der(&self) -> Vec<u8> {
+        self.0.to_pkcs1_der().unwrap().to_vec()
+    }
     pub fn create_from_data(data: &str) -> Result<Self, String> {
         let res = DecodeRsaPublicKey::from_pkcs1_pem(data);
         if let Ok(pub_key) = res {

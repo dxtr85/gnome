@@ -836,8 +836,8 @@ pub async fn start_communication(
     // let remote_addr = SocketAddr::from_str("")
 
     // dedicated_socket.connect(remote_addr).await.unwrap();
-    let id_pub_key_pem = std::str::from_utf8(&buf[..count]).unwrap();
-    let result = Encrypter::create_from_data(id_pub_key_pem);
+    let id_pub_key_pem = std::str::from_utf8(&buf[..count]).unwrap().to_string();
+    let result = Encrypter::create_from_data(&id_pub_key_pem);
     if result.is_err() {
         println!("Failed to build Encrypter from received PEM: {:?}", result);
         // return None;
@@ -971,11 +971,13 @@ pub async fn start_communication(
     // let swarm_names = vec![swarm_name];
     spawn(prepare_and_serve(
         dedicated_socket,
-        remote_gnome_id,
+        // remote_gnome_id,
         session_key,
         swarm_names,
         sub_sender.clone(),
         pipes_sender.clone(),
+        // encr,
+        id_pub_key_pem,
     ));
     // resp_receiver
 }

@@ -186,26 +186,28 @@ async fn establish_secure_connection(
         println!("Received {} bytes", count);
         let decr_res = session_key.decrypt(&recv_buf[..count]);
         if let Ok(remote_pubkey_pem) = decr_res {
-            let remote_id_pub_key_pem = std::str::from_utf8(&remote_pubkey_pem).unwrap();
-            let encr = Encrypter::create_from_data(remote_id_pub_key_pem).unwrap();
-            remote_gnome_id = GnomeId(encr.hash());
-            println!("Remote GnomeId: {}", remote_gnome_id);
-            println!(
-                "Decrypted PEM using session key:\n {:?}",
-                remote_id_pub_key_pem
-            );
+            let remote_id_pub_key_pem =
+                std::str::from_utf8(&remote_pubkey_pem).unwrap().to_string();
+            spawn(prepare_and_serve(
+                dedicated_socket,
+                // remote_gnome_id,
+                session_key,
+                swarm_names,
+                sender.clone(),
+                pipes_sender.clone(),
+                // encr,
+                remote_id_pub_key_pem,
+            ));
+        } else {
+            println!("Failed to decrypt message");
+            return;
         }
+    } else {
+        println!("Failed to receive data from remote");
+        return;
     }
 
-    spawn(prepare_and_serve(
-        dedicated_socket,
-        remote_gnome_id,
-        session_key,
-        swarm_names,
-        sender.clone(),
-        pipes_sender.clone(),
-    ));
-    return;
+    // return;
     // }
     // resp_receiver
 }
@@ -262,12 +264,18 @@ async fn establish_secure_connection(
 
 pub async fn prepare_and_serve(
     dedicated_socket: UdpSocket,
-    remote_gnome_id: GnomeId,
+    // remote_gnome_id: GnomeId,
     session_key: SessionKey,
     swarm_names: Vec<String>,
     sender: Sender<Subscription>,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    // encrypter: Encrypter,
+    pub_key_pem: String,
 ) {
+    let encr = Encrypter::create_from_data(&pub_key_pem).unwrap();
+    let remote_gnome_id = GnomeId(encr.hash());
+    println!("Remote GnomeId: {}", remote_gnome_id);
+    println!("Decrypted PEM using session key:\n {:?}", pub_key_pem);
     send_subscribed_swarm_names(&dedicated_socket, &swarm_names).await;
 
     let mut remote_names: Vec<String> = vec![];
@@ -293,6 +301,7 @@ pub async fn prepare_and_serve(
         remote_gnome_id,
         &mut ch_pairs,
         shared_sender.clone(),
+        pub_key_pem,
     );
 
     // spawn a task to serve socket
