@@ -1,5 +1,6 @@
 use crate::crypto::Decrypter;
 use async_std::task::yield_now;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use swarm_consensus::NetworkSettings;
 use swarm_consensus::SwarmTime;
 // use crate::gnome::NetworkSettings;
@@ -277,6 +278,7 @@ impl Manager {
             let (send, recv) = channel();
 
             fn verify(
+                gnome_id: GnomeId,
                 key: &Vec<u8>,
                 swarm_time: SwarmTime,
                 data: &mut Vec<u8>,
@@ -284,32 +286,50 @@ impl Manager {
             ) -> bool {
                 println!("Verify time: {:?}", swarm_time);
                 // println!("PubKey DER: '{:?}' {}", key, key.len());
-                let res = DecodeRsaPublicKey::from_pkcs1_der(key);
+                let res: std::result::Result<RsaPublicKey, rsa::pkcs1::Error> =
+                    DecodeRsaPublicKey::from_pkcs1_der(key);
                 // println!("decode res: {:?}", res);
                 // let res = DecodeRsaPublicKey::from_pkcs1_pem(&key[..key.len() - 4]);
+                // let pub_key: RsaPublicKey;
                 if let Ok(pub_key) = res {
+                    let mut hasher = DefaultHasher::new();
+                    pub_key.hash(&mut hasher);
+                    let id: u64 = hasher.finish();
+                    if id != gnome_id.0 {
+                        println!("Verify FAIL: GnomeId mismatch!");
+                        return false;
+                    }
                     // println!("PubKey decoded!");
                     let signature_three = Signature::try_from(signature).unwrap();
 
                     let verifier: VerifyingKey<Sha256> = VerifyingKey::new(pub_key);
                     // Include timestamp before signing
-                    let mut last_byte = 0;
                     for st_byte in swarm_time.0.to_be_bytes() {
                         data.push(st_byte);
-                        last_byte = st_byte;
                     }
                     let mut result = verifier.verify(data, &signature_three);
+
                     // TODO: dirty hack to check against two more neighboring SwarmTimes
+                    let mut last_byte = swarm_time.0 + 1;
                     if result.is_err() {
-                        last_byte += 1;
                         data.pop();
-                        data.push(last_byte);
+                        data.pop();
+                        data.pop();
+                        data.pop();
+                        for st_byte in last_byte.to_be_bytes() {
+                            data.push(st_byte);
+                        }
+                        last_byte -= 2;
                         result = verifier.verify(data, &signature_three);
                     }
                     if result.is_err() {
-                        last_byte -= 2;
                         data.pop();
-                        data.push(last_byte);
+                        data.pop();
+                        data.pop();
+                        data.pop();
+                        for st_byte in last_byte.to_be_bytes() {
+                            data.push(st_byte);
+                        }
                         result = verifier.verify(data, &signature_three);
                     }
                     // println!("verify: {:?}", result);

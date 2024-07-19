@@ -79,16 +79,16 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
         let block_id: u64 = as_u64_be(&[
             bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12],
         ]);
-        (Header::Block(BlockID(block_id)), 13)
+        (Header::Block(BlockID(block_id)), 21)
     } else if bytes[0] & 0b0_111_0000 == 112 {
         if bytes[5] == 255 {
             (Header::Sync, 5)
         } else {
             // TODO: is data_idx correct here?
             // TODO: gnome_id should not be defined here
-            // gnome_id = GnomeId(as_u64_be(&[
-            //     bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
-            // ]));
+            gnome_id = GnomeId(as_u64_be(&[
+                bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
+            ]));
             println!("Reconf byte: {}", bytes[5]);
             (Header::Reconfigure(bytes[5], gnome_id), 5)
         }
@@ -107,27 +107,27 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
         if bytes[data_idx] == 255 {
             Payload::Bye
         } else {
-            let sig_type = bytes[data_idx + 1];
+            let sig_type = bytes[data_idx + 9];
             let signature = if sig_type == 0 {
                 println!("Regular sig");
                 let mut sig_bytes = vec![];
-                for i in data_idx + 2..data_idx + 66 {
+                for i in data_idx + 10..data_idx + 74 {
                     sig_bytes.push(bytes[i]);
                 }
-                data_idx += 66;
-                Signature::Regular(sig_bytes)
+                data_idx += 74;
+                Signature::Regular(gnome_id, sig_bytes)
             } else if sig_type == 255 {
                 println!("Extended sig,all bytes len: {}", bytes.len());
                 let mut pub_key = Vec::with_capacity(74);
-                for i in data_idx + 2..data_idx + 76 {
+                for i in data_idx + 10..data_idx + 84 {
                     pub_key.push(bytes[i]);
                 }
                 let mut sig_bytes = Vec::with_capacity(64);
-                for i in data_idx + 76..data_idx + 140 {
+                for i in data_idx + 84..data_idx + 148 {
                     sig_bytes.push(bytes[i]);
                 }
-                data_idx += 140;
-                Signature::Extended(pub_key, sig_bytes)
+                data_idx += 148;
+                Signature::Extended(gnome_id, pub_key, sig_bytes)
             } else {
                 panic!("Unexpected value: {}", sig_type);
             };
@@ -226,6 +226,9 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
         let bid: u64 = as_u64_be(&[
             bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12],
         ]);
+        let gnome_id: u64 = as_u64_be(&[
+            bytes[13], bytes[14], bytes[15], bytes[16], bytes[17], bytes[18], bytes[19], bytes[20],
+        ]);
         let sig_type = bytes[data_idx];
         let signature = if sig_type == 0 {
             println!("Regular sig");
@@ -234,7 +237,7 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
                 sig_bytes.push(bytes[i]);
             }
             data_idx += 65;
-            Signature::Regular(sig_bytes)
+            Signature::Regular(GnomeId(gnome_id), sig_bytes)
         } else if sig_type == 255 {
             // println!("Extended sig,all bytes len: {}", bytes.len());
             let mut pub_key = Vec::with_capacity(74);
@@ -246,7 +249,7 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
                 sig_bytes.push(bytes[i]);
             }
             data_idx += 139;
-            Signature::Extended(pub_key, sig_bytes)
+            Signature::Extended(GnomeId(gnome_id), pub_key, sig_bytes)
         } else {
             panic!("Unexpected value: {}", sig_type);
         };
@@ -400,6 +403,7 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
         }
         Payload::Reconfigure(signature, config) => {
             bytes.push(config.header_byte());
+            put_u64(&mut bytes, signature.gnome_id().0);
             bytes.push(signature.header_byte());
             for sign_byte in signature.bytes() {
                 bytes.push(sign_byte);
@@ -461,7 +465,7 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
                 }
             }
             // TODO: make sure this put_u32 is needed
-            put_u32(&mut bytes, config.as_u32());
+            // put_u32(&mut bytes, config.as_u32());
             // bytes.put_u32(config.as_u32());
             0b0_111_0000
         }
@@ -471,6 +475,7 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
                 put_u64(&mut bytes, block_id.0);
                 // bytes.put_u32(block_id.0);
             };
+            put_u64(&mut bytes, signature.gnome_id().0);
             bytes.push(signature.header_byte());
             for sign_byte in signature.bytes() {
                 bytes.push(sign_byte);
