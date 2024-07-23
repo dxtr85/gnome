@@ -458,6 +458,13 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
                     // TODO
                     // bytes.put_u8(c_id.0);
                 }
+                Configuration::InsertPubkey(g_id, pub_key) => {
+                    bytes.push(245);
+                    put_u64(&mut bytes, g_id.0);
+                    for b in pub_key {
+                        bytes.push(b);
+                    }
+                }
                 Configuration::UserDefined(id) => {
                     // bytes.push(id);
                     // TODO
