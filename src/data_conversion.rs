@@ -135,7 +135,6 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
             let config = match bytes[5] {
                 254 => {
                     gnome_id = GnomeId(as_u64_be(&[
-                        bytes[data_idx],
                         bytes[data_idx + 1],
                         bytes[data_idx + 2],
                         bytes[data_idx + 3],
@@ -143,14 +142,14 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
                         bytes[data_idx + 5],
                         bytes[data_idx + 6],
                         bytes[data_idx + 7],
+                        bytes[data_idx + 8],
                     ]));
-                    let c_id: CastID = CastID(bytes[data_idx + 8]);
+                    let c_id: CastID = CastID(bytes[data_idx + 9]);
                     // println!("StartBroadcast config {}, {:?}", gnome_id, c_id);
                     Configuration::StartBroadcast(gnome_id, c_id)
                 }
                 253 => {
                     gnome_id = GnomeId(as_u64_be(&[
-                        bytes[data_idx],
                         bytes[data_idx + 1],
                         bytes[data_idx + 2],
                         bytes[data_idx + 3],
@@ -158,8 +157,9 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
                         bytes[data_idx + 5],
                         bytes[data_idx + 6],
                         bytes[data_idx + 7],
+                        bytes[data_idx + 8],
                     ]));
-                    let c_id: CastID = CastID(bytes[data_idx + 8]);
+                    let c_id: CastID = CastID(bytes[data_idx + 9]);
                     Configuration::ChangeBroadcastOrigin(gnome_id, c_id)
                 }
                 252 => {
@@ -168,7 +168,6 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
                 }
                 251 => {
                     gnome_id = GnomeId(as_u64_be(&[
-                        bytes[data_idx],
                         bytes[data_idx + 1],
                         bytes[data_idx + 2],
                         bytes[data_idx + 3],
@@ -176,13 +175,13 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
                         bytes[data_idx + 5],
                         bytes[data_idx + 6],
                         bytes[data_idx + 7],
+                        bytes[data_idx + 8],
                     ]));
-                    let c_id: CastID = CastID(bytes[data_idx + 8]);
+                    let c_id: CastID = CastID(bytes[data_idx + 9]);
                     Configuration::StartMulticast(gnome_id, c_id)
                 }
                 250 => {
                     gnome_id = GnomeId(as_u64_be(&[
-                        bytes[data_idx],
                         bytes[data_idx + 1],
                         bytes[data_idx + 2],
                         bytes[data_idx + 3],
@@ -190,8 +189,9 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
                         bytes[data_idx + 5],
                         bytes[data_idx + 6],
                         bytes[data_idx + 7],
+                        bytes[data_idx + 8],
                     ]));
-                    let c_id: CastID = CastID(bytes[data_idx + 8]);
+                    let c_id: CastID = CastID(bytes[data_idx + 9]);
                     Configuration::ChangeMulticastOrigin(gnome_id, c_id)
                 }
                 249 => {
@@ -201,6 +201,25 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
                 248 => Configuration::CreateGroup,
                 247 => Configuration::DeleteGroup,
                 246 => Configuration::ModifyGroup,
+                245 => {
+                    // println!("Reading InsertPubkey config");
+                    gnome_id = GnomeId(as_u64_be(&[
+                        bytes[data_idx + 1],
+                        bytes[data_idx + 2],
+                        bytes[data_idx + 3],
+                        bytes[data_idx + 4],
+                        bytes[data_idx + 5],
+                        bytes[data_idx + 6],
+                        bytes[data_idx + 7],
+                        bytes[data_idx + 8],
+                    ]));
+                    let mut key = vec![];
+                    for i in data_idx + 9..bytes.len() {
+                        key.push(bytes[i]);
+                    }
+                    // println!("read: {}, {:?}", gnome_id, key);
+                    Configuration::InsertPubkey(gnome_id, key)
+                }
                 other => Configuration::UserDefined(other),
             };
             Payload::Reconfigure(signature, config)

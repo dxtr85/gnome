@@ -26,7 +26,7 @@ use swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, Wr
 
 async fn read_bytes_from_socket(
     socket: &UdpSocket,
-    buf: &mut [u8; 1100],
+    buf: &mut [u8; 1500],
 ) -> Result<Vec<u8>, String> {
     // println!("read_bytes_from_socket");
     // TODO: increase size of buffer everywhere
@@ -146,8 +146,8 @@ async fn race_tasks(
         senders.insert(i as u8, (sender, c_sender));
         receivers.insert(i as u8, receiver);
     }
-    let mut buf = [0u8; 1100];
-    let mut buf2 = [0u8; 1100];
+    let mut buf = [0u8; 1500];
+    let mut buf2 = [0u8; 1500];
     // if let Some((sender, mut receiver)) = send_recv_pairs.pop() {
     loop {
         // print!("l");
@@ -214,6 +214,7 @@ async fn race_tasks(
                 // if bytes.len() <= count {
                 // println!("Count {}", count);
                 if count > 0 {
+                    println!("Got {} bytes to decipher", count);
                     let decr_res = session_key.decrypt(&buf[..count]);
                     // buf = BytesMut::zeroed(1100);
                     if let Ok(deciph) = decr_res {
