@@ -52,7 +52,7 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
     let server_port: u16 = 1026;
     // let nic_buffer_size: u32 = 500000;
     let nic_buffer_size: u64 = 0;
-    let upload_bytes_per_sec: u64 = 10240;
+    let upload_bytes_per_sec: u64 = 1024000;
     let mut decrypter: Option<Decrypter> = None;
     // let mut encrypter: Option<Encrypter> = None;
     let priv_path = PathBuf::from(work_dir.clone()).join("id_rsa");

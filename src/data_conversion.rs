@@ -73,33 +73,33 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
     let neighborhood: Neighborhood = Neighborhood(bytes[0] & 0b0_000_1111);
     let mut gnome_id: GnomeId = GnomeId(0);
     let (header, mut data_idx) = if bytes[0] & 0b1_000_0000 == 128 {
-        if bytes[0] & 0b0100_0000 == 64 {
+        if bytes[0] & 0b0110_0000 == 96 {
             let block_id: u64 = as_u64_be(&[
                 bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12],
             ]);
             (Header::Block(BlockID(block_id)), 21)
-        } else {
+        } else if bytes[0] & 0b0110_0000 == 64 {
+            let block_id: u64 = as_u64_be(&[
+                bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12],
+            ]);
+            (Header::Block(BlockID(block_id)), 13)
+        } else if bytes[0] & 0b0110_0000 == 32 {
             gnome_id = GnomeId(as_u64_be(&[
                 bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
             ]));
             println!("Reconf byte: {}", bytes[5]);
             (Header::Reconfigure(bytes[5], gnome_id), 5)
+        } else {
+            gnome_id = GnomeId(as_u64_be(&[
+                bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
+            ]));
+            // println!("Reconf byte: {}", bytes[5]);
+            (Header::Reconfigure(bytes[5], gnome_id), 14)
         }
     // } else if bytes[0] & 0b0_111_0000 == 112 {
     } else {
         // if bytes[5] == 255 {
         (Header::Sync, 5)
-        // } else {
-        // TODO: is data_idx correct here?
-        // TODO: gnome_id should not be defined here
-        // gnome_id = GnomeId(as_u64_be(&[
-        //     bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
-        // ]));
-        // println!("Reconf byte: {}", bytes[5]);
-        // (Header::Reconfigure(bytes[5], gnome_id), 5)
-        // }
-        // } else {
-        //     (Header::Sync, 5)
     };
     // let payload: Payload = if bytes[0] & 0b0_111_0000 == 112 {
     let payload: Payload = if header.is_sync() {
@@ -115,14 +115,6 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
                 bytes[data_idx + 7],
             ]);
             Payload::KeepAlive(bandwith)
-        // } else if bytes[0] & 0b0011_0000 == 16 {
-        //     // TODO: NeighborRequest
-        //     let n_req = NeighborRequest::SwarmSyncRequest;
-        //     Payload::Request(n_req)
-        // } else if bytes[0] & 0b0011_0000 == 32 {
-        //     //TODO: NeighborResponse
-        //     let n_resp = NeighborResponse::ForwardConnectFailed;
-        //     Payload::Request(n_resp)
         } else if bytes[0] & 0b0110_0000 == 64 {
             Payload::Bye
         } else {
@@ -133,6 +125,7 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
         if bytes[0] & 0b0010_0000 == 0 {
             println!("Reconf KA");
             let bandwith: u64 = as_u64_be(&[
+                bytes[data_idx],
                 bytes[data_idx + 1],
                 bytes[data_idx + 2],
                 bytes[data_idx + 3],
@@ -140,12 +133,13 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
                 bytes[data_idx + 5],
                 bytes[data_idx + 6],
                 bytes[data_idx + 7],
-                bytes[data_idx + 8],
             ]);
             Payload::KeepAlive(bandwith)
-        } else if bytes[0] & 0b0010_0000 == 32 {
-            println!("Reconf conf");
-            println!("Configuration! {}", bytes[data_idx]);
+        // } else if bytes[0] & 0b0010_0000 == 32 {
+        } else {
+            // println!("Reconf conf");
+            // println!("Configuration! {}", bytes[data_idx]);
+            // println!("Configuration! {:?}", bytes);
             let config = match bytes[data_idx] {
                 254 => {
                     let c_id: CastID = CastID(bytes[data_idx + 9]);
@@ -207,7 +201,7 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
             };
             let sig_type = bytes[data_idx];
             let signature = if sig_type == 0 {
-                println!("Regular sig");
+                // println!("Regular sig");
                 let mut sig_bytes = vec![];
                 for i in data_idx + 1..data_idx + 65 {
                     sig_bytes.push(bytes[i]);
@@ -215,7 +209,7 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
                 // data_idx += 74;
                 Signature::Regular(gnome_id, sig_bytes)
             } else if sig_type == 255 {
-                println!("Extended sig,all bytes len: {}", bytes.len());
+                // println!("Extended sig,all bytes len: {}", bytes.len());
                 let mut pub_key = Vec::with_capacity(74);
                 for i in data_idx + 1..data_idx + 75 {
                     pub_key.push(bytes[i]);
@@ -230,16 +224,6 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
                 panic!("Unexpected value: {}", sig_type);
             };
             Payload::Reconfigure(signature, config)
-        // } else if bytes[0] & 0b0011_0000 == 16 {
-        //     // TODO: NeighborRequest
-        //     let n_req = NeighborRequest::SwarmSyncRequest;
-        //     Payload::Request(n_req)
-        // } else if bytes[0] & 0b0011_0000 == 32 {
-        //     //TODO: NeighborResponse
-        //     let n_resp = NeighborResponse::ForwardConnectFailed;
-        //     Payload::Request(n_resp)
-        } else {
-            panic!("Uncovered payload value, Reconf header: {}", bytes[0]);
         }
 
     // } else if bytes[0] & 0b0_111_0000 == 64 {
@@ -256,10 +240,9 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
             bytes[data_idx + 7],
         ]);
         Payload::KeepAlive(bandwith)
-    } else if bytes[0] & 0b0010_0000 == 32 {
+    // } else if bytes[0] & 0b0010_0000 == 32 {
+    } else {
         // println!("Header Block, Payload Block");
-        // let bid: u32 = as_u32_be(&[bytes[6], bytes[7], bytes[8], bytes[9]]);
-        // let data = Data(as_u32_be(&[bytes[10], bytes[11], bytes[12], bytes[13]]));
         let bid: u64 = as_u64_be(&[
             bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12],
         ]);
@@ -268,7 +251,7 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
         ]);
         let sig_type = bytes[data_idx];
         let signature = if sig_type == 0 {
-            println!("Regular sig");
+            // println!("Regular sig");
             let mut sig_bytes = vec![];
             for i in data_idx + 1..data_idx + 65 {
                 sig_bytes.push(bytes[i]);
@@ -294,52 +277,7 @@ pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
         // println!("len: {}", bytes.len());
         let data = Data::new(Vec::from(&bytes[data_idx..])).unwrap();
         Payload::Block(BlockID(bid), signature, data)
-    // } else if bytes[0] & 0b0011_0000 == 16 {
-    //     // TODO: NeighborRequest
-    //     let n_req = NeighborRequest::SwarmSyncRequest;
-    //     Payload::Request(n_req)
-    // } else if bytes[0] & 0b0011_0000 == 32 {
-    //     //TODO: NeighborResponse
-    //     let n_resp = NeighborResponse::ForwardConnectFailed;
-    //     Payload::Request(n_resp)
-    } else {
-        panic!("Uncovered payload value, Reconf header: {}", bytes[0]);
-        // }
     };
-    // } else if bytes[0] & 0b0_111_0000 == 32 {
-    //     let nr = bytes_to_neighbor_response(&bytes[1..]);
-    //     Payload::Response(nr)
-    // } else if bytes[0] & 0b0_111_0000 == 48 {
-    //     let c_id = CastID(bytes[data_idx]);
-    //     let data: Data = Data(as_u32_be(&[
-    //         bytes[data_idx + 1],
-    //         bytes[data_idx + 2],
-    //         bytes[data_idx + 3],
-    //         bytes[data_idx + 4],
-    //     ]));
-    //     Payload::Broadcast(c_id, data)
-    // } else if bytes[0] & 0b0_111_0000 == 96 {
-    //     let c_id = CastID(bytes[data_idx]);
-    //     let data: Data = Data(as_u32_be(&[
-    //         bytes[data_idx + 1],
-    //         bytes[data_idx + 2],
-    //         bytes[data_idx + 3],
-    //         bytes[data_idx + 4],
-    //     ]));
-    //     Payload::Multicast(c_id, data)
-    // } else {
-    //     let bandwith: u64 = as_u64_be(&[
-    //         bytes[data_idx],
-    //         bytes[data_idx + 1],
-    //         bytes[data_idx + 2],
-    //         bytes[data_idx + 3],
-    //         bytes[data_idx + 4],
-    //         bytes[data_idx + 5],
-    //         bytes[data_idx + 6],
-    //         bytes[data_idx + 7],
-    //     ]);
-    //     Payload::KeepAlive(bandwith)
-    // };
     Ok(Message {
         swarm_time,
         neighborhood,
@@ -439,12 +377,14 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
         }
         put_u64(&mut bytes, block_id.0);
         block_id_inserted = true;
-    } else if let Header::Reconfigure(_conf_id, _gnome_id) = msg.header {
+    } else if let Header::Reconfigure(conf_id, gnome_id) = msg.header {
         if matches!(msg.payload, Payload::Reconfigure(ref _s, ref _d)) {
             bytes[0] |= 0b101_00000;
         } else {
             bytes[0] |= 0b100_00000;
         }
+        bytes.push(conf_id);
+        put_u64(&mut bytes, gnome_id.0);
     } else if matches!(msg.payload, Payload::Bye) {
         bytes[0] |= 0b010_00000;
         return bytes;
@@ -459,7 +399,7 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
         }
         Payload::Reconfigure(signature, config) => {
             // bytes.push(config.header_byte());
-            for byte in config.bytes() {
+            for byte in config.content_bytes(false) {
                 bytes.push(byte);
             }
             // put_u64(&mut bytes, signature.gnome_id().0);
