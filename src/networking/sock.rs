@@ -217,7 +217,7 @@ async fn race_tasks(
                     // println!("Got {} bytes to decipher", count);
                     let decr_res = session_key.decrypt(&buf[..count]);
                     // buf = BytesMut::zeroed(1100);
-                    if let Ok(deciph) = decr_res {
+                    if let Ok(mut deciph) = decr_res {
                         // println!("Decrypted: {:?}", deciph);
                         // let deciph = Bytes::from(deciph);
                         // let mut byte_iterator = deciph.into_iter();
@@ -227,9 +227,10 @@ async fn race_tasks(
                         if let Some((sender, cast_sender)) = senders.get(&swarm_id) {
                             if dgram_header & 0b11000000 == 0 {
                                 // TODO: regular message
-                                let deciphered = &deciph[1..];
+                                deciph.drain(0..1);
+                                // let deciphered = &deciph[1..];
                                 // println!("received a regular message: {:?}", deciphered);
-                                if let Ok(message) = bytes_to_message(deciphered) {
+                                if let Ok(message) = bytes_to_message(deciph) {
                                     // println!("decode OK: {:?}", message);
                                     let _send_result = sender.send(message);
                                     if _send_result.is_err() {
@@ -246,7 +247,9 @@ async fn race_tasks(
                                 match c_id {
                                     255 => {
                                         // TODO N_Req
-                                        let n_req = bytes_to_neighbor_request(&deciph[2..]);
+                                        deciph.drain(0..2);
+                                        // let n_req = bytes_to_neighbor_request(&deciph[2..]);
+                                        let n_req = bytes_to_neighbor_request(deciph);
                                         let message = CastMessage::new_request(n_req);
                                         let _send_result = cast_sender.send(message);
                                         if _send_result.is_err() {
@@ -255,7 +258,8 @@ async fn race_tasks(
                                     }
                                     254 => {
                                         // TODO N_Resp
-                                        let n_resp = bytes_to_neighbor_response(&deciph[2..]);
+                                        deciph.drain(0..2);
+                                        let n_resp = bytes_to_neighbor_response(deciph);
                                         let message = CastMessage::new_response(n_resp);
                                         let _send_result = cast_sender.send(message);
                                         if _send_result.is_err() {
@@ -295,7 +299,8 @@ async fn race_tasks(
                             // TODO: maybe we should instantiate a new
                             // Neighbor for a new swarm?
                             // For this we need Sender<Subscription> ?
-                            let neighbor_request = bytes_to_neighbor_request(&deciph[2..]);
+                            deciph.drain(0..2);
+                            let neighbor_request = bytes_to_neighbor_request(deciph);
                             // println!("NR: {:?}", neighbor_request);
                             if let NeighborRequest::CreateNeighbor(remote_gnome_id, swarm_name) =
                                 neighbor_request
