@@ -3,6 +3,7 @@ use crate::networking::stun::{
     build_request, stun_decode, stun_send, StunChangeRequest, StunMessage,
 };
 use crate::networking::subscription::Subscription;
+use aes_gcm::aead::Buffer;
 use async_std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use async_std::task::{sleep, yield_now};
 // use bytes::{BufMut, BytesMut};
@@ -61,7 +62,9 @@ pub async fn send_subscribed_swarm_names(
         // TODO split with some other value
         buf.push(255);
     }
-    // let bytes = buf.col();
+    if !buf.is_empty() {
+        buf.pop();
+    }
     println!("After split: {:?}", &buf);
     // let send_result = socket.send_to(&bytes, remote_addr).await;
     let send_result = socket.send(&buf).await;
