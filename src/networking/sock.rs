@@ -237,7 +237,7 @@ async fn race_tasks(
                                         // TODO: if failed maybe we are no longer interested?
                                         // Maybe send back a bye if possible?
                                         // Remove given Sender/Receiver pair
-                                        println!("send result2: {:?}", _send_result);
+                                        // println!("send result2: {:?}", _send_result);
                                     }
                                 } else {
                                     println!("Failed to decode incoming stream");
@@ -274,7 +274,7 @@ async fn race_tasks(
                                                 // TODO: if failed maybe we are no longer interested?
                                                 // Maybe send back a bye if possible?
                                                 // Remove given Sender/Receiver pair
-                                                println!("send result2: {:?}", _send_result);
+                                                println!("send result3: {:?}", _send_result);
                                             }
                                         }
                                     }
@@ -288,7 +288,7 @@ async fn race_tasks(
                                     // TODO: if failed maybe we are no longer interested?
                                     // Maybe send back a bye if possible?
                                     // Remove given Sender/Receiver pair
-                                    println!("send result2: {:?}", _send_result);
+                                    println!("send result4: {:?}", _send_result);
                                 }
                                 // }
                             } else {

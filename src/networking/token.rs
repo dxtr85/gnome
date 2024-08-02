@@ -67,21 +67,7 @@ pub async fn token_dispenser(
             }
         }
         if let Ok((s, r)) = reciever.try_recv() {
-            // match tm {
-            //     TokenMessage::Add((s, r)) => {
             socket_pipes.push_back((s, r, token_size, false));
-            //     }
-            //     TokenMessage::AvailBandwith(_) => {
-            //         let _ = sender.send(TokenMessage::AvailBandwith(std::cmp::max(
-            //             bandwith_bytes_sec - used_bandwith.iter().sum::<u32>(),
-            //             0,
-            //         )));
-            //     }
-            //     TokenMessage::SlowDown => {
-            //         //TODO: better algo
-            //         token_size = std::cmp::max(min_token_size, token_size >> 1);
-            //     }
-            // }
         }
         if timer_reciever.try_recv().is_ok() {
             available_buffer = std::cmp::min(buffer_size_bytes, available_buffer + bytes_per_msec);
@@ -102,7 +88,7 @@ pub async fn token_dispenser(
                         bandwith_bytes_sec.saturating_sub(used_bandwith_one_sec);
                     if sent_avail_bandwith.abs_diff(new_avail_bandwith) * 10 > sent_avail_bandwith {
                         let how_many = bandwith_notification_senders.len();
-                        for _i in [0..how_many] {
+                        for _i in 0..how_many {
                             if let Some(sender) = bandwith_notification_senders.pop_front() {
                                 let res = sender.send(new_avail_bandwith);
                                 if res.is_ok() {
@@ -168,14 +154,14 @@ pub async fn token_dispenser(
                     // println!("unused>0");
                     available_buffer += unused_size;
                     //TODO make sure if it's needed:
-                    used_bandwith_msec.checked_sub(unused_size).unwrap_or(0);
+                    used_bandwith_msec = used_bandwith_msec.saturating_sub(unused_size);
                     // print!(
                     //     "max(min:{}, prev:{} - unused:{} + overhead:{}) ",
                     //     min_token_size, new_size, unused_size, overhead
                     // );
                     new_size = std::cmp::max(
                         min_token_size,
-                        new_size.checked_sub(unused_size).unwrap_or(0) + overhead,
+                        new_size.saturating_sub(unused_size) + overhead,
                     );
                     // println!("computed: {}", new_size);
                 }
