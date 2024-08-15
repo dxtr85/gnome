@@ -157,6 +157,7 @@ impl Manager {
         mut self,
         req_receiver: Receiver<ManagerRequest>,
         resp_sender: Sender<ManagerResponse>,
+        app_sync_hash: u64,
     ) {
         loop {
             if let Ok(request) = req_receiver.try_recv() {
@@ -186,7 +187,7 @@ impl Manager {
                         }
                         if let Ok((swarm_id, (user_req, user_res))) =
                             // gmgr.join_a_swarm("trzat".to_string(), Some(neighbor_network_settings), None)
-                            self.join_a_swarm(swarm_name.clone(), None, None)
+                            self.join_a_swarm(swarm_name.clone(), app_sync_hash, None, None)
                         {
                             self.notify_other_swarms(swarm_id, swarm_name.clone());
                             let _ = resp_sender.send(ManagerResponse::SwarmJoined(
@@ -265,6 +266,7 @@ impl Manager {
     pub fn join_a_swarm(
         &mut self,
         name: String,
+        app_sync_hash: u64,
         neighbor_network_settings: Option<NetworkSettings>,
         neighbors: Option<Vec<Neighbor>>,
     ) -> Result<(SwarmID, (Sender<Request>, Receiver<Response>)), String> {
@@ -376,9 +378,10 @@ impl Manager {
                 } else {
                     Err(())
                 }
-            };
+            }
             let (sender, receiver) = Swarm::join(
                 name.clone(),
+                app_sync_hash,
                 swarm_id,
                 self.gnome_id,
                 self.pub_key_der.clone(),

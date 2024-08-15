@@ -475,6 +475,7 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, bytes: &mut Vec<u8>)
             founder,
             swarm_time,
             swarm_type,
+            app_data_hash,
             key_reg_size,
             caps_size,
             poli_size,
@@ -488,6 +489,7 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, bytes: &mut Vec<u8>)
             put_u64(bytes, founder.0);
             put_u32(bytes, swarm_time.0);
             bytes.push(swarm_type.as_byte());
+            put_u64(bytes, app_data_hash);
             bytes.push(key_reg_size);
             bytes.push(caps_size);
             bytes.push(poli_size);
@@ -621,6 +623,7 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, bytes: &mut Vec<u8>) {
             sync_poli,
             sync_bcasts,
             sync_mcasts,
+            app_data_hash,
         ) => {
             bytes.push(250);
             bytes.push(sync_key_reg as u8);
@@ -628,6 +631,7 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, bytes: &mut Vec<u8>) {
             bytes.push(sync_poli as u8);
             bytes.push(sync_bcasts as u8);
             bytes.push(sync_mcasts as u8);
+            put_u64(bytes, app_data_hash);
         }
         NeighborRequest::SubscribeRequest(is_bcast, cast_id) => {
             bytes.push(249);
@@ -727,12 +731,21 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
             let sync_poli = bytes[data_idx + 3] > 0;
             let sync_bcasts = bytes[data_idx + 4] > 0;
             let sync_mcasts = bytes[data_idx + 5] > 0;
+            let mut app_data_hash: u64 = ((bytes[data_idx + 6]) as u64) << 56;
+            app_data_hash += ((bytes[data_idx + 7]) as u64) << 48;
+            app_data_hash += ((bytes[data_idx + 8]) as u64) << 40;
+            app_data_hash += ((bytes[data_idx + 9]) as u64) << 32;
+            app_data_hash += ((bytes[data_idx + 10]) as u64) << 24;
+            app_data_hash += ((bytes[data_idx + 11]) as u64) << 16;
+            app_data_hash += ((bytes[data_idx + 12]) as u64) << 8;
+            app_data_hash += (bytes[data_idx + 13]) as u64;
             NeighborRequest::SwarmSyncRequest(
                 sync_key_reg,
                 sync_caps,
                 sync_poli,
                 sync_bcasts,
                 sync_mcasts,
+                app_data_hash,
             )
         }
         249 => {
@@ -846,15 +859,25 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
                 bytes[data_idx + 13],
                 bytes[data_idx + 14],
             ]));
-            let swarm_type = SwarmType::from(bytes[data_idx + 15]);
-            let key_reg_size = bytes[data_idx + 16];
-            let caps_size = bytes[data_idx + 17];
-            let poli_size = bytes[data_idx + 18];
-            let b_casts_size = bytes[data_idx + 19];
-            let m_casts_size = bytes[data_idx + 20];
-            let more_pubkeys_incoming = bytes[data_idx + 21] != 0;
+            let app_data_hash = as_u64_be(&[
+                bytes[data_idx + 15],
+                bytes[data_idx + 16],
+                bytes[data_idx + 17],
+                bytes[data_idx + 18],
+                bytes[data_idx + 19],
+                bytes[data_idx + 20],
+                bytes[data_idx + 21],
+                bytes[data_idx + 22],
+            ]);
+            let swarm_type = SwarmType::from(bytes[data_idx + 23]);
+            let key_reg_size = bytes[data_idx + 24];
+            let caps_size = bytes[data_idx + 25];
+            let poli_size = bytes[data_idx + 26];
+            let b_casts_size = bytes[data_idx + 27];
+            let m_casts_size = bytes[data_idx + 28];
+            let more_pubkeys_incoming = bytes[data_idx + 29] != 0;
             let mut id_pubkey_pairs = vec![];
-            let mut idx = data_idx + 22;
+            let mut idx = data_idx + 30;
             while idx < bytes_len {
                 let mut g_vec = [0; 8];
                 for i in 0..8 {
@@ -872,6 +895,7 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
                 founder,
                 swarm_time,
                 swarm_type,
+                app_data_hash,
                 key_reg_size,
                 caps_size,
                 poli_size,

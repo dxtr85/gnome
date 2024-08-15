@@ -116,9 +116,10 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
         // create_manager_and_receiver(gnome_id, Some(network_settings));
         create_manager_and_receiver(gnome_id,pub_key_der,priv_key_pem, None, decrypter.clone().unwrap());
 
+    let app_sync_hash = 0; // TODO when we read data from disk we update app_sync_hash
     if let Ok((swarm_id, (user_req, user_res))) =
         // gmgr.join_a_swarm("trzat".to_string(), Some(neighbor_network_settings), None)
-        gmgr.join_a_swarm("/".to_string(), None, None)
+        gmgr.join_a_swarm("/".to_string(), app_sync_hash, None, None)
     {
         let _ = resp_sender.send(ManagerResponse::SwarmJoined(
             swarm_id,
@@ -176,7 +177,7 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
     //       of total bandwith available.
     //       If we are between min and min_off we can stay in this configuration.
     //
-    spawn(gmgr.do_your_job(req_receiver, resp_sender));
+    spawn(gmgr.do_your_job(req_receiver, resp_sender, app_sync_hash));
     (req_sender, resp_receiver)
 }
 // fn start(
