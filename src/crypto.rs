@@ -232,13 +232,16 @@ pub fn store_key_pair_as_pem_files(
     }
 }
 
-pub fn get_new_key_pair(bits: usize) -> Option<(RsaPrivateKey, RsaPublicKey)> {
+pub fn get_new_key_pair() -> Option<(RsaPrivateKey, RsaPublicKey)> {
+    // println!("get_new_key_pair {}", bits);
     let mut rng = rand::thread_rng();
-    // let bits = 2048;
+    let bits = 2048;
     if let Ok(priv_key) = RsaPrivateKey::new(&mut rng, bits) {
+        // println!("get_new_key_pair some");
         let pub_key = RsaPublicKey::from(&priv_key);
         Some((priv_key, pub_key))
     } else {
+        // println!("get_new_key_pair none");
         None
     }
 }

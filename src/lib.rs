@@ -47,6 +47,7 @@ pub fn init(
     work_dir: String,
     app_sync_hash: u64,
 ) -> (Sender<ManagerRequest>, Receiver<ManagerResponse>) {
+    // println!("init start");
     let (req_sender, req_receiver) = channel();
     let (resp_sender, resp_receiver) = channel();
 
@@ -66,6 +67,7 @@ pub fn init(
     let pub_key_pem; //= String::new();
     let mut pub_key_der = vec![];
     let priv_key_pem;
+    // println!("check if key files exist");
     if pub_path.exists() && priv_path.exists() {
         // println!("both exist");
         pub_key_pem = read_to_string(pub_path.clone()).unwrap();
@@ -73,7 +75,7 @@ pub fn init(
         let res = Encrypter::create_from_data(&pub_key_pem);
         if let Ok(encr) = res {
             pub_key_der = encr.pub_key_der();
-            // println!("DER: {:?}", pub_key_der);
+            // println!("\n\n\n\n\n\nDER len: {:?}", pub_key_der.len());
             let ki = RsaPublicKey::from_der(&pub_key_der);
             if ki.is_err() {
                 println!("key err: {:?}", ki);
@@ -93,16 +95,18 @@ pub fn init(
             // }
             decrypter = Some(Decrypter::create(priv_key));
         }
-    } else if let Some((priv_key, pub_key)) = get_new_key_pair(512) {
-        let res = store_key_pair_as_pem_files(&priv_key, &pub_key, PathBuf::from(work_dir));
-        println!("Store key pair result: {:?} {:?}", res, priv_key);
+    // } else if let Some((priv_key, pub_key)) = get_new_key_pair(512) {
+    } else if let Some((priv_key, pub_key)) = get_new_key_pair() {
+        // println!("new keys created");
+        let _res = store_key_pair_as_pem_files(&priv_key, &pub_key, PathBuf::from(work_dir));
+        // println!("Store key pair result: {:?} {:?}", res, priv_key);
         decrypter = Some(Decrypter::create(priv_key));
         pub_key_pem = read_to_string(pub_path.clone()).unwrap();
         priv_key_pem = read_to_string(priv_path.clone()).unwrap();
         let res = Encrypter::create_from_data(&pub_key_pem);
         if let Ok(encr) = res {
             pub_key_der = encr.pub_key_der();
-            // println!("This is to verify signing works");
+            // println!("DER size: {}", pub_key_der.len());
             // if let Ok(signature) = decrypter.clone().unwrap().sign("Test message".as_bytes()) {
             //     if encr.verify("Test message".as_bytes(), &signature) {
             //         panic!("Message verified!");

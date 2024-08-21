@@ -142,7 +142,7 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
             Payload::KeepAlive(bandwith)
         // } else if bytes[0] & 0b0010_0000 == 32 {
         } else {
-            // println!("Reconf conf");
+            // println!("Reconf conf {}", bytes[data_idx]);
             // println!("Configuration! {}", bytes[data_idx]);
             // println!("Configuration! {:?}", bytes);
             let config = match bytes[data_idx] {
@@ -191,10 +191,10 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
                 }
                 245 => {
                     let mut key = vec![];
-                    for i in data_idx + 9..data_idx + 83 {
+                    for i in data_idx + 9..data_idx + 279 {
                         key.push(bytes[i]);
                     }
-                    data_idx += 83;
+                    data_idx += 279;
                     // println!("read: {}, {:?}", gnome_id, key);
                     Configuration::InsertPubkey(gnome_id, key)
                 }
@@ -208,19 +208,22 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
             let signature = if sig_type == 0 {
                 // println!("Regular sig");
                 let mut sig_bytes = vec![];
-                for i in data_idx + 1..data_idx + 65 {
+                for i in data_idx + 1..data_idx + 257 {
                     sig_bytes.push(bytes[i]);
                 }
                 // data_idx += 74;
                 Signature::Regular(gnome_id, sig_bytes)
             } else if sig_type == 255 {
                 // println!("Extended sig,all bytes len: {}", bytes.len());
-                let mut pub_key = Vec::with_capacity(74);
-                for i in data_idx + 1..data_idx + 75 {
+                // let mut pub_key = Vec::with_capacity(74);
+                let mut pub_key = Vec::with_capacity(270);
+                for i in data_idx + 1..data_idx + 271 {
                     pub_key.push(bytes[i]);
                 }
-                let mut sig_bytes = Vec::with_capacity(64);
-                for i in data_idx + 75..data_idx + 139 {
+                let mut sig_bytes = Vec::with_capacity(256);
+
+                // for i in data_idx + 75..data_idx + 139 {
+                for i in data_idx + 271..data_idx + 527 {
                     sig_bytes.push(bytes[i]);
                 }
                 // data_idx += 148;
@@ -257,23 +260,27 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
         let sig_type = bytes[data_idx];
         let signature = if sig_type == 0 {
             // println!("Regular sig");
-            let mut sig_bytes = vec![];
-            for i in data_idx + 1..data_idx + 65 {
+            let mut sig_bytes = Vec::with_capacity(256);
+            for i in data_idx + 1..data_idx + 257 {
                 sig_bytes.push(bytes[i]);
             }
-            data_idx += 65;
+            data_idx += 257;
             Signature::Regular(GnomeId(gnome_id), sig_bytes)
         } else if sig_type == 255 {
             // println!("Extended sig,all bytes len: {}", bytes.len());
-            let mut pub_key = Vec::with_capacity(74);
-            for i in data_idx + 1..data_idx + 75 {
+            // let mut pub_key = Vec::with_capacity(74);
+            // for i in data_idx + 1..data_idx + 75 {
+            let mut pub_key = Vec::with_capacity(270);
+            for i in data_idx + 1..data_idx + 271 {
                 pub_key.push(bytes[i]);
             }
-            let mut sig_bytes = Vec::with_capacity(64);
-            for i in data_idx + 75..data_idx + 139 {
+            // let mut sig_bytes = Vec::with_capacity(64);
+            let mut sig_bytes = Vec::with_capacity(256);
+            for i in data_idx + 271..data_idx + 527 {
                 sig_bytes.push(bytes[i]);
             }
-            data_idx += 139;
+            // data_idx += 139;
+            data_idx += 527;
             Signature::Extended(GnomeId(gnome_id), pub_key, sig_bytes)
         } else {
             panic!("Unexpected value: {}", sig_type);
@@ -906,11 +913,11 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
                 for i in 0..8 {
                     g_vec[i] = bytes[idx + i];
                 }
-                let mut pubkey_vec = Vec::with_capacity(74);
-                for i in 0..74 {
+                let mut pubkey_vec = Vec::with_capacity(270);
+                for i in 0..270 {
                     pubkey_vec.push(bytes[idx + 8 + i]);
                 }
-                idx += 82;
+                idx += 278;
                 id_pubkey_pairs.push((GnomeId(u64::from_be_bytes(g_vec)), pubkey_vec));
             }
             NeighborResponse::SwarmSync(
@@ -961,12 +968,14 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
                     bytes[idx + 6],
                     bytes[idx + 7],
                 ]));
-                let mut pubkey = Vec::with_capacity(74);
-                for i in idx + 8..idx + 82 {
+                // let mut pubkey = Vec::with_capacity(74);
+                // for i in idx + 8..idx + 82 {
+                let mut pubkey = Vec::with_capacity(270);
+                for i in idx + 8..idx + 278 {
                     pubkey.push(bytes[i]);
                 }
                 id_pubkey_pairs.push((gnome_id, pubkey));
-                idx += 82;
+                idx += 278;
             }
             NeighborResponse::KeyRegistrySync(part_no, total_parts, id_pubkey_pairs)
         }

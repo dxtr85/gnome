@@ -221,6 +221,7 @@ impl Manager {
             match request {
                 GnomeToManager::NeighboringSwarm(swarm_id, gnome_id, swarm_name) => {
                     println!("Manager got info about a swarm: '{}'", swarm_name);
+                    // println!("DER size: {}", self.pub_key_der.len());
                     if let Some(list) = self.neighboring_swarms.get_mut(&swarm_name) {
                         list.push((swarm_id, gnome_id));
                     } else {
@@ -308,6 +309,7 @@ impl Manager {
                         return false;
                     }
                     // println!("PubKey decoded!");
+                    // println!("Signature [{} bytes]:\n{:?}", signature.len(), signature);
                     let signature_three = Signature::try_from(signature).unwrap();
 
                     let verifier: VerifyingKey<Sha256> = VerifyingKey::new(pub_key);
@@ -316,6 +318,7 @@ impl Manager {
                         data.push(st_byte);
                     }
                     let mut result = verifier.verify(data, &signature_three);
+                    // println!("Ver res: {:?}", result);
 
                     // TODO: dirty hack to check against two more neighboring SwarmTimes
                     let mut last_byte = swarm_time.0 + 1;
@@ -330,6 +333,7 @@ impl Manager {
                         last_byte -= 2;
                         result = verifier.verify(data, &signature_three);
                     }
+                    // println!("Ver res 2: {:?}", result);
                     if result.is_err() {
                         data.pop();
                         data.pop();
@@ -375,6 +379,7 @@ impl Manager {
                     for i in (0..signature_string.len()).step_by(2) {
                         bytes.push(u8::from_str_radix(&signature_string[i..i + 2], 16).unwrap());
                     }
+                    // println!("Signature [{} bytes]:\n{:?}", bytes.len(), bytes);
                     // Remove timestamp
                     data.pop();
                     data.pop();
