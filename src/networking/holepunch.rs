@@ -902,7 +902,7 @@ pub async fn start_communication(
             //     yield_now().await
             // }
             if let Ok(sym_key) = decoded_key {
-                println!("Got session key: {:?}", sym_key);
+                // println!("Got session key: {:?}", sym_key);
                 session_key = SessionKey::from_key(&sym_key.try_into().unwrap());
             } else {
                 println!("Unable to decode key");

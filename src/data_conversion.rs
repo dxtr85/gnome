@@ -92,7 +92,7 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
             gnome_id = GnomeId(as_u64_be(&[
                 bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
             ]));
-            println!("Reconf byte: {}", bytes[5]);
+            // println!("Reconf byte: {}", bytes[5]);
             (Header::Reconfigure(bytes[5], gnome_id), 5)
         } else {
             gnome_id = GnomeId(as_u64_be(&[
@@ -126,9 +126,9 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
             panic!("Uncovered header value: {}", bytes[0]);
         }
     } else if header.is_reconfigure() {
-        println!("Reconf header");
+        // println!("Reconf header");
         if bytes[0] & 0b0010_0000 == 0 {
-            println!("Reconf KA");
+            // println!("Reconf KA");
             let bandwith: u64 = as_u64_be(&[
                 bytes[data_idx],
                 bytes[data_idx + 1],
@@ -558,9 +558,8 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, bytes: &mut Vec<u8>)
             bytes.push(part_no);
             bytes.push(total_parts);
             for (pol, req) in pol_req_pairs {
-                bytes.push(pol.byte());
-                bytes.push(req.len());
-                req.bytes(bytes);
+                pol.append_bytes_to(bytes);
+                req.append_bytes_to(bytes);
             }
         }
         NeighborResponse::BroadcastSync(part_no, total_parts, cast_id_origin_pairs) => {
@@ -1017,15 +1016,17 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
             let mut idx = data_idx + 3;
             let mut pol_req_pairs = vec![];
             drop(b_drain);
-            while idx < bytes_len {
-                b_drain = bytes.drain(0..2);
-                let pol_id = b_drain.next().unwrap();
-                let req_len = b_drain.next().unwrap();
-                drop(b_drain);
-                idx += req_len as usize + 3;
+            // while idx < bytes_len {
+            while !bytes.is_empty() {
+                // b_drain = bytes.drain(0..2);
+                let policy = Policy::from(&mut bytes);
                 let req = Requirement::from(&mut bytes);
+                // let pol_id = b_drain.next().unwrap();
+                // let req_len = b_drain.next().unwrap();
+                // drop(b_drain);
+                // idx += req_len as usize + 3;
                 // println!("policy: {:?}:{:?}", Policy::from(pol_id), req);
-                pol_req_pairs.push((Policy::from(pol_id), req));
+                pol_req_pairs.push((policy, req));
             }
             NeighborResponse::PolicySync(part_no, total_parts, pol_req_pairs)
         }

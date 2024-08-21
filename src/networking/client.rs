@@ -166,7 +166,7 @@ async fn establish_secure_connection(
     //     yield_now().await
     // }
     if let Ok(sym_key) = decoded_key {
-        println!("Got session key: {:?}", sym_key);
+        // println!("Got session key: {:?}", sym_key);
         session_key = SessionKey::from_key(&sym_key.try_into().unwrap());
     } else {
         println!("Unable to decode key");
@@ -275,7 +275,7 @@ pub async fn prepare_and_serve(
     let encr = Encrypter::create_from_data(&pub_key_pem).unwrap();
     let remote_gnome_id = GnomeId(encr.hash());
     println!("Remote GnomeId: {}", remote_gnome_id);
-    println!("Decrypted PEM using session key:\n {:?}", pub_key_pem);
+    // println!("Decrypted PEM using session key:\n {:?}", pub_key_pem);
     send_subscribed_swarm_names(&dedicated_socket, &swarm_names).await;
 
     let mut remote_names: Vec<String> = vec![];
