@@ -574,6 +574,17 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, bytes: &mut Vec<u8>)
                 put_u64(bytes, origin.0);
             }
         }
+        NeighborResponse::AppSync(id, c_id, part_no, total, data) => {
+            bytes.push(241);
+            bytes.push(id);
+            put_u16(bytes, c_id);
+            put_u16(bytes, part_no);
+            put_u16(bytes, total);
+            for byte in data.bytes() {
+                bytes.push(byte);
+            }
+            // bytes.put_u32(data.0);
+        } // _ => todo!(),
         NeighborResponse::CustomResponse(id, data) => {
             bytes.push(id);
             for byte in data.bytes() {
@@ -654,6 +665,13 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, bytes: &mut Vec<u8>) {
         NeighborRequest::SwarmJoinedInfo(swarm_name) => {
             bytes.push(247);
             for byte in swarm_name.bytes() {
+                bytes.push(byte);
+            }
+        }
+        NeighborRequest::AppSyncRequest(id, data) => {
+            bytes.push(246);
+            bytes.push(id);
+            for byte in data.bytes() {
                 bytes.push(byte);
             }
         }
@@ -771,6 +789,11 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
             let swarm_name = String::from_utf8(bytes[data_idx + 1..bytes_len].to_vec()).unwrap();
             NeighborRequest::SwarmJoinedInfo(swarm_name)
         }
+        246 => {
+            let req_id = bytes[data_idx + 1];
+            let dta = Vec::from(&bytes[data_idx + 2..]);
+            NeighborRequest::AppSyncRequest(req_id, Data::new(dta).unwrap())
+        }
         other => {
             println!("Other message: {:?}", bytes);
             // TODO
@@ -859,8 +882,8 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
                 bytes[data_idx + 13],
                 bytes[data_idx + 14],
             ]));
+            let swarm_type = SwarmType::from(bytes[data_idx + 15]);
             let app_data_hash = as_u64_be(&[
-                bytes[data_idx + 15],
                 bytes[data_idx + 16],
                 bytes[data_idx + 17],
                 bytes[data_idx + 18],
@@ -868,8 +891,8 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
                 bytes[data_idx + 20],
                 bytes[data_idx + 21],
                 bytes[data_idx + 22],
+                bytes[data_idx + 23],
             ]);
-            let swarm_type = SwarmType::from(bytes[data_idx + 23]);
             let key_reg_size = bytes[data_idx + 24];
             let caps_size = bytes[data_idx + 25];
             let poli_size = bytes[data_idx + 26];
@@ -1045,11 +1068,25 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
             }
             NeighborResponse::MulticastSync(part_no, total_parts, cid_origin_pairs)
         }
+        241 => {
+            let s_type = bytes[data_idx + 1];
+            let c_id = as_u16_be(&[bytes[data_idx + 2], bytes[data_idx + 3]]);
+            let part_no = as_u16_be(&[bytes[data_idx + 4], bytes[data_idx + 5]]);
+            let total = as_u16_be(&[bytes[data_idx + 6], bytes[data_idx + 7]]);
+
+            NeighborResponse::AppSync(
+                s_type,
+                c_id,
+                part_no,
+                total,
+                Data::new(Vec::from(&bytes[data_idx + 8..])).unwrap(),
+            )
+        }
         _other => {
             // TODO
             NeighborResponse::CustomResponse(
-                bytes[data_idx + 1],
-                Data::new(Vec::from(&bytes[data_idx + 2..])).unwrap(),
+                bytes[data_idx],
+                Data::new(Vec::from(&bytes[data_idx + 1..])).unwrap(),
             )
         }
     }

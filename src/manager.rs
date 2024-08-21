@@ -162,6 +162,12 @@ impl Manager {
         loop {
             if let Ok(request) = req_receiver.try_recv() {
                 match request {
+                    // ManagerRequest::UpdateAppRootHash(swarm_id, new_app_hash) => {
+                    //     println!("Manager updating hash to {}", new_app_hash);
+                    //     if let Some(sender) = self.swarms.get(&swarm_id) {
+                    //         let _ = sender.send(ManagerToGnome::UpdateAppRootHash(new_app_hash));
+                    //     }
+                    // }
                     ManagerRequest::JoinSwarm(swarm_name) => {
                         // let mut neighbors = vec![];
                         if let Some(pairs) = self.neighboring_swarms.get(&swarm_name) {

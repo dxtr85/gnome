@@ -34,13 +34,19 @@ pub mod prelude {
     pub use swarm_consensus::Data;
     pub use swarm_consensus::GnomeId;
     pub use swarm_consensus::Nat;
+    pub use swarm_consensus::NeighborRequest;
+    pub use swarm_consensus::NeighborResponse;
     pub use swarm_consensus::NetworkSettings;
     pub use swarm_consensus::PortAllocationRule;
     pub use swarm_consensus::Request;
     pub use swarm_consensus::Response;
+    pub use swarm_consensus::SwarmID;
 }
 
-pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerResponse>) {
+pub fn init(
+    work_dir: String,
+    app_sync_hash: u64,
+) -> (Sender<ManagerRequest>, Receiver<ManagerResponse>) {
     let (req_sender, req_receiver) = channel();
     let (resp_sender, resp_receiver) = channel();
 
@@ -116,7 +122,7 @@ pub fn init(work_dir: String) -> (Sender<ManagerRequest>, Receiver<ManagerRespon
         // create_manager_and_receiver(gnome_id, Some(network_settings));
         create_manager_and_receiver(gnome_id,pub_key_der,priv_key_pem, None, decrypter.clone().unwrap());
 
-    let app_sync_hash = 0; // TODO when we read data from disk we update app_sync_hash
+    // let app_sync_hash = 0; // TODO when we read data from disk we update app_sync_hash
     if let Ok((swarm_id, (user_req, user_res))) =
         // gmgr.join_a_swarm("trzat".to_string(), Some(neighbor_network_settings), None)
         gmgr.join_a_swarm("/".to_string(), app_sync_hash, None, None)
