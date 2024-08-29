@@ -114,14 +114,8 @@ async fn read_bytes_from_local_stream(
     // Err(ConnError::LocalStreamClosed)
 }
 
-// We have a problem with receiving tokens since
-// race_tasks with combination of chill_out mode
-// block "socket" from receiving info on provisioned
-// tokens.
-// Then once socket has data to send it has no
-// tokens to spend
-// Maybe we should send tokens in a WrappedMessage
-// every say 100ms instead of current workaround?
+// In order for sockets to collect tokens
+// we utilize WrappedMessage to send NoOp
 async fn race_tasks(
     session_key: SessionKey,
     socket: UdpSocket,

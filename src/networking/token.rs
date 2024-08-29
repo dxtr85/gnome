@@ -110,18 +110,17 @@ pub async fn token_dispenser(
                     let used_bandwith_one_sec = used_bandwith.iter().sum::<u64>();
                     let new_avail_bandwith =
                         bandwith_bytes_sec.saturating_sub(used_bandwith_one_sec);
-                    if sent_avail_bandwith.abs_diff(new_avail_bandwith) * 10 > sent_avail_bandwith {
-                        let how_many = bandwith_notification_senders.len();
-                        for _i in 0..how_many {
-                            if let Some(sender) = bandwith_notification_senders.pop_front() {
-                                let res = sender.send(new_avail_bandwith);
-                                if res.is_ok() {
-                                    bandwith_notification_senders.push_back(sender);
-                                }
-                            };
+                    // By sending 0 we request a gnome to select any Neighbor
+                    // it has and send WrappedMessage::NoOp
+                    // to trigger token collection
+                    if let Some(sender) = bandwith_notification_senders.pop_front() {
+                        let _ = sender.send(0);
+                        let res = sender.send(new_avail_bandwith);
+                        if res.is_ok() {
+                            bandwith_notification_senders.push_back(sender);
                         }
-                        sent_avail_bandwith = new_avail_bandwith;
-                    }
+                    };
+                    sent_avail_bandwith = new_avail_bandwith;
                 }
             }
 
