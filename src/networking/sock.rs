@@ -11,6 +11,7 @@ use crate::networking::token::Token;
 
 use async_std::net::UdpSocket;
 use async_std::task;
+use async_std::task::yield_now;
 use swarm_consensus::NeighborRequest;
 // TODO: get rid of bytes crate
 // use bytes::BufMut;
@@ -113,6 +114,14 @@ async fn read_bytes_from_local_stream(
     // Err(ConnError::LocalStreamClosed)
 }
 
+// We have a problem with receiving tokens since
+// race_tasks with combination of chill_out mode
+// block "socket" from receiving info on provisioned
+// tokens.
+// Then once socket has data to send it has no
+// tokens to spend
+// Maybe we should send tokens in a WrappedMessage
+// every say 100ms instead of current workaround?
 async fn race_tasks(
     session_key: SessionKey,
     socket: UdpSocket,
@@ -148,7 +157,16 @@ async fn race_tasks(
     }
     let mut buf = [0u8; 1500];
     let mut buf2 = [0u8; 1500];
-    // if let Some((sender, mut receiver)) = send_recv_pairs.pop() {
+    println!("Waiting for initial tokens");
+    yield_now().await;
+    let max_tokens = if let Ok(Token::Provision(tkns)) = token_reciever.try_recv() {
+        tkns * 1000
+    } else {
+        println!("Did not receive Provision as first token message");
+        println!("setting max_tokens to 100kB");
+        102400
+    };
+    println!("Max tokens: {}", max_tokens);
     loop {
         // print!("l");
         if let Ok((swarm_name, snd, cast_snd, recv)) = extend_receiver.try_recv() {
@@ -170,20 +188,31 @@ async fn race_tasks(
                 }
             }
         }
-        if let Ok(token_msg) = token_reciever.try_recv() {
+        let mut provisioned_tokens_count = 0;
+        while let Ok(token_msg) = token_reciever.try_recv() {
             match token_msg {
                 Token::Provision(count) => {
-                    let _ = token_sender.send(Token::Unused(available_tokens));
-                    // println!("{} unused, more tokens: {}", available_tokens, count);
-                    available_tokens = count;
+                    provisioned_tokens_count += count;
                 }
                 other => {
                     println!("Unexpected Token message: {:?}", other);
                 }
             }
         }
+        let _ = token_sender.send(Token::Unused(available_tokens));
+        // println!(
+        //     "{} unused, more tokens: {}",
+        //     available_tokens, provisioned_tokens_count
+        // );
+        available_tokens += provisioned_tokens_count;
+        if available_tokens > max_tokens {
+            available_tokens = max_tokens;
+        }
         if available_tokens < min_tokens_threshold {
-            println!("Requesting more tokens");
+            println!(
+                "Requesting more tokens (have: {}, required: {})",
+                available_tokens, min_tokens_threshold
+            );
             let _ = token_sender.send(Token::Request(2 * min_tokens_threshold));
         }
         let t1 = read_bytes_from_socket(&socket, &mut buf2).fuse();
@@ -197,6 +226,9 @@ async fn race_tasks(
             result2 = t2 => (false, result2),
         };
         if let Err(_err) = result {
+            // We could use Err for token provisioning
+            // Err = 0 would mean actual error with local stream, when not from socket
+            // when from socket error numbers would have a meaning assigned
             println!("SRVC Error received: {:?}", _err);
             // TODO: should end serving this socket
             for (sender, _c_snd) in senders.values() {

@@ -15,6 +15,8 @@ pub async fn token_dispenser(
     bandwith_bytes_sec: u64,
     // sender: Sender<TokenMessage>,
     reciever: Receiver<(Sender<Token>, Receiver<Token>)>,
+    // when we join a new swarm we receive a sender to inform that gnome about avail
+    // bandwith
     band_reciever: Receiver<Sender<u64>>,
 ) {
     println!("Starting token dispenser service");
@@ -22,7 +24,9 @@ pub async fn token_dispenser(
     let buffer_size_bytes = std::cmp::max(bandwith_bytes_sec, buffer_size_bytes);
     let mut available_buffer = buffer_size_bytes;
     let bytes_per_msec: u64 = bandwith_bytes_sec / 1000;
+    // this is to provision tokens on a per socket basis
     let mut socket_pipes: VecDeque<(Sender<Token>, Receiver<Token>, u64, bool)> = VecDeque::new();
+    // this is to notify gnomes
     let mut bandwith_notification_senders: VecDeque<Sender<u64>> = VecDeque::new();
     let dur = Duration::from_micros(1000);
     // let dur = Duration::from_millis(1000);
@@ -51,6 +55,7 @@ pub async fn token_dispenser(
     used_bandwith_ring.push_back((true, 0));
     let mut additional_request_received = false;
 
+    yield_now().await;
     // TODO: this needs rework
     // TODO: we might need to provide this service with
     //       shared_sender, since in order for race_tasks
@@ -58,17 +63,35 @@ pub async fn token_dispenser(
     //       to be sent
     //       but then we need a shared_sender for every socket...
     loop {
+        // print!("L");
         let mut send_tokens = false;
 
         while let Ok(sender) = band_reciever.try_recv() {
+            // Here we send to every gnome how many bps we have unused
             let res = sender.send(sent_avail_bandwith);
             if res.is_ok() {
                 bandwith_notification_senders.push_back(sender);
             }
         }
         if let Ok((s, r)) = reciever.try_recv() {
-            socket_pipes.push_back((s, r, token_size, false));
+            let mut broken_pipe = false;
+            let new_size = bytes_per_msec * 100;
+            let res = s.send(Token::Provision(new_size));
+            if res.is_err() {
+                broken_pipe = true;
+            }
+            available_buffer = if new_size > available_buffer {
+                0
+            } else {
+                available_buffer - new_size
+            };
+
+            used_bandwith_msec += new_size;
+            if !broken_pipe {
+                socket_pipes.push_back((s, r, token_size, false));
+            }
         }
+        // We receive a tick every ms
         if timer_reciever.try_recv().is_ok() {
             available_buffer = std::cmp::min(buffer_size_bytes, available_buffer + bytes_per_msec);
             // println!("AvaBuf: {} {}", available_buffer, bytes_per_msec);
@@ -77,6 +100,7 @@ pub async fn token_dispenser(
             if let Some((push, value)) = used_bandwith_ring.pop_front() {
                 used_bandwith_ring.push_back((push, used_bandwith_msec));
                 used_bandwith_msec = 0;
+                // We enter this every 10ms
                 if push {
                     let sum = used_bandwith_ring
                         .iter()
