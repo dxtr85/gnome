@@ -152,6 +152,7 @@ async fn race_tasks(
         println!("setting max_tokens to 100kB");
         102400
     };
+    let mut token_dispenser = TokenDispenser::new(max_tokens);
     println!("Max tokens: {}", max_tokens);
     loop {
         // print!("l");
@@ -174,30 +175,44 @@ async fn race_tasks(
                 }
             }
         }
-        let mut provisioned_tokens_count = 0;
+        // TODO: a different approach to token provisioning:
+        // we keep here a VecDeque containing always 8 u64 elements
+        // every 128ms we receive some tokens (total 1024ms ~ 1sec)
+        // (it can also be a mutable list [u64;8])
+        // we sum all the numbers in VecDeque = this is how many tokens
+        // we have not used
+        // we push front recently received tokens
+        // and pop_back & discard oldest provisioned tokens
+        // now we use this front value for sending messages out.
+        // when we run out of tokens in this front value, or have not enough
+        // to send current message we decrement from next value.
+        // If we run out of all the tokens we request more
+
+        // let mut provisioned_tokens_count = 0;
         while let Ok(token_msg) = token_reciever.try_recv() {
             match token_msg {
                 Token::Provision(count) => {
-                    provisioned_tokens_count += count;
+                    // provisioned_tokens_count += count;
+                    token_dispenser.add(count);
                 }
                 other => {
                     println!("Unexpected Token message: {:?}", other);
                 }
             }
         }
-        let _ = token_sender.send(Token::Unused(available_tokens));
+        let _ = token_sender.send(Token::Unused(token_dispenser.available_tokens));
         // println!(
         //     "{} unused, more tokens: {}",
         //     available_tokens, provisioned_tokens_count
         // );
-        available_tokens += provisioned_tokens_count;
-        if available_tokens > max_tokens {
-            available_tokens = max_tokens;
-        }
-        if available_tokens < min_tokens_threshold {
+        // available_tokens += provisioned_tokens_count;
+        // if available_tokens > max_tokens {
+        //     available_tokens = max_tokens;
+        // }
+        if token_dispenser.available_tokens < min_tokens_threshold {
             println!(
                 "Requesting more tokens (have: {}, required: {})",
-                available_tokens, min_tokens_threshold
+                token_dispenser.available_tokens, min_tokens_threshold
             );
             let _ = token_sender.send(Token::Request(2 * min_tokens_threshold));
         }
@@ -359,7 +374,8 @@ async fn race_tasks(
             }
             let ciphered = session_key.encrypt(&bytes);
             let len = 43 + ciphered.len() as u64;
-            if len <= available_tokens {
+            let taken = token_dispenser.take(len);
+            if taken == len {
                 let _send_result = socket.send(&ciphered).await;
                 // available_tokens -= len;
                 available_tokens = if len > available_tokens {
@@ -374,13 +390,15 @@ async fn race_tasks(
                 let res = token_reciever.recv();
                 match res {
                     Ok(Token::Provision(amount)) => {
-                        available_tokens += amount;
+                        token_dispenser.add(amount);
+                        token_dispenser.take(len);
+                        // available_tokens += amount;
                         let _send_result = socket.send(&ciphered).await;
-                        available_tokens = if len > available_tokens {
-                            0
-                        } else {
-                            available_tokens - len
-                        };
+                        // available_tokens = if len > available_tokens {
+                        //     0
+                        // } else {
+                        //     available_tokens - len
+                        // };
                     }
                     Ok(other) => println!("Received unexpected Token: {:?}", other),
                     Err(e) => {
@@ -392,6 +410,48 @@ async fn race_tasks(
     }
     // }
     // }
+}
+struct TokenDispenser {
+    available_tokens: u64,
+    token_slots: [u64; 8],
+}
+impl TokenDispenser {
+    pub fn new(value: u64) -> Self {
+        TokenDispenser {
+            available_tokens: value,
+            token_slots: [value >> 3; 8],
+        }
+    }
+    pub fn take(&mut self, value: u64) -> u64 {
+        if value > self.available_tokens {
+            let ret_val = self.available_tokens;
+            self.available_tokens = 0;
+            self.token_slots = [0; 8];
+            return ret_val;
+        }
+        self.available_tokens -= value;
+        let mut left_to_substract = value;
+        for i in 0..8 {
+            let tokens_in_slot = self.token_slots[i];
+            if tokens_in_slot >= left_to_substract {
+                self.token_slots[i] = tokens_in_slot - left_to_substract;
+                break;
+            } else {
+                self.token_slots[i] = 0;
+                left_to_substract -= tokens_in_slot;
+            }
+        }
+        value
+    }
+    pub fn add(&mut self, value: u64) {
+        let mut prev_value = value;
+        for i in 0..8 {
+            std::mem::swap(&mut self.token_slots[i], &mut prev_value);
+            // let temp = self.token_slots[i];
+            // self.token_slots[i] = prev_value;
+            // prev_value = temp;
+        }
+    }
 }
 
 pub async fn serve_socket(
