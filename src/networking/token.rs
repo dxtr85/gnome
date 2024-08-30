@@ -13,7 +13,6 @@ pub enum Token {
 pub async fn token_dispenser(
     max_buffer_size_bytes: u64,
     bandwith_bytes_sec: u64,
-    // sender: Sender<TokenMessage>,
     reciever: Receiver<(Sender<Token>, Receiver<Token>)>,
     // when we join a new swarm we receive a sender to inform that gnome about avail
     // bandwith
@@ -23,12 +22,9 @@ pub async fn token_dispenser(
     let mut tokens_available_from_buffer = max_buffer_size_bytes;
     let mut tokens_available_from_time_pass = bandwith_bytes_sec;
 
-    // Cover case when buffer size is less than bandwith
-    // let buffer_size_bytes = std::cmp::max(bandwith_bytes_sec, max_buffer_size_bytes);
-    // let mut available_buffer = buffer_size_bytes;
     let bytes_per_msec: u64 = bandwith_bytes_sec >> 10;
     // this is to provision tokens on a per socket basis
-    let mut socket_pipes: VecDeque<(Sender<Token>, Receiver<Token>, u64, bool)> = VecDeque::new();
+    let mut token_eaters: Vec<TokenEater> = Vec::with_capacity(16);
     // this is to notify gnomes
     let mut bandwith_notification_senders: VecDeque<Sender<u64>> = VecDeque::new();
     let dur = Duration::from_millis(1);
@@ -46,21 +42,10 @@ pub async fn token_dispenser(
     task::spawn(timer(dur, timer_sender));
 
     let sent_avail_bandwith: u64 = bandwith_bytes_sec;
-    // let token_size = 256;
     // TODO: we need to think about how to calculate this
     let token_size = bandwith_bytes_sec >> 6;
-    // let min_token_size = 256;
-    // let min_overhead = 4;
-    // let max_overhead = 64;
-    // let mut overhead = 16;
-    // let mut used_bandwith_msec: u64 = 0;
-    // let mut used_bandwith: VecDeque<u64> = VecDeque::from(vec![0; 100]);
-    // let mut used_bandwith_ring: VecDeque<(bool, u64)> = VecDeque::from(vec![(false, 0); 7]);
-    // used_bandwith_ring.push_back((true, 0));
-    // let mut additional_request_received = false;
 
     yield_now().await;
-    // TODO: this needs rework
     // New concept:
     // We have two token sources:
     // 1 - time every 1ms bandwith_bytes_sec>>10 is added to bucket
@@ -133,7 +118,7 @@ pub async fn token_dispenser(
                     broken_pipe = true;
                 }
                 if !broken_pipe {
-                    socket_pipes.push_back((s, r, token_size, false));
+                    token_eaters.push(TokenEater::new(s, r));
                 }
             }
 
@@ -157,69 +142,60 @@ pub async fn token_dispenser(
             if let Some(sender) = bandwith_notification_senders.pop_front() {
                 let _ = sender.send(0);
                 // TODO: here we should send sum of unused tokens from last second
-                let res = sender.send(tokens_available_from_time_pass);
+                let res = sender.send(tokens_available_from_time_pass << 3);
                 if res.is_ok() {
                     bandwith_notification_senders.push_back(sender);
                 }
             };
 
-            let mut socket_count: u64 = socket_pipes.len() as u64;
-            let tokens_per_socket = if socket_count > 0 {
-                tokens_available_from_time_pass / socket_count
+            let eaters_count: u64 = token_eaters.len() as u64;
+            let tokens_per_eater = if eaters_count > 0 {
+                tokens_available_from_time_pass / eaters_count
             } else {
                 tokens_available_from_time_pass
             };
-            while socket_count > 0 {
-                socket_count -= 1;
-                let mut broken_pipe = false;
-                if let Some((s, r, prev_size, additional_request)) = socket_pipes.pop_front() {
-                    let res = s.send(Token::Provision(tokens_per_socket));
-                    if res.is_err() {
-                        broken_pipe = true;
-                    } else {
-                        tokens_available_from_time_pass -= tokens_per_socket;
-                    }
-                    if !broken_pipe {
-                        // socket_pipes.push_back((s, r, new_size, new_add_req));
-                        socket_pipes.push_back((s, r, prev_size, additional_request));
-                    }
+            let mut to_removal = vec![];
+            for (i, token_eater) in token_eaters.iter_mut().enumerate() {
+                token_eater.shift_history();
+                let res = token_eater.send.send(Token::Provision(tokens_per_eater));
+                if res.is_err() {
+                    to_removal.push(i);
+                } else {
+                    tokens_available_from_time_pass -= tokens_per_eater;
                 }
+            }
+            while let Some(index) = to_removal.pop() {
+                token_eaters.swap_remove(index);
             }
         } else {
             // TODO: extend the logic to store unused tokens history per socket
-            let mut socket_count: u64 = socket_pipes.len() as u64;
-            while socket_count > 0 {
-                socket_count -= 1;
-                if let Some((s, r, prev_size, additional_request)) = socket_pipes.pop_front() {
-                    while let Ok(request) = r.try_recv() {
-                        match request {
-                            Token::Request(req_size) => {
-                                if tokens_available_from_time_pass >= req_size {
-                                    tokens_available_from_time_pass -= req_size;
-                                    let _ = s.send(Token::Provision(req_size));
+            for token_eater in token_eaters.iter_mut() {
+                while let Ok(request) = token_eater.recv.try_recv() {
+                    match request {
+                        Token::Request(req_size) => {
+                            if tokens_available_from_time_pass >= req_size {
+                                tokens_available_from_time_pass -= req_size;
+                                let _ = token_eater.send.send(Token::Provision(req_size));
+                            } else {
+                                let mut missing_tokens = req_size - tokens_available_from_time_pass;
+                                tokens_available_from_time_pass = 0;
+                                if tokens_available_from_buffer >= missing_tokens {
+                                    tokens_available_from_buffer -= missing_tokens;
+                                    missing_tokens = 0;
                                 } else {
-                                    let mut missing_tokens =
-                                        req_size - tokens_available_from_time_pass;
-                                    tokens_available_from_time_pass = 0;
-                                    if tokens_available_from_buffer >= missing_tokens {
-                                        tokens_available_from_buffer -= missing_tokens;
-                                        missing_tokens = 0;
-                                    } else {
-                                        missing_tokens +=
-                                            tokens_available_from_buffer - missing_tokens;
-                                        tokens_available_from_buffer = 0;
-                                    }
-                                    let _ = s.send(Token::Provision(req_size - missing_tokens));
+                                    missing_tokens += tokens_available_from_buffer - missing_tokens;
+                                    tokens_available_from_buffer = 0;
                                 }
+                                let _ = token_eater
+                                    .send
+                                    .send(Token::Provision(req_size - missing_tokens));
                             }
-                            Token::Unused(_size) => {
-                                // TODO
-                                //unused_size += size,
-                            }
-                            _ => (),
                         }
+                        Token::Unused(size) => {
+                            token_eater.add_to_pending(size);
+                        }
+                        _ => (),
                     }
-                    socket_pipes.push_back((s, r, prev_size, additional_request));
                 }
             }
         }
@@ -231,12 +207,13 @@ enum Category {
     Rabbit,
     Cheetah,
 }
+
 struct TokenEater {
     cat: Category,
     send: Sender<Token>,
     recv: Receiver<Token>,
     history: [u64; 64],
-    pending: u64,
+    iter: u8,
 }
 
 impl TokenEater {
@@ -246,7 +223,20 @@ impl TokenEater {
             send,
             recv,
             history: [0; 64],
-            pending: 0,
+            iter: 0,
+        }
+    }
+    pub fn add_to_pending(&mut self, value: u64) {
+        self.history[0] += value;
+    }
+    pub fn shift_history(&mut self) {
+        self.iter += 1;
+        if self.iter >= 8 {
+            self.iter = 0;
+            let mut prev = 0;
+            for i in 0..64 {
+                std::mem::swap(&mut self.history[i], &mut prev);
+            }
         }
     }
 }
