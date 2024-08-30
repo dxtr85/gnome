@@ -12,9 +12,6 @@ use crate::networking::token::Token;
 use async_std::net::UdpSocket;
 use async_std::task;
 use async_std::task::yield_now;
-use swarm_consensus::NeighborRequest;
-// TODO: get rid of bytes crate
-// use bytes::BufMut;
 use core::panic;
 use futures::{
     future::FutureExt, // for `.fuse()`
@@ -23,11 +20,14 @@ use futures::{
 };
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use swarm_consensus::NeighborRequest;
 use swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
 
 async fn read_bytes_from_socket(
     socket: &UdpSocket,
-    buf: &mut [u8; 1500],
+    // We only peek, so it's better not to waste resources
+    // buf: &mut [u8; 1500],
+    buf: &mut [u8; 1],
 ) -> Result<Vec<u8>, String> {
     // println!("read_bytes_from_socket");
     // TODO: increase size of buffer everywhere
@@ -76,9 +76,10 @@ async fn read_bytes_from_local_stream(
                         match c_msg.content {
                             CastContent::Data(data) => {
                                 // let data = c_msg.get_data().unwrap();
-                                for a_byte in data.bytes() {
-                                    merged_bytes.push(a_byte);
-                                }
+                                // for a_byte in data.bytes() {
+                                //     merged_bytes.push(a_byte);
+                                // }
+                                merged_bytes.append(&mut data.bytes());
                             }
                             CastContent::Request(n_req) => {
                                 neighbor_request_to_bytes(n_req, &mut merged_bytes);
@@ -97,16 +98,6 @@ async fn read_bytes_from_local_stream(
                         return Ok(merged_bytes);
                     }
                 }
-                // println!(">>>>> {:?}", bytes);
-
-                // if *id == 0 {
-                // } else {
-                //     let mut extended_bytes = BytesMut::with_capacity(bytes.len() + 2);
-                //     extended_bytes.put_u8(240);
-                //     extended_bytes.put_u8(*id);
-                //     extended_bytes.put(bytes);
-                //     return Ok((*id, Bytes::from(extended_bytes)));
-                // }
             }
         }
         task::yield_now().await;
@@ -150,7 +141,8 @@ async fn race_tasks(
         receivers.insert(i as u8, receiver);
     }
     let mut buf = [0u8; 1500];
-    let mut buf2 = [0u8; 1500];
+    // let mut buf2 = [0u8; 1500];
+    let mut buf2 = [0u8; 1];
     println!("Waiting for initial tokens");
     yield_now().await;
     let max_tokens = if let Ok(Token::Provision(tkns)) = token_reciever.try_recv() {
@@ -233,7 +225,8 @@ async fn race_tasks(
         }
         if from_socket {
             // println!("From soket");
-            // if let Ok((id, bytes)) = result {
+            // Here we read entire bytestream after being notified
+            // that there is incoming data
             let read_result = socket.recv(&mut buf).await;
             if let Ok(count) = read_result {
                 // println!("Read {} bytes", count);
@@ -377,6 +370,7 @@ async fn race_tasks(
             } else {
                 println!("Waiting for tokens...");
                 let _ = token_sender.send(Token::Request(2 * len));
+                yield_now().await;
                 let res = token_reciever.recv();
                 match res {
                     Ok(Token::Provision(amount)) => {
