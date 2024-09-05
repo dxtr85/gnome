@@ -182,13 +182,14 @@ pub async fn token_dispenser(
                                 if tokens_available_from_buffer >= missing_tokens {
                                     tokens_available_from_buffer -= missing_tokens;
                                     missing_tokens = 0;
-                                } else {
-                                    missing_tokens += tokens_available_from_buffer - missing_tokens;
-                                    tokens_available_from_buffer = 0;
+                                    let _ = token_eater
+                                        .send
+                                        .send(Token::Provision(req_size - missing_tokens));
+                                    // } else {
+                                    //     missing_tokens -= tokens_available_from_buffer;
+                                    //     tokens_available_from_buffer = 0;
+                                    //     // We do not send tokens in this case
                                 }
-                                let _ = token_eater
-                                    .send
-                                    .send(Token::Provision(req_size - missing_tokens));
                             }
                         }
                         Token::Unused(size) => {
