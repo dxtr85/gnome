@@ -7,10 +7,10 @@ use std::error::Error;
 use std::net::IpAddr;
 use swarm_consensus::BlockID;
 use swarm_consensus::Capabilities;
+use swarm_consensus::CastData;
 use swarm_consensus::CastID;
 use swarm_consensus::CastMessage;
 use swarm_consensus::Configuration;
-use swarm_consensus::Data;
 use swarm_consensus::GnomeId;
 use swarm_consensus::Header;
 use swarm_consensus::Message;
@@ -27,6 +27,7 @@ use swarm_consensus::Signature;
 use swarm_consensus::SwarmID;
 use swarm_consensus::SwarmTime;
 use swarm_consensus::SwarmType;
+use swarm_consensus::SyncData;
 
 // Every received Dgram starts with message identification header
 // (and optional second byte for casting messages).
@@ -287,7 +288,7 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
         };
         // println!("Data idx: {:?}", &bytes[data_idx..]);
         // println!("len: {}", bytes.len());
-        let data = Data::new(Vec::from(&bytes[data_idx..])).unwrap();
+        let data = SyncData::new(Vec::from(&bytes[data_idx..])).unwrap();
         Payload::Block(BlockID(bid), signature, data)
     };
     Ok(Message {
@@ -300,7 +301,7 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
 pub fn bytes_to_cast_message(bytes: &[u8]) -> Result<CastMessage, ConversionError> {
     let dgram_header = bytes[0];
     let c_id = CastID(bytes[1]);
-    let data = Data::new(Vec::from(&bytes[2..])).unwrap();
+    let data = CastData::new(Vec::from(&bytes[2..])).unwrap();
     if dgram_header & 0b11000000 == 192 {
         // TODO: broadcast
         // println!("received a broadcast");
@@ -798,7 +799,7 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
         246 => {
             let req_id = bytes[data_idx + 1];
             let dta = Vec::from(&bytes[data_idx + 2..]);
-            NeighborRequest::AppSyncRequest(req_id, Data::new(dta).unwrap())
+            NeighborRequest::AppSyncRequest(req_id, SyncData::new(dta).unwrap())
         }
         other => {
             println!("Other message: {:?}", bytes);
@@ -809,7 +810,7 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
             //     bytes[data_idx + 4],
             //     bytes[data_idx + 5],
             // ]);
-            NeighborRequest::CustomRequest(other, Data::new(dta).unwrap())
+            NeighborRequest::CustomRequest(other, SyncData::new(dta).unwrap())
         }
     }
     // nr
@@ -854,7 +855,7 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
             ]);
 
             let data = Vec::from(&bytes[data_idx + 9..]);
-            NeighborResponse::Block(BlockID(b_id), Data::new(data).unwrap())
+            NeighborResponse::Block(BlockID(b_id), SyncData::new(data).unwrap())
         }
         252 => {
             let net_set = parse_network_settings(&bytes[data_idx + 1..bytes_len]);
@@ -1089,14 +1090,14 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
                 c_id,
                 part_no,
                 total,
-                Data::new(Vec::from(&bytes[data_idx + 8..])).unwrap(),
+                SyncData::new(Vec::from(&bytes[data_idx + 8..])).unwrap(),
             )
         }
         _other => {
             // TODO
             NeighborResponse::CustomResponse(
                 bytes[data_idx],
-                Data::new(Vec::from(&bytes[data_idx + 1..])).unwrap(),
+                SyncData::new(Vec::from(&bytes[data_idx + 1..])).unwrap(),
             )
         }
     }

@@ -30,8 +30,8 @@ pub mod prelude {
     pub use crate::manager::Manager as GManager;
     pub use crate::manager::ManagerRequest;
     pub use crate::manager::ManagerResponse;
+    pub use swarm_consensus::CastData;
     pub use swarm_consensus::CastID;
-    pub use swarm_consensus::Data;
     pub use swarm_consensus::GnomeId;
     pub use swarm_consensus::Nat;
     pub use swarm_consensus::NeighborRequest;
@@ -41,6 +41,7 @@ pub mod prelude {
     pub use swarm_consensus::Request;
     pub use swarm_consensus::Response;
     pub use swarm_consensus::SwarmID;
+    pub use swarm_consensus::SyncData;
 }
 
 pub fn init(

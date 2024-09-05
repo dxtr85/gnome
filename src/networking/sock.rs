@@ -215,6 +215,7 @@ async fn race_tasks(
                 token_dispenser.available_tokens, min_tokens_threshold
             );
             let _ = token_sender.send(Token::Request(2 * min_tokens_threshold));
+            continue;
         }
         let t1 = read_bytes_from_socket(&socket, &mut buf2).fuse();
         // TODO: serv pairs of sender-receiver
