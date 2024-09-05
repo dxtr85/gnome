@@ -11,7 +11,6 @@ use crate::networking::token::Token;
 
 use async_std::net::UdpSocket;
 use async_std::task;
-use async_std::task::yield_now;
 use core::panic;
 use futures::{
     future::FutureExt, // for `.fuse()`
@@ -144,7 +143,7 @@ async fn race_tasks(
     // let mut buf2 = [0u8; 1500];
     let mut buf2 = [0u8; 1];
     println!("Waiting for initial tokens");
-    yield_now().await;
+    task::yield_now().await;
     let max_tokens = if let Ok(Token::Provision(tkns)) = token_reciever.try_recv() {
         tkns * 1000
     } else {
@@ -192,6 +191,7 @@ async fn race_tasks(
         while let Ok(token_msg) = token_reciever.try_recv() {
             match token_msg {
                 Token::Provision(count) => {
+                    // println!("Got {} tokens!", count);
                     // provisioned_tokens_count += count;
                     token_dispenser.add(count);
                 }
@@ -215,6 +215,7 @@ async fn race_tasks(
                 token_dispenser.available_tokens, min_tokens_threshold
             );
             let _ = token_sender.send(Token::Request(2 * min_tokens_threshold));
+            task::yield_now().await;
             continue;
         }
         let t1 = read_bytes_from_socket(&socket, &mut buf2).fuse();
@@ -387,7 +388,7 @@ async fn race_tasks(
             } else {
                 println!("Waiting for tokens...");
                 let _ = token_sender.send(Token::Request(2 * len));
-                yield_now().await;
+                task::yield_now().await;
                 let res = token_reciever.recv();
                 match res {
                     Ok(Token::Provision(amount)) => {
@@ -446,6 +447,8 @@ impl TokenDispenser {
     }
     pub fn add(&mut self, value: u64) {
         let mut prev_value = value;
+        self.available_tokens += value;
+        self.available_tokens -= self.token_slots[7];
         for i in 0..8 {
             std::mem::swap(&mut self.token_slots[i], &mut prev_value);
             // let temp = self.token_slots[i];
