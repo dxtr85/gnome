@@ -5,7 +5,6 @@ use std::fs::read_to_string;
 pub use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
-// use std::time::Duration;
 use swarm_consensus::GnomeId;
 use swarm_consensus::NetworkSettings;
 mod crypto;
@@ -48,6 +47,7 @@ pub fn init(
     work_dir: String,
     app_sync_hash: u64,
 ) -> (Sender<ManagerRequest>, Receiver<ManagerResponse>) {
+    // ) {
     // println!("init start");
     let (req_sender, req_receiver) = channel();
     let (resp_sender, resp_receiver) = channel();
@@ -58,9 +58,8 @@ pub fn init(
     // let server_ip: IpAddr = "100.116.51.23".parse().unwrap();
     // let broadcast_ip: IpAddr = "192.168.0.255".parse().unwrap();
     let server_port: u16 = 1026;
-    // let nic_buffer_size: u32 = 500000;
-    let nic_buffer_size: u64 = 0;
-    let upload_bytes_per_sec: u64 = 1024000;
+    let nic_buffer_size: u64 = 500000;
+    let upload_bytes_per_sec: u64 = 102400;
     let mut decrypter: Option<Decrypter> = None;
     // let mut encrypter: Option<Encrypter> = None;
     let priv_path = PathBuf::from(work_dir.clone()).join("id_rsa");

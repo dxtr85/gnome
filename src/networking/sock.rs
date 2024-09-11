@@ -19,6 +19,7 @@ use futures::{
 };
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::time::Duration;
 use swarm_consensus::NeighborRequest;
 use swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
 
@@ -132,7 +133,7 @@ async fn race_tasks(
 ) {
     let mut senders: HashMap<u8, (Sender<Message>, Sender<CastMessage>)> = HashMap::new();
     let mut receivers: HashMap<u8, Receiver<WrappedMessage>> = HashMap::new();
-    let min_tokens_threshold: u64 = 128;
+    let min_tokens_threshold: u64 = 1500;
     let mut available_tokens: u64 = min_tokens_threshold;
     // println!("racing: {:?}", send_recv_pairs);
     for (i, (sender, c_sender, receiver)) in send_recv_pairs.into_iter().enumerate() {
@@ -148,11 +149,12 @@ async fn race_tasks(
         tkns * 1000
     } else {
         println!("Did not receive Provision as first token message");
-        println!("setting max_tokens to 100kB");
-        102400
+        println!("setting max_tokens to 10kB/s");
+        10240
     };
     let mut token_dispenser = TokenDispenser::new(max_tokens);
     println!("Max tokens: {}", max_tokens);
+    let mut requested_tokens: u64 = 0;
     loop {
         // print!("l");
         if let Ok((swarm_name, snd, cast_snd, recv)) = extend_receiver.try_recv() {
@@ -191,9 +193,16 @@ async fn race_tasks(
         while let Ok(token_msg) = token_reciever.try_recv() {
             match token_msg {
                 Token::Provision(count) => {
-                    // println!("Got {} tokens!", count);
-                    // provisioned_tokens_count += count;
+                    if requested_tokens > 0 {
+                        // println!("Got {} tokens (requested: {})!", count, requested_tokens);
+                        if count >= requested_tokens {
+                            requested_tokens = 0;
+                        } else {
+                            requested_tokens -= count;
+                        }
+                    }
                     token_dispenser.add(count);
+                    // println!("Now I have: {}", token_dispenser.available_tokens);
                 }
                 other => {
                     println!("Unexpected Token message: {:?}", other);
@@ -201,6 +210,10 @@ async fn race_tasks(
             }
         }
         let _ = token_sender.send(Token::Unused(token_dispenser.available_tokens));
+        if requested_tokens > 0 && token_dispenser.available_tokens < min_tokens_threshold {
+            task::yield_now().await;
+            continue;
+        }
         // println!(
         //     "{} unused, more tokens: {}",
         //     available_tokens, provisioned_tokens_count
@@ -210,11 +223,12 @@ async fn race_tasks(
         //     available_tokens = max_tokens;
         // }
         if token_dispenser.available_tokens < min_tokens_threshold {
-            println!(
-                "Requesting more tokens (have: {}, required: {})",
-                token_dispenser.available_tokens, min_tokens_threshold
-            );
-            let _ = token_sender.send(Token::Request(2 * min_tokens_threshold));
+            // println!(
+            //     "Requesting more tokens (have: {}, required: {})",
+            //     token_dispenser.available_tokens, min_tokens_threshold
+            // );
+            requested_tokens = (2 * min_tokens_threshold) - token_dispenser.available_tokens;
+            let _ = token_sender.send(Token::Request(requested_tokens));
             task::yield_now().await;
             continue;
         }
@@ -379,7 +393,6 @@ async fn race_tasks(
             let taken = token_dispenser.take(len);
             if taken == len {
                 let _send_result = socket.send(&ciphered).await;
-                // available_tokens -= len;
                 available_tokens = if len > available_tokens {
                     0
                 } else {
@@ -394,13 +407,7 @@ async fn race_tasks(
                     Ok(Token::Provision(amount)) => {
                         token_dispenser.add(amount);
                         token_dispenser.take(len);
-                        // available_tokens += amount;
                         let _send_result = socket.send(&ciphered).await;
-                        // available_tokens = if len > available_tokens {
-                        //     0
-                        // } else {
-                        //     available_tokens - len
-                        // };
                     }
                     Ok(other) => println!("Received unexpected Token: {:?}", other),
                     Err(e) => {
@@ -410,8 +417,6 @@ async fn race_tasks(
             }
         }
     }
-    // }
-    // }
 }
 struct TokenDispenser {
     available_tokens: u64,

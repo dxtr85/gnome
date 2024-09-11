@@ -22,7 +22,9 @@ pub async fn token_dispenser(
     let mut tokens_available_from_buffer = max_buffer_size_bytes;
     let mut tokens_available_from_time_pass = bandwith_bytes_sec;
 
-    let bytes_per_msec: u64 = bandwith_bytes_sec >> 10;
+    // We need to make sure that we add some tokens, so effective
+    // bandwith minimum is 2048 bytes per second
+    let bytes_per_msec: u64 = u64::max(bandwith_bytes_sec >> 10, 2);
     // this is to provision tokens on a per socket basis
     let mut token_eaters: Vec<TokenEater> = Vec::with_capacity(16);
     // this is to notify gnomes
@@ -87,9 +89,11 @@ pub async fn token_dispenser(
     // If a cheetah is increasing it's unused tokens count, we change it to rabbit.
 
     let mut iteration: u8 = 0;
+    let send_trigger: u8 = 128;
+    let max_tokens_avail_from_time_pas = (send_trigger as u64) * bytes_per_msec;
     loop {
         // print!("L");
-        let send_tokens = if iteration >= 128 {
+        let send_tokens = if iteration >= send_trigger {
             iteration = 0;
             true
         } else {
@@ -126,11 +130,13 @@ pub async fn token_dispenser(
             if tokens_available_from_buffer < max_buffer_size_bytes {
                 tokens_available_from_buffer += bytes_per_msec;
                 if tokens_available_from_buffer > max_buffer_size_bytes {
-                    let tokens_left = tokens_available_from_buffer - max_buffer_size_bytes;
+                    // let tokens_left = tokens_available_from_buffer - max_buffer_size_bytes;
                     tokens_available_from_buffer = max_buffer_size_bytes;
-                    tokens_available_from_buffer += tokens_left;
+                    // tokens_available_from_time_pass += tokens_left;
                 }
-            } else {
+                // } else {
+            }
+            if tokens_available_from_time_pass < max_tokens_avail_from_time_pas {
                 tokens_available_from_time_pass += bytes_per_msec;
             }
         }
@@ -150,7 +156,9 @@ pub async fn token_dispenser(
 
             let eaters_count: u64 = token_eaters.len() as u64;
             let tokens_per_eater = if eaters_count > 0 {
-                tokens_available_from_time_pass / eaters_count
+                let tpe = tokens_available_from_time_pass / eaters_count;
+                // println!("Provisioning {} per eater", tpe);
+                tpe
             } else {
                 tokens_available_from_time_pass
             };
@@ -174,21 +182,26 @@ pub async fn token_dispenser(
                     match request {
                         Token::Request(req_size) => {
                             if tokens_available_from_time_pass >= req_size {
+                                // println!("Have enough tokens from time pass");
                                 tokens_available_from_time_pass -= req_size;
                                 let _ = token_eater.send.send(Token::Provision(req_size));
                             } else {
-                                let mut missing_tokens = req_size - tokens_available_from_time_pass;
+                                let missing_tokens = req_size - tokens_available_from_time_pass;
                                 tokens_available_from_time_pass = 0;
                                 if tokens_available_from_buffer >= missing_tokens {
+                                    // println!("Have enough tokens from buffer");
                                     tokens_available_from_buffer -= missing_tokens;
-                                    missing_tokens = 0;
-                                    let _ = token_eater
-                                        .send
-                                        .send(Token::Provision(req_size - missing_tokens));
+                                    // missing_tokens = 0;
+                                    let _ = token_eater.send.send(Token::Provision(req_size));
                                     // } else {
                                     //     missing_tokens -= tokens_available_from_buffer;
                                     //     tokens_available_from_buffer = 0;
                                     //     // We do not send tokens in this case
+                                } else {
+                                    println!(
+                                        "Do not have enough tokens from buffer {}, req: {}",
+                                        tokens_available_from_buffer, req_size
+                                    );
                                 }
                             }
                         }
