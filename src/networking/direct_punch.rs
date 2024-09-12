@@ -1,5 +1,5 @@
 // use super::common::are_we_behind_a_nat;
-use super::common::{are_we_behind_a_nat, discover_network_settings, time_out};
+use super::common::{are_we_behind_a_nat, discover_network_settings};
 use super::token::Token;
 use crate::crypto::Decrypter;
 use crate::networking::holepunch::cluster_punch_it;
@@ -10,7 +10,7 @@ use crate::networking::{
 };
 // use crate::GnomeId;
 use async_std::net::UdpSocket;
-use async_std::task::{spawn, yield_now};
+use async_std::task::{sleep, spawn};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -74,6 +74,7 @@ pub async fn direct_punching_service(
 
     let mut waiting_for_my_settings = false;
     let mut request_sender: Option<Sender<Request>> = None;
+    let sleep_time = Duration::from_millis(16);
     loop {
         // print!("dps");
         if let Ok((swarm_name, req_sender, net_set_recv)) = pipes_receiver.try_recv() {
@@ -106,7 +107,8 @@ pub async fn direct_punching_service(
                 waiting_for_my_settings = false;
             }
         }
-        yield_now().await;
+        // yield_now().await;
+        sleep(sleep_time).await;
     }
 }
 
@@ -131,16 +133,22 @@ async fn socket_maintainer(
 
     // TODO: race two tasks: either timeout or receive NetworkSettings from pipe
     //       if timeout - we need to refresh the socket by sending to STUN server
-    let timeout_sec = Duration::from_secs(14);
-    let (t_send, timeout) = channel();
-    spawn(time_out(timeout_sec, Some(t_send.clone())));
+    // let timeout_sec = Duration::from_secs(14);
+    let trigger_update_at_iter = 14;
+    let mut current_iter = 0;
+    // let (t_send, timeout) = channel();
+    // spawn(time_out(timeout_sec, Some(t_send.clone())));
+    let sleep_time = Duration::from_secs(1);
     loop {
-        if timeout.try_recv().is_ok() {
+        current_iter += 1;
+        sleep(sleep_time).await;
+        if current_iter > trigger_update_at_iter {
+            current_iter = 0;
             my_settings = update_my_pub_addr(&socket, my_settings).await;
-            spawn(time_out(timeout_sec, Some(t_send.clone())));
+            //     spawn(time_out(timeout_sec, Some(t_send.clone())));
         }
-        let recv_result = recv_other.try_recv();
-        if let Ok((swarm_name, other_settings)) = recv_result {
+        // let recv_result = recv_other.try_recv();
+        while let Ok((swarm_name, other_settings)) = recv_other.try_recv() {
             if !swarm_names.contains(&swarm_name) {
                 swarm_names.push(swarm_name.clone());
             }
@@ -162,7 +170,7 @@ async fn socket_maintainer(
             socket = UdpSocket::bind(bind_addr).await.unwrap();
             my_settings = update_my_pub_addr(&socket, my_settings).await;
         }
-        yield_now().await;
+        // yield_now().await;
     }
 }
 async fn update_my_pub_addr(

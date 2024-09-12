@@ -233,9 +233,9 @@ pub fn store_key_pair_as_pem_files(
 }
 
 pub fn get_new_key_pair() -> Option<(RsaPrivateKey, RsaPublicKey)> {
-    // println!("get_new_key_pair {}", bits);
-    let mut rng = rand::thread_rng();
     let bits = 2048;
+    println!("Generating new {}-bit RSA key pair", bits);
+    let mut rng = rand::thread_rng();
     if let Ok(priv_key) = RsaPrivateKey::new(&mut rng, bits) {
         // println!("get_new_key_pair some");
         let pub_key = RsaPublicKey::from(&priv_key);

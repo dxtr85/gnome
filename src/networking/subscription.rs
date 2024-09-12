@@ -1,8 +1,9 @@
 // use crate::crypto::Decrypter;
-use async_std::task::yield_now;
+use async_std::task::sleep;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::mpsc::{Receiver, Sender};
+use std::time::Duration;
 use swarm_consensus::{Nat, Neighbor, NetworkSettings, NotificationBundle, Request};
 
 #[derive(Debug)]
@@ -35,6 +36,7 @@ pub async fn subscriber(
     let mut names: Vec<String> = Vec::with_capacity(10);
     println!("Subscriber service started");
     let mut notify_holepunch = true;
+    let sleep_time = Duration::from_millis(256);
     loop {
         // print!("sub");
         let recv_result = notification_receiver.try_recv();
@@ -114,6 +116,6 @@ pub async fn subscriber(
             }
         }
         // print!("Y");
-        yield_now().await;
+        sleep(sleep_time).await;
     }
 }

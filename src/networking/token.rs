@@ -1,4 +1,4 @@
-use async_std::task::{self, yield_now};
+use async_std::task;
 use std::collections::VecDeque;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
@@ -47,7 +47,7 @@ pub async fn token_dispenser(
     // TODO: we need to think about how to calculate this
     let token_size = bandwith_bytes_sec >> 6;
 
-    yield_now().await;
+    task::sleep(dur).await;
     // New concept:
     // We have two token sources:
     // 1 - time every 1ms bandwith_bytes_sec>>10 is added to bucket
@@ -213,7 +213,7 @@ pub async fn token_dispenser(
                 }
             }
         }
-        yield_now().await;
+        task::sleep(dur).await;
     }
 }
 enum Category {

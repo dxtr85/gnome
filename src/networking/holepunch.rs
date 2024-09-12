@@ -668,6 +668,8 @@ pub async fn punch_it(
     let mut responsive_socket_result;
     let retries_count_start = 6u8;
     let mut retries_remaining = 5u8;
+    // TODO: before there was no interval
+    let punch_interval = Duration::from_millis(64);
     while retries_remaining > 0 {
         responsive_socket_result = reciever.try_recv();
         match responsive_socket_result {
@@ -706,7 +708,7 @@ pub async fn punch_it(
                 // println!("Receiver error: {:?}", e);
             }
         }
-        yield_now().await;
+        sleep(punch_interval).await;
     }
     drop(reciever);
     // if dedicated_socket.is_none() {

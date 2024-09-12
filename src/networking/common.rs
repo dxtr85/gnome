@@ -27,6 +27,7 @@ pub async fn collect_subscribed_swarm_names(
 ) -> Receiver<Subscription> {
     // println!("Collecting swarm names...");
     let _ = sender.send(Subscription::ProvideList);
+    let sleep_time = Duration::from_millis(128);
     loop {
         if let Ok(subs_msg) = receiver.try_recv() {
             // recv_result = Ok(recv_rslt);
@@ -42,7 +43,8 @@ pub async fn collect_subscribed_swarm_names(
                 _ => println!("Unexpected message: {:?}", subs_msg),
             };
         }
-        yield_now().await;
+        // yield_now().await;
+        sleep(sleep_time).await;
     }
     receiver
 }

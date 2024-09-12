@@ -1,20 +1,21 @@
 use crate::crypto::Decrypter;
-use async_std::task::yield_now;
+use async_std::task::sleep;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::time::Duration;
 use swarm_consensus::NetworkSettings;
 use swarm_consensus::SwarmTime;
 // use crate::gnome::NetworkSettings;
 // use crate::swarm::{Swarm, SwarmID};
 use crate::NotificationBundle;
 use rsa::{
-    pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey, EncodeRsaPrivateKey, EncodeRsaPublicKey},
+    pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey},
     pkcs1v15::{Signature, SigningKey, VerifyingKey},
-    pkcs8::LineEnding,
+    // pkcs8::LineEnding,
     sha2::{Digest, Sha256},
     signature::Verifier,
     // traits::SignatureScheme,
-    Pkcs1v15Encrypt,
-    RsaPrivateKey,
+    // Pkcs1v15Encrypt,
+    // RsaPrivateKey,
     RsaPublicKey,
 };
 use std::collections::HashMap;
@@ -159,6 +160,9 @@ impl Manager {
         resp_sender: Sender<ManagerResponse>,
         app_sync_hash: u64,
     ) {
+        // let min_sleep_nanos: u64 = 1 << 7;
+        // let max_sleep_nanos: u64 = 1 << 27;
+        let sleep_nanos: u64 = 1 << 25;
         loop {
             if let Ok(request) = req_receiver.try_recv() {
                 match request {
@@ -210,7 +214,8 @@ impl Manager {
                 }
             }
             self.serve_gnome_requests();
-            yield_now().await;
+            let sleep_time = Duration::from_nanos(sleep_nanos);
+            sleep(sleep_time).await;
         }
         self.finish();
         // join.await;
@@ -330,8 +335,10 @@ impl Manager {
                         for st_byte in last_byte.to_be_bytes() {
                             data.push(st_byte);
                         }
-                        last_byte -= 2;
-                        result = verifier.verify(data, &signature_three);
+                        if last_byte > 1 {
+                            last_byte -= 2;
+                            result = verifier.verify(data, &signature_three);
+                        }
                     }
                     // println!("Ver res 2: {:?}", result);
                     if result.is_err() {

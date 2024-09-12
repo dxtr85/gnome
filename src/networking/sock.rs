@@ -51,6 +51,7 @@ async fn read_bytes_from_local_stream(
     receivers: &mut HashMap<u8, Receiver<WrappedMessage>>,
 ) -> Result<Vec<u8>, String> {
     // println!("read_bytes_from_local_stream");
+    let sleep_time = Duration::from_micros(100);
     loop {
         for (id, receiver) in receivers.iter_mut() {
             let next_option = receiver.try_recv();
@@ -100,7 +101,7 @@ async fn read_bytes_from_local_stream(
                 }
             }
         }
-        task::yield_now().await;
+        task::sleep(sleep_time).await;
     }
     // Err(ConnError::LocalStreamClosed)
 }
@@ -144,7 +145,7 @@ async fn race_tasks(
     // let mut buf2 = [0u8; 1500];
     let mut buf2 = [0u8; 1];
     println!("Waiting for initial tokens");
-    task::yield_now().await;
+    task::sleep(Duration::from_millis(1)).await;
     let max_tokens = if let Ok(Token::Provision(tkns)) = token_reciever.try_recv() {
         tkns * 1000
     } else {
@@ -211,7 +212,7 @@ async fn race_tasks(
         }
         let _ = token_sender.send(Token::Unused(token_dispenser.available_tokens));
         if requested_tokens > 0 && token_dispenser.available_tokens < min_tokens_threshold {
-            task::yield_now().await;
+            task::sleep(Duration::from_millis(1)).await;
             continue;
         }
         // println!(
@@ -229,7 +230,7 @@ async fn race_tasks(
             // );
             requested_tokens = (2 * min_tokens_threshold) - token_dispenser.available_tokens;
             let _ = token_sender.send(Token::Request(requested_tokens));
-            task::yield_now().await;
+            task::sleep(Duration::from_millis(1)).await;
             continue;
         }
         let t1 = read_bytes_from_socket(&socket, &mut buf2).fuse();
@@ -401,7 +402,7 @@ async fn race_tasks(
             } else {
                 println!("Waiting for tokens...");
                 let _ = token_sender.send(Token::Request(2 * len));
-                task::yield_now().await;
+                task::sleep(Duration::from_millis(1)).await;
                 let res = token_reciever.recv();
                 match res {
                     Ok(Token::Provision(amount)) => {
