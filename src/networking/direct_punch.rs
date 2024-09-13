@@ -15,14 +15,14 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{NetworkSettings, Request};
+use swarm_consensus::{NetworkSettings, ToGnome};
 
 pub async fn direct_punching_service(
     // host_ip: IpAddr,
-    sub_sender: Sender<Subscription>,
+    subscription_sender: Sender<Subscription>,
     decrypter: Decrypter,
-    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
-    pipes_receiver: Receiver<(String, Sender<Request>, Receiver<NetworkSettings>)>,
+    token_endpoints_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    swarm_endpoints_receiver: Receiver<(String, Sender<ToGnome>, Receiver<NetworkSettings>)>,
     pub_key_pem: String,
 ) {
     println!("Waiting for direct connect requests.");
@@ -55,54 +55,55 @@ pub async fn direct_punching_service(
     // Then we receive trough settings_result external ip and port
     // of joining party and use our predicted ip and port to connect to it.
 
-    let mut swarms: HashMap<String, (Sender<Request>, Receiver<NetworkSettings>)> =
+    let mut swarms: HashMap<String, (Sender<ToGnome>, Receiver<NetworkSettings>)> =
         HashMap::with_capacity(10);
-    let (send_other, recv_other) = channel();
-    let (send_my, recv_my) = channel();
+    let (send_other_network_settings, recv_other_network_settings) = channel();
+    let (send_my_network_settings, recv_my_network_settings) = channel();
     // TODO: maybe only run it when it makes sense?
     spawn(socket_maintainer(
         // host_ip,
         pub_key_pem.clone(),
         // gnome_id,
-        sub_sender.clone(),
+        subscription_sender.clone(),
         decrypter.clone(),
-        pipes_sender.clone(),
-        send_my,
-        recv_other,
+        token_endpoints_sender.clone(),
+        send_my_network_settings,
+        recv_other_network_settings,
     ));
     // println!("after sm spawn");
 
     let mut waiting_for_my_settings = false;
-    let mut request_sender: Option<Sender<Request>> = None;
+    let mut send_to_gnome: Option<Sender<ToGnome>> = None;
     let sleep_time = Duration::from_millis(16);
     loop {
         // print!("dps");
-        if let Ok((swarm_name, req_sender, net_set_recv)) = pipes_receiver.try_recv() {
-            swarms.insert(swarm_name, (req_sender, net_set_recv));
+        if let Ok((swarm_name, to_gnome_sender, net_set_recv)) = swarm_endpoints_receiver.try_recv()
+        {
+            swarms.insert(swarm_name, (to_gnome_sender, net_set_recv));
         }
         if !waiting_for_my_settings {
-            for (swarm_name, (req_sender, net_set_recv)) in &swarms {
+            for (swarm_name, (to_gnome_sender, net_set_recv)) in &swarms {
                 let settings_result = net_set_recv.try_recv();
                 // match settings_result {
                 if let Ok(other_settings) = settings_result {
-                    let _ = send_other.send((swarm_name.clone(), other_settings));
+                    let _ = send_other_network_settings.send((swarm_name.clone(), other_settings));
                     println!("His: {:?}", other_settings);
                     waiting_for_my_settings = true;
-                    request_sender = Some(req_sender.clone());
+                    send_to_gnome = Some(to_gnome_sender.clone());
                 }
             }
         } else {
-            let recv_result = recv_my.try_recv();
+            let recv_result = recv_my_network_settings.try_recv();
             if let Ok(my_settings) = recv_result {
                 println!("My: {:?}", my_settings);
-                let request = Request::NetworkSettingsUpdate(
+                let request = ToGnome::NetworkSettingsUpdate(
                     true,
                     my_settings.pub_ip,
                     my_settings.pub_port,
                     my_settings.nat_type,
                 );
-                if let Some(req_sender) = &request_sender {
-                    let _ = req_sender.send(request);
+                if let Some(to_gnome) = &send_to_gnome {
+                    let _ = to_gnome.send(request);
                 }
                 waiting_for_my_settings = false;
             }
@@ -116,11 +117,11 @@ async fn socket_maintainer(
     // host_ip: IpAddr,
     pub_key_pem: String,
     // gnome_id: GnomeId,
-    sub_sender: Sender<Subscription>,
+    subscription_sender: Sender<Subscription>,
     decrypter: Decrypter,
-    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
-    send_my: Sender<NetworkSettings>,
-    recv_other: Receiver<(String, NetworkSettings)>,
+    token_endpoints_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    my_network_settings_sender: Sender<NetworkSettings>,
+    other_network_settings_reciever: Receiver<(String, NetworkSettings)>,
 ) {
     let mut swarm_names = vec![];
     // println!("SM start");
@@ -148,22 +149,22 @@ async fn socket_maintainer(
             //     spawn(time_out(timeout_sec, Some(t_send.clone())));
         }
         // let recv_result = recv_other.try_recv();
-        while let Ok((swarm_name, other_settings)) = recv_other.try_recv() {
+        while let Ok((swarm_name, other_settings)) = other_network_settings_reciever.try_recv() {
             if !swarm_names.contains(&swarm_name) {
                 swarm_names.push(swarm_name.clone());
             }
             // TODO: discover with stun server
             println!("recvd other!");
-            let _ = send_my.send(my_settings);
+            let _ = my_network_settings_sender.send(my_settings);
             swarm_names.sort();
             spawn(punch_and_communicate(
                 socket,
                 bind_addr,
                 pub_key_pem.clone(),
                 // gnome_id.clone(),
-                sub_sender.clone(),
+                subscription_sender.clone(),
                 decrypter.clone(),
-                pipes_sender.clone(),
+                token_endpoints_sender.clone(),
                 swarm_names.clone(),
                 (my_settings, other_settings),
             ));

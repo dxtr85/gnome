@@ -4,7 +4,6 @@ use rsa::pkcs8::der::Decode;
 use std::fs::read_to_string;
 pub use std::net::IpAddr;
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
 use swarm_consensus::GnomeId;
 use swarm_consensus::NetworkSettings;
 mod crypto;
@@ -14,39 +13,40 @@ mod networking;
 use crate::crypto::{
     get_key_pair_from_files, get_new_key_pair, store_key_pair_as_pem_files, Decrypter, Encrypter,
 };
-use crate::manager::ManagerRequest;
-use crate::manager::ManagerResponse;
+use crate::manager::FromGnomeManager;
+use crate::manager::ToGnomeManager;
 use manager::Manager;
 use networking::run_networking_tasks;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
 use swarm_consensus::NotificationBundle;
 // use swarm_consensus::Request;
 // use swarm_consensus::Response;
 
 pub mod prelude {
     pub use crate::init;
+    pub use crate::manager::FromGnomeManager;
     pub use crate::manager::Manager as GManager;
-    pub use crate::manager::ManagerRequest;
-    pub use crate::manager::ManagerResponse;
+    pub use crate::manager::ToGnomeManager;
     pub use swarm_consensus::CastData;
     pub use swarm_consensus::CastID;
     pub use swarm_consensus::GnomeId;
+    pub use swarm_consensus::GnomeToApp;
     pub use swarm_consensus::Nat;
     pub use swarm_consensus::NeighborRequest;
     pub use swarm_consensus::NeighborResponse;
     pub use swarm_consensus::NetworkSettings;
     pub use swarm_consensus::PortAllocationRule;
-    pub use swarm_consensus::Request;
-    pub use swarm_consensus::Response;
     pub use swarm_consensus::SwarmID;
     pub use swarm_consensus::SyncData;
+    pub use swarm_consensus::ToGnome;
 }
 
 pub fn init(
     work_dir: String,
     app_sync_hash: u64,
-) -> (Sender<ManagerRequest>, Receiver<ManagerResponse>) {
+) -> (Sender<ToGnomeManager>, Receiver<FromGnomeManager>) {
     // ) {
     // println!("init start");
     let (req_sender, req_receiver) = channel();
@@ -131,7 +131,7 @@ pub fn init(
         // gmgr.join_a_swarm("trzat".to_string(), Some(neighbor_network_settings), None)
         gmgr.join_a_swarm("/".to_string(), app_sync_hash, None, None)
     {
-        let _ = resp_sender.send(ManagerResponse::SwarmJoined(
+        let _ = resp_sender.send(FromGnomeManager::SwarmJoined(
             swarm_id,
             "/".to_string(),
             user_req,

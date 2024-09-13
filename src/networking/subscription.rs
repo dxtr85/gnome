@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{Nat, Neighbor, NetworkSettings, NotificationBundle, Request};
+use swarm_consensus::{Nat, Neighbor, NetworkSettings, NotificationBundle, ToGnome};
 
 #[derive(Debug)]
 pub enum Subscription {
@@ -30,9 +30,9 @@ pub async fn subscriber(
     notification_receiver: Receiver<NotificationBundle>,
     token_dispenser_send: Sender<Sender<u64>>,
     holepunch_sender: Sender<String>,
-    direct_punch_sender: Sender<(String, Sender<Request>, Receiver<NetworkSettings>)>,
+    direct_punch_sender: Sender<(String, Sender<ToGnome>, Receiver<NetworkSettings>)>,
 ) {
-    let mut swarms: HashMap<String, Sender<Request>> = HashMap::with_capacity(10);
+    let mut swarms: HashMap<String, Sender<ToGnome>> = HashMap::with_capacity(10);
     let mut names: Vec<String> = Vec::with_capacity(10);
     println!("Subscriber service started");
     let mut notify_holepunch = true;
@@ -74,7 +74,7 @@ pub async fn subscriber(
             match sub {
                 Subscription::IncludeNeighbor(swarm, neighbor) => {
                     if let Some(sender) = swarms.get(&swarm) {
-                        let _ = sender.send(Request::AddNeighbor(neighbor));
+                        let _ = sender.send(ToGnome::AddNeighbor(neighbor));
                     } else {
                         println!("No sender for {} found", swarm);
                     }
@@ -85,7 +85,7 @@ pub async fn subscriber(
                 }
                 Subscription::Distribute(ip, port, nat) => {
                     for sender in swarms.values() {
-                        let request = Request::NetworkSettingsUpdate(false, ip, port, nat);
+                        let request = ToGnome::NetworkSettingsUpdate(false, ip, port, nat);
                         let _ = sender.send(request);
                     }
                 }

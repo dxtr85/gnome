@@ -25,6 +25,8 @@ use swarm_consensus::PortAllocationRule;
 use swarm_consensus::Requirement;
 use swarm_consensus::Signature;
 use swarm_consensus::SwarmID;
+use swarm_consensus::SwarmSyncRequestParams;
+use swarm_consensus::SwarmSyncResponse;
 use swarm_consensus::SwarmTime;
 use swarm_consensus::SwarmType;
 use swarm_consensus::SyncData;
@@ -479,32 +481,32 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, bytes: &mut Vec<u8>)
             insert_network_settings(bytes, network_settings);
         }
         NeighborResponse::SwarmSync(
-            chill_phase,
-            founder,
-            swarm_time,
-            swarm_type,
-            app_data_hash,
-            key_reg_size,
-            caps_size,
-            poli_size,
-            bcasts_size,
-            mcasts_size,
-            more_pubkeys_incoming,
-            id_pubkey_pairs,
+            sync_response, // chill_phase,
+                           // founder,
+                           // swarm_time,
+                           // swarm_type,
+                           // app_data_hash,
+                           // key_reg_size,
+                           // caps_size,
+                           // poli_size,
+                           // bcasts_size,
+                           // mcasts_size,
+                           // more_pubkeys_incoming,
+                           // id_pubkey_pairs,
         ) => {
             bytes.push(248);
-            put_u16(bytes, chill_phase);
-            put_u64(bytes, founder.0);
-            put_u32(bytes, swarm_time.0);
-            bytes.push(swarm_type.as_byte());
-            put_u64(bytes, app_data_hash);
-            bytes.push(key_reg_size);
-            bytes.push(caps_size);
-            bytes.push(poli_size);
-            bytes.push(bcasts_size);
-            bytes.push(mcasts_size);
-            bytes.push(more_pubkeys_incoming as u8);
-            for (g_id, mut pubkey) in id_pubkey_pairs {
+            put_u16(bytes, sync_response.chill_phase);
+            put_u64(bytes, sync_response.founder.0);
+            put_u32(bytes, sync_response.swarm_time.0);
+            bytes.push(sync_response.swarm_type.as_byte());
+            put_u64(bytes, sync_response.app_root_hash);
+            bytes.push(sync_response.key_reg_size);
+            bytes.push(sync_response.capability_size);
+            bytes.push(sync_response.policy_size);
+            bytes.push(sync_response.broadcast_size);
+            bytes.push(sync_response.multicast_size);
+            bytes.push(sync_response.more_key_reg_messages as u8);
+            for (g_id, mut pubkey) in sync_response.key_reg_pairs {
                 put_u64(bytes, g_id.0);
                 bytes.append(&mut pubkey);
             }
@@ -581,9 +583,10 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, bytes: &mut Vec<u8>)
                 put_u64(bytes, origin.0);
             }
         }
-        NeighborResponse::AppSync(id, c_id, part_no, total, data) => {
+        NeighborResponse::AppSync(id, data_id, c_id, part_no, total, data) => {
             bytes.push(241);
             bytes.push(id);
+            bytes.push(data_id);
             put_u16(bytes, c_id);
             put_u16(bytes, part_no);
             put_u16(bytes, total);
@@ -592,7 +595,7 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, bytes: &mut Vec<u8>)
             }
             // bytes.put_u32(data.0);
         } // _ => todo!(),
-        NeighborResponse::CustomResponse(id, data) => {
+        NeighborResponse::Custom(id, data) => {
             bytes.push(id);
             for byte in data.bytes() {
                 bytes.push(byte);
@@ -635,21 +638,14 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, bytes: &mut Vec<u8>) {
             // bytes.put_u64(gnome_id.0);
             insert_network_settings(bytes, network_settings);
         }
-        NeighborRequest::SwarmSyncRequest(
-            sync_key_reg,
-            sync_caps,
-            sync_poli,
-            sync_bcasts,
-            sync_mcasts,
-            app_data_hash,
-        ) => {
+        NeighborRequest::SwarmSyncRequest(sync_req_params) => {
             bytes.push(250);
-            bytes.push(sync_key_reg as u8);
-            bytes.push(sync_caps as u8);
-            bytes.push(sync_poli as u8);
-            bytes.push(sync_bcasts as u8);
-            bytes.push(sync_mcasts as u8);
-            put_u64(bytes, app_data_hash);
+            bytes.push(sync_req_params.sync_key_reg as u8);
+            bytes.push(sync_req_params.sync_capability as u8);
+            bytes.push(sync_req_params.sync_policy as u8);
+            bytes.push(sync_req_params.sync_broadcast as u8);
+            bytes.push(sync_req_params.sync_multicast as u8);
+            put_u64(bytes, sync_req_params.app_root_hash);
         }
         NeighborRequest::SubscribeRequest(is_bcast, cast_id) => {
             bytes.push(249);
@@ -682,7 +678,7 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, bytes: &mut Vec<u8>) {
                 bytes.push(byte);
             }
         }
-        NeighborRequest::CustomRequest(id, data) => {
+        NeighborRequest::Custom(id, data) => {
             bytes.push(id);
             for byte in data.bytes() {
                 bytes.push(byte);
@@ -752,26 +748,27 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
         }
         250 => {
             let sync_key_reg = bytes[data_idx + 1] > 0;
-            let sync_caps = bytes[data_idx + 2] > 0;
-            let sync_poli = bytes[data_idx + 3] > 0;
-            let sync_bcasts = bytes[data_idx + 4] > 0;
-            let sync_mcasts = bytes[data_idx + 5] > 0;
-            let mut app_data_hash: u64 = ((bytes[data_idx + 6]) as u64) << 56;
-            app_data_hash += ((bytes[data_idx + 7]) as u64) << 48;
-            app_data_hash += ((bytes[data_idx + 8]) as u64) << 40;
-            app_data_hash += ((bytes[data_idx + 9]) as u64) << 32;
-            app_data_hash += ((bytes[data_idx + 10]) as u64) << 24;
-            app_data_hash += ((bytes[data_idx + 11]) as u64) << 16;
-            app_data_hash += ((bytes[data_idx + 12]) as u64) << 8;
-            app_data_hash += (bytes[data_idx + 13]) as u64;
-            NeighborRequest::SwarmSyncRequest(
+            let sync_capability = bytes[data_idx + 2] > 0;
+            let sync_policy = bytes[data_idx + 3] > 0;
+            let sync_broadcast = bytes[data_idx + 4] > 0;
+            let sync_multicast = bytes[data_idx + 5] > 0;
+            let mut app_root_hash: u64 = ((bytes[data_idx + 6]) as u64) << 56;
+            app_root_hash += ((bytes[data_idx + 7]) as u64) << 48;
+            app_root_hash += ((bytes[data_idx + 8]) as u64) << 40;
+            app_root_hash += ((bytes[data_idx + 9]) as u64) << 32;
+            app_root_hash += ((bytes[data_idx + 10]) as u64) << 24;
+            app_root_hash += ((bytes[data_idx + 11]) as u64) << 16;
+            app_root_hash += ((bytes[data_idx + 12]) as u64) << 8;
+            app_root_hash += (bytes[data_idx + 13]) as u64;
+            let sync_req_params = SwarmSyncRequestParams {
                 sync_key_reg,
-                sync_caps,
-                sync_poli,
-                sync_bcasts,
-                sync_mcasts,
-                app_data_hash,
-            )
+                sync_capability,
+                sync_policy,
+                sync_broadcast,
+                sync_multicast,
+                app_root_hash,
+            };
+            NeighborRequest::SwarmSyncRequest(sync_req_params)
         }
         249 => {
             let is_bcast = bytes[data_idx + 1] > 0;
@@ -810,7 +807,7 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
             //     bytes[data_idx + 4],
             //     bytes[data_idx + 5],
             // ]);
-            NeighborRequest::CustomRequest(other, SyncData::new(dta).unwrap())
+            NeighborRequest::Custom(other, CastData::new(dta).unwrap())
         }
     }
     // nr
@@ -890,7 +887,7 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
                 bytes[data_idx + 14],
             ]));
             let swarm_type = SwarmType::from(bytes[data_idx + 15]);
-            let app_data_hash = as_u64_be(&[
+            let app_root_hash = as_u64_be(&[
                 bytes[data_idx + 16],
                 bytes[data_idx + 17],
                 bytes[data_idx + 18],
@@ -901,12 +898,12 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
                 bytes[data_idx + 23],
             ]);
             let key_reg_size = bytes[data_idx + 24];
-            let caps_size = bytes[data_idx + 25];
-            let poli_size = bytes[data_idx + 26];
-            let b_casts_size = bytes[data_idx + 27];
-            let m_casts_size = bytes[data_idx + 28];
-            let more_pubkeys_incoming = bytes[data_idx + 29] != 0;
-            let mut id_pubkey_pairs = vec![];
+            let capability_size = bytes[data_idx + 25];
+            let policy_size = bytes[data_idx + 26];
+            let broadcast_size = bytes[data_idx + 27];
+            let multicast_size = bytes[data_idx + 28];
+            let more_key_reg_messages = bytes[data_idx + 29] != 0;
+            let mut key_reg_pairs = vec![];
             let mut idx = data_idx + 30;
             while idx < bytes_len {
                 let mut g_vec = [0; 8];
@@ -918,22 +915,23 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
                     pubkey_vec.push(bytes[idx + 8 + i]);
                 }
                 idx += 278;
-                id_pubkey_pairs.push((GnomeId(u64::from_be_bytes(g_vec)), pubkey_vec));
+                key_reg_pairs.push((GnomeId(u64::from_be_bytes(g_vec)), pubkey_vec));
             }
-            NeighborResponse::SwarmSync(
+            let sync_response = SwarmSyncResponse {
                 chill_phase,
                 founder,
                 swarm_time,
                 swarm_type,
-                app_data_hash,
+                app_root_hash,
                 key_reg_size,
-                caps_size,
-                poli_size,
-                b_casts_size,
-                m_casts_size,
-                more_pubkeys_incoming,
-                id_pubkey_pairs,
-            )
+                capability_size,
+                policy_size,
+                broadcast_size,
+                multicast_size,
+                more_key_reg_messages,
+                key_reg_pairs,
+            };
+            NeighborResponse::SwarmSync(sync_response)
         }
         247 => {
             let is_bcast = bytes[data_idx + 1] > 0;
@@ -1014,7 +1012,7 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
             let _ = b_drain.next();
             let part_no = b_drain.next().unwrap();
             let total_parts = b_drain.next().unwrap();
-            let mut idx = data_idx + 3;
+            // let idx = data_idx + 3;
             let mut pol_req_pairs = vec![];
             drop(b_drain);
             // while idx < bytes_len {
@@ -1081,12 +1079,14 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
         }
         241 => {
             let s_type = bytes[data_idx + 1];
-            let c_id = as_u16_be(&[bytes[data_idx + 2], bytes[data_idx + 3]]);
-            let part_no = as_u16_be(&[bytes[data_idx + 4], bytes[data_idx + 5]]);
-            let total = as_u16_be(&[bytes[data_idx + 6], bytes[data_idx + 7]]);
+            let data_id = bytes[data_idx + 2];
+            let c_id = as_u16_be(&[bytes[data_idx + 3], bytes[data_idx + 4]]);
+            let part_no = as_u16_be(&[bytes[data_idx + 5], bytes[data_idx + 6]]);
+            let total = as_u16_be(&[bytes[data_idx + 7], bytes[data_idx + 8]]);
 
             NeighborResponse::AppSync(
                 s_type,
+                data_id,
                 c_id,
                 part_no,
                 total,
@@ -1095,9 +1095,9 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
         }
         _other => {
             // TODO
-            NeighborResponse::CustomResponse(
+            NeighborResponse::Custom(
                 bytes[data_idx],
-                SyncData::new(Vec::from(&bytes[data_idx + 1..])).unwrap(),
+                CastData::new(Vec::from(&bytes[data_idx + 1..])).unwrap(),
             )
         }
     }

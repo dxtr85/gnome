@@ -23,15 +23,15 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use swarm_consensus::GnomeToManager;
 use swarm_consensus::ManagerToGnome;
 use swarm_consensus::{GnomeId, Neighbor};
-use swarm_consensus::{Request, Response};
+use swarm_consensus::{GnomeToApp, ToGnome};
 use swarm_consensus::{Swarm, SwarmID};
 
-pub enum ManagerRequest {
+pub enum ToGnomeManager {
     JoinSwarm(String),
     Disconnect,
 }
-pub enum ManagerResponse {
-    SwarmJoined(SwarmID, String, Sender<Request>, Receiver<Response>),
+pub enum FromGnomeManager {
+    SwarmJoined(SwarmID, String, Sender<ToGnome>, Receiver<GnomeToApp>),
 }
 pub struct Manager {
     gnome_id: GnomeId,
@@ -156,8 +156,8 @@ impl Manager {
     //
     pub async fn do_your_job(
         mut self,
-        req_receiver: Receiver<ManagerRequest>,
-        resp_sender: Sender<ManagerResponse>,
+        req_receiver: Receiver<ToGnomeManager>,
+        resp_sender: Sender<FromGnomeManager>,
         app_sync_hash: u64,
     ) {
         // let min_sleep_nanos: u64 = 1 << 7;
@@ -172,7 +172,7 @@ impl Manager {
                     //         let _ = sender.send(ManagerToGnome::UpdateAppRootHash(new_app_hash));
                     //     }
                     // }
-                    ManagerRequest::JoinSwarm(swarm_name) => {
+                    ToGnomeManager::JoinSwarm(swarm_name) => {
                         // let mut neighbors = vec![];
                         if let Some(pairs) = self.neighboring_swarms.get(&swarm_name) {
                             for (s_id, g_id) in pairs {
@@ -200,14 +200,14 @@ impl Manager {
                             self.join_a_swarm(swarm_name.clone(), app_sync_hash, None, None)
                         {
                             self.notify_other_swarms(swarm_id, swarm_name.clone());
-                            let _ = resp_sender.send(ManagerResponse::SwarmJoined(
+                            let _ = resp_sender.send(FromGnomeManager::SwarmJoined(
                                 swarm_id, swarm_name, user_req, user_res,
                             ));
                         } else {
                             println!("Unable to join a swarm.");
                         }
                     }
-                    ManagerRequest::Disconnect => {
+                    ToGnomeManager::Disconnect => {
                         // TODO: do all necessary stuff
                         break;
                     }
@@ -281,7 +281,7 @@ impl Manager {
         app_sync_hash: u64,
         neighbor_network_settings: Option<NetworkSettings>,
         neighbors: Option<Vec<Neighbor>>,
-    ) -> Result<(SwarmID, (Sender<Request>, Receiver<Response>)), String> {
+    ) -> Result<(SwarmID, (Sender<ToGnome>, Receiver<GnomeToApp>)), String> {
         if let Some(swarm_id) = self.next_avail_swarm_id() {
             let (band_send, band_recv) = channel();
             let (net_settings_send, net_settings_recv) = channel();
@@ -430,7 +430,7 @@ impl Manager {
     pub fn notify_networking(
         &mut self,
         swarm_name: String,
-        sender: Sender<Request>,
+        sender: Sender<ToGnome>,
         avail_bandwith_sender: Sender<u64>,
         network_settings_receiver: Receiver<NetworkSettings>,
     ) {
