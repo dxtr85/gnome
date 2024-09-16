@@ -299,7 +299,7 @@ impl Manager {
                 signature: &[u8],
             ) -> bool {
                 println!("Verify time: {:?}", swarm_time);
-                // println!("PubKey DER: '{:?}' {}", key, key.len());
+                // println!("PubKey DER: '{:?}' len: {}", key, key.len());
                 let res: std::result::Result<RsaPublicKey, rsa::pkcs1::Error> =
                     DecodeRsaPublicKey::from_pkcs1_der(key);
                 // println!("decode res: {:?}", res);

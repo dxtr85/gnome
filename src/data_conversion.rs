@@ -96,6 +96,7 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
                 bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
             ]));
             // println!("Reconf byte: {}", bytes[5]);
+            // println!("Decoded GID: {}", gnome_id);
             (Header::Reconfigure(bytes[5], gnome_id), 5)
         } else {
             gnome_id = GnomeId(as_u64_be(&[
@@ -163,7 +164,7 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
                 252 => {
                     let c_id: CastID = CastID(bytes[data_idx + 9]);
                     data_idx += 10;
-                    Configuration::EndBroadcast(c_id)
+                    Configuration::EndBroadcast(gnome_id, c_id)
                 }
                 251 => {
                     let c_id: CastID = CastID(bytes[data_idx + 9]);
@@ -208,6 +209,7 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
                 }
             };
             let sig_type = bytes[data_idx];
+            // println!("Sig type: {}, bytes_len: {}", sig_type, bytes.len());
             let signature = if sig_type == 0 {
                 // println!("Regular sig");
                 let mut sig_bytes = vec![];
@@ -393,6 +395,7 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
         put_u64(&mut bytes, block_id.0);
         block_id_inserted = true;
     } else if let Header::Reconfigure(conf_id, gnome_id) = msg.header {
+        // println!("Header::Refonfigure: {}, {}", conf_id, gnome_id);
         if matches!(msg.payload, Payload::Reconfigure(ref _s, ref _d)) {
             bytes[0] |= 0b101_00000;
         } else {
@@ -413,7 +416,7 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
             panic!("Bye should be short circuiting this fn");
         }
         Payload::Reconfigure(signature, config) => {
-            // bytes.push(config.header_byte());
+            // println!("msg->bytes sign len: {}", signature.len());
             for byte in config.content_bytes(false) {
                 bytes.push(byte);
             }
@@ -603,6 +606,24 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, bytes: &mut Vec<u8>) {
             }
             bytes.push(cast_id.0);
         }
+        NeighborRequest::UnsubscribeRequest(is_bcast, cast_id) => {
+            bytes.push(248);
+            if is_bcast {
+                bytes.push(1);
+            } else {
+                bytes.push(0);
+            }
+            bytes.push(cast_id.0);
+        }
+        NeighborRequest::SourceDrained(is_bcast, cast_id) => {
+            bytes.push(247);
+            if is_bcast {
+                bytes.push(1);
+            } else {
+                bytes.push(0);
+            }
+            bytes.push(cast_id.0);
+        }
         NeighborRequest::Custom(id, data) => {
             bytes.push(id);
             for byte in data.bytes() {
@@ -686,6 +707,16 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
             let is_bcast = bytes[data_idx + 1] > 0;
             let cast_id = CastID(bytes[data_idx + 2]);
             NeighborRequest::SubscribeRequest(is_bcast, cast_id)
+        }
+        248 => {
+            let is_bcast = bytes[data_idx + 1] > 0;
+            let cast_id = CastID(bytes[data_idx + 2]);
+            NeighborRequest::UnsubscribeRequest(is_bcast, cast_id)
+        }
+        247 => {
+            let is_bcast = bytes[data_idx + 1] > 0;
+            let cast_id = CastID(bytes[data_idx + 2]);
+            NeighborRequest::SourceDrained(is_bcast, cast_id)
         }
         other => {
             let dta = if bytes.len() > data_idx + 1 {
