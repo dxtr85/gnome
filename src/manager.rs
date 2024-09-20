@@ -369,7 +369,22 @@ impl Manager {
                 swarm_time: SwarmTime,
                 data: &mut Vec<u8>,
             ) -> Result<Vec<u8>, ()> {
-                println!("Sign time: {:?}", swarm_time);
+                // println!(
+                //     "Sign time: {:?} blen: {}\nSign head: ",
+                //     swarm_time,
+                //     data.len()
+                // );
+                // for i in 0..20 {
+                //     if let Some(byte) = data.get(i) {
+                //         print!("{}-", byte);
+                //     }
+                // }
+                // println!("Sign tail:");
+                // for i in data.len() - 20..data.len() {
+                //     if let Some(byte) = data.get(i) {
+                //         print!("{}-", byte);
+                //     }
+                // }
                 if let Ok(priv_key) = DecodeRsaPrivateKey::from_pkcs1_pem(priv_key_pem) {
                     let signer: SigningKey<Sha256> = SigningKey::new(priv_key);
                     // Include timestamp before signing

@@ -74,7 +74,7 @@ use swarm_consensus::SyncData;
 
 // pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
 pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
-    // println!("Bytes to message: {:?}", bytes);
+    // println!("Bytes to message: {:?}", bytes.len());
     // println!("decoding: {:#08b} {:?}", bytes[0], bytes);
     // let bytes_len = bytes.len();
     let swarm_time: SwarmTime = SwarmTime(as_u32_be(&[bytes[1], bytes[2], bytes[3], bytes[4]]));
@@ -103,6 +103,7 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
                 bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
             ]));
             // println!("Reconf byte: {}", bytes[5]);
+            // println!("GnomeId: {}", gnome_id);
             (Header::Reconfigure(bytes[5], gnome_id), 14)
         }
     // } else if bytes[0] & 0b0_111_0000 == 112 {
@@ -146,7 +147,7 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
             Payload::KeepAlive(bandwith)
         // } else if bytes[0] & 0b0010_0000 == 32 {
         } else {
-            // println!("Reconf conf {}", bytes[data_idx]);
+            // println!("Reconf conf {} ({})", bytes[data_idx], bytes.len());
             // println!("Configuration! {}", bytes[data_idx]);
             // println!("Configuration! {:?}", bytes);
             let config = match bytes[data_idx] {
@@ -204,10 +205,24 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
                 }
                 // TODO:
                 other => {
-                    data_idx += 1;
-                    Configuration::UserDefined(other)
+                    // println!("Custom: {}", other);
+                    // 1 byte for Reconf id
+                    // 8 bytes for GnomeId
+                    // 2 bytes for sync_data len
+                    // println!("Data idx: {}", data_idx);
+                    let s_data_len =
+                        u16::from_be_bytes([bytes[data_idx + 9], bytes[data_idx + 10]]) as usize;
+                    // println!("SData len: {}", s_data_len);
+                    data_idx += 11;
+                    let mut s_data_bytes = Vec::with_capacity(s_data_len);
+                    for i in data_idx..data_idx + s_data_len {
+                        s_data_bytes.push(bytes[i]);
+                    }
+                    data_idx += s_data_len;
+                    Configuration::UserDefined(other, SyncData::new(s_data_bytes).unwrap())
                 }
             };
+            // println!("Reading sig type at index: {}", data_idx);
             let sig_type = bytes[data_idx];
             // println!("Sig type: {}, bytes_len: {}", sig_type, bytes.len());
             let signature = if sig_type == 0 {
@@ -417,10 +432,16 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
         }
         Payload::Reconfigure(signature, config) => {
             // println!("msg->bytes sign len: {}", signature.len());
+            if config.is_user_defined() {
+                let [len_1, len_2] = (config.len() as u16 - 1).to_be_bytes();
+                bytes.push(len_1);
+                bytes.push(len_2);
+            }
             for byte in config.content_bytes(false) {
                 bytes.push(byte);
             }
             // put_u64(&mut bytes, signature.gnome_id().0);
+            // print!("Pushing at index {} sig header byte: ", bytes.len());
             bytes.push(signature.header_byte());
             for sign_byte in signature.bytes() {
                 bytes.push(sign_byte);
@@ -443,6 +464,7 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
             }
         }
     };
+    // println!("Message to bytes: {}", bytes.len());
     bytes
 }
 
