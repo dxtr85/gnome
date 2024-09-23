@@ -137,7 +137,7 @@ pub fn init(
             user_req,
             user_res,
         ));
-        println!("Joined `/` swarm");
+        eprintln!("Joined `/` swarm");
     }
 
     // let _join = spawn(activate_gnome(

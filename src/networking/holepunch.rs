@@ -57,10 +57,10 @@ pub async fn holepunch(
     let sleep_duration = Duration::from_millis(50);
 
     if !holepunch_probe_ok(puncher).await {
-        println!("Unable to start holepunch service: proxy unresponsive or blocked");
+        eprintln!("Unable to start holepunch service: proxy unresponsive or blocked");
         return;
     }
-    println!("Holepunch started");
+    eprintln!("Holepunch started");
 
     loop {
         let recv_result = receiver.try_recv();
@@ -127,34 +127,34 @@ async fn holepunch_task(
     // TODO: read only magic_ports!
     let bind_result = UdpSocket::bind(("0.0.0.0", bind_port)).await;
     if bind_result.is_err() {
-        println!("unable to create socket for holepunch service");
+        eprintln!("unable to create socket for holepunch service");
         return;
     }
-    println!("Round '1'");
+    eprintln!("Round '1'");
     let mut holepunch = bind_result.unwrap();
 
     let my_settings = discover_network_settings(&mut holepunch).await;
     let mut remote_socket_opt =
         ask_proxy_for_remote_socket(&holepunch, puncher, swarm_name.clone(), true).await;
     if remote_socket_opt.is_none() {
-        println!("Unable to receive remote socket addr");
+        eprintln!("Unable to receive remote socket addr");
         return;
     }
     let (remote_1_addr, _remote_1_port) = remote_socket_opt.unwrap();
     // println!("My PUB IP: {:?}", my_settings.pub_ip);
     // println!("Remote IP: {:?}", remote_1_addr);
     if remote_1_addr == my_settings.pub_ip {
-        println!("Proxy returned my own IP, trying again...");
+        eprintln!("Proxy returned my own IP, trying again...");
         remote_socket_opt =
             ask_proxy_for_remote_socket(&holepunch, puncher, swarm_name.clone(), true).await;
     }
     if remote_socket_opt.is_none() {
-        println!("Unable to receive remote socket addr");
+        eprintln!("Unable to receive remote socket addr");
         return;
     }
     let (remote_1_addr, remote_1_port) = remote_socket_opt.unwrap();
     if remote_1_addr == my_settings.pub_ip {
-        println!("Proxy returned my own IP again, done trying.");
+        eprintln!("Proxy returned my own IP again, done trying.");
         return;
     }
     let remote_controls_port = magic_ports.is_magic(remote_1_port);
@@ -167,7 +167,7 @@ async fn holepunch_task(
         //TODO: we do not know PortAllocationRule
         (Nat::Unknown, (PortAllocationRule::PortSensitive, 1))
     };
-    println!(
+    eprintln!(
         "Holepunching {} (magic?: {:?}) and :{} (you) for {}.",
         remote_1_addr,
         remote_controls_port,
@@ -200,7 +200,7 @@ async fn holepunch_task(
         return;
     };
 
-    println!("Round '2'");
+    eprintln!("Round '2'");
     // 1. We need to define a common phrase for two endpoints - based on both ip addresses
     // Since we know our public IP and remote public IP
     let my_pub_ip = my_settings.pub_ip.to_string();
@@ -223,12 +223,12 @@ async fn holepunch_task(
     let remote_socket_opt =
         ask_proxy_for_remote_socket(&holepunch, puncher, common_phrase.clone(), true).await;
     if remote_socket_opt.is_none() {
-        println!("Unable to receive remote socket addr");
+        eprintln!("Unable to receive remote socket addr");
         return;
     }
     // 3. We should receive a public IP and PORT of remote host
     let (remote_1_addr, remote_1_port) = remote_socket_opt.unwrap();
-    println!("First remote socket: {:?}:{}", remote_1_addr, remote_1_port);
+    eprintln!("First remote socket: {:?}:{}", remote_1_addr, remote_1_port);
     // 4. We repeat steps 1, 2, 3 and now we have two remote socket addresses.
     bind_port += 1;
     holepunch = UdpSocket::bind(("0.0.0.0", bind_port))
@@ -238,18 +238,18 @@ async fn holepunch_task(
     let remote_socket_opt =
         ask_proxy_for_remote_socket(&holepunch, puncher, common_phrase, true).await;
     if remote_socket_opt.is_none() {
-        println!("Unable to receive remote socket addr");
+        eprintln!("Unable to receive remote socket addr");
         return;
     }
     let (remote_2_addr, remote_2_port) = remote_socket_opt.unwrap();
-    println!(
+    eprintln!(
         "Second remote socket: {:?}:{}",
         remote_2_addr, remote_2_port
     );
 
     // 5. We calculate delta_port based on two received public ports from proxy
     let delta_port = remote_2_port - remote_1_port;
-    println!("Delta port: {}", delta_port);
+    eprintln!("Delta port: {}", delta_port);
     // 6. We add delta_port to last port number we received from proxy
     let target_remote_port = remote_2_port + delta_port;
     // 7. We create a new socket and try to punch through to remote host using
@@ -284,7 +284,7 @@ async fn holepunch_task(
         return;
     };
 
-    println!("Round '3'");
+    eprintln!("Round '3'");
     let my_port_min = bind_port + 2;
     let his_port_min = target_remote_port + delta_port;
     let his_port_max = target_remote_port + (50 * delta_port);
@@ -376,7 +376,7 @@ async fn ask_proxy_for_remote_socket(
         .send_to(&buf, puncher)
         .await
         .expect("unable to talk to helper");
-    println!("Waiting for UDPunch server to respond");
+    eprintln!("Waiting for UDPunch server to respond");
     let mut received;
     let mut bytes;
     loop {
@@ -504,37 +504,37 @@ async fn try_communicate(socket: &UdpSocket, remote_addr: SocketAddr) -> Result<
     let mut buf = [2u8; 32];
     let send_result = socket.send_to(&buf, remote_addr).await;
     if send_result.is_err() {
-        println!("Unable to send first message: {:?}", send_result);
+        eprintln!("Unable to send first message: {:?}", send_result);
         return Err(2);
     }
     sleep(Duration::from_millis(1)).await;
     buf[0] = 1;
     let send_result = socket.send_to(&buf, remote_addr).await;
     if send_result.is_err() {
-        println!("Unable to send second message: {:?}", send_result);
+        eprintln!("Unable to send second message: {:?}", send_result);
         return Err(1);
     }
     sleep(Duration::from_millis(10)).await;
     buf[0] = 0;
     let send_result = socket.send_to(&buf, remote_addr).await;
     if send_result.is_err() {
-        println!("Unable to send third message: {:?}", send_result);
+        eprintln!("Unable to send third message: {:?}", send_result);
         return Err(0);
     }
     let recv_result = socket.recv_from(&mut buf).await;
     if recv_result.is_err() {
-        println!("Error while waiting for datagram: {:?}", recv_result);
+        eprintln!("Error while waiting for datagram: {:?}", recv_result);
         Err(buf[0])
     } else {
         let (_count, remote) = recv_result.unwrap();
         if remote.ip() == remote_addr.ip() {
-            println!("Recieved {} from {:?}", buf[0], remote);
+            eprintln!("Recieved {} from {:?}", buf[0], remote);
             Ok(remote)
             // socket.send_to(&[0], remote).await;
             // remote_addr = remote;
             // break;
         } else {
-            println!(
+            eprintln!(
                 "Unexpected response: {:?} from {:?} (sent to {:?})",
                 buf, remote, remote_addr
             );
@@ -632,19 +632,19 @@ async fn punch_back(
     remote_addr: SocketAddr,
     // sender: Sender<Option<(SocketAddr, UdpSocket)>>,
 ) {
-    println!("Fixing target...");
+    eprintln!("Fixing target...");
     let con_res = socket.connect(remote_addr).await;
-    println!("Con res: {:?}", con_res);
-    println!("Sending back...");
+    eprintln!("Con res: {:?}", con_res);
+    eprintln!("Sending back...");
     let mut i = 10;
     while i > 0 {
         let _res = socket.send(&[1]).await;
         i -= 1
     }
     let mut buf = [0; 200];
-    println!("Waiting for response...");
+    eprintln!("Waiting for response...");
     let _res = socket.recv(&mut buf).await;
-    println!("Response {:?} received: {:?}", &buf, _res);
+    eprintln!("Response {:?} received: {:?}", &buf, _res);
     // sender.send(Some((remote_addr, socket)));
 }
 
@@ -658,7 +658,7 @@ pub async fn punch_it(
     (my_settings, other_settings): (NetworkSettings, NetworkSettings),
 ) -> Option<UdpSocket> {
     let mut remote_adr = other_settings.get_predicted_addr(0);
-    println!(
+    eprintln!(
         "Punching: {:?}:{:?}",
         other_settings.pub_ip, other_settings.pub_port
     );
@@ -679,7 +679,7 @@ pub async fn punch_it(
                 if my_settings.port_allocation_predictable()
                     && other_settings.port_allocation_predictable()
                 {
-                    println!("\nHit me babe one more time");
+                    eprintln!("\nHit me babe one more time");
                     // TODO: we try to cover case when NAT assigned next port
                     // while we were trying to initialize communication
                     let mut local_addr = socket.local_addr().unwrap();
@@ -696,10 +696,10 @@ pub async fn punch_it(
             }
 
             Ok((socket, Some(remote_addr))) => {
-                println!("Got a sock!");
+                eprintln!("Got a sock!");
                 let conn_result = socket.connect(remote_addr).await;
                 if conn_result.is_err() {
-                    println!("Unable to make dedicated connection");
+                    eprintln!("Unable to make dedicated connection");
                 }
                 dedicated_socket = Some(socket);
                 break;
@@ -727,14 +727,14 @@ pub async fn cluster_punch_it(
     (his_port_min, his_step, his_port_max): (u16, u16, u16),
     timeout_sec: Duration,
 ) -> Option<UdpSocket> {
-    println!("Performing clusterpunch");
-    println!(
+    eprintln!("Performing clusterpunch");
+    eprintln!(
         "my sockets: {:?} ports: {}-{}",
         my_ip,
         my_port_min,
         my_port_min + my_count
     );
-    println!(
+    eprintln!(
         "his sockets: {:?} ports: {}-{}",
         his_ip, his_port_min, his_port_max
     );
@@ -783,7 +783,7 @@ pub async fn cluster_punch_it(
                 break;
             }
             other => {
-                println!("Unexpected probe result: {:?}", other);
+                eprintln!("Unexpected probe result: {:?}", other);
             }
         }
     }
@@ -806,7 +806,7 @@ pub async fn start_communication(
     // that are ready for message exchange
     // let dedicated_socket = dedicated_socket.unwrap();
     let remote_addr = dedicated_socket.peer_addr().unwrap();
-    println!("We did it: {:?}", remote_addr);
+    eprintln!("We did it: {:?}", remote_addr);
     // if s_addr.is_err() {
     //     println!("Coś poszło nie tak");
     //     ::std::process::exit(1);
@@ -815,22 +815,22 @@ pub async fn start_communication(
     // let sleep_time = Duration::from_millis(50);
     let _send_result = dedicated_socket.send(pub_key_pem.as_bytes()).await;
     // sleep(sleep_time).await;
-    println!(
+    eprintln!(
         "Send PUB key to: {:?} from: {:?} result: {:?}",
         remote_addr, //changed here
         dedicated_socket.local_addr().unwrap(),
         _send_result
     );
-    println!("Waiting for some response...");
+    eprintln!("Waiting for some response...");
     let mut count;
     let mut buf = [0u8; 1100];
     loop {
         let recv_result = dedicated_socket.recv(&mut buf).await;
         if recv_result.is_err() {
-            println!("Unable to receive from remote host on dedicated socket");
+            eprintln!("Unable to receive from remote host on dedicated socket");
         }
         count = recv_result.unwrap();
-        println!("Recieve {} count: {}", buf[0], count);
+        eprintln!("Recieve {} count: {}", buf[0], count);
         if count > 100 {
             break;
         }
@@ -841,7 +841,7 @@ pub async fn start_communication(
     let id_pub_key_pem = std::str::from_utf8(&buf[..count]).unwrap().to_string();
     let result = Encrypter::create_from_data(&id_pub_key_pem);
     if result.is_err() {
-        println!("Failed to build Encrypter from received PEM: {:?}", result);
+        eprintln!("Failed to build Encrypter from received PEM: {:?}", result);
         // return None;
     }
     let encr = result.unwrap();
@@ -857,22 +857,22 @@ pub async fn start_communication(
         let bytes_to_send = Vec::from(&key);
         let encr_res = encr.encrypt(&bytes_to_send);
         if encr_res.is_err() {
-            println!("Failed to encrypt symmetric key: {:?}", encr_res);
+            eprintln!("Failed to encrypt symmetric key: {:?}", encr_res);
             // return None;
         }
-        println!("Encrypted symmetric key");
+        eprintln!("Encrypted symmetric key");
 
         let encrypted_data = encr_res.unwrap();
         // let res = socket.send_to(&encrypted_data, remote_addr).await;
         let res = dedicated_socket.send(&encrypted_data).await;
         if res.is_err() {
-            println!("Failed to send encrypted symmetric key: {:?}", res);
+            eprintln!("Failed to send encrypted symmetric key: {:?}", res);
             // return None;
         }
     } else {
         let recv_result = dedicated_socket.recv(&mut buf).await;
         if recv_result.is_err() {
-            println!("Failed to received encrypted session key");
+            eprintln!("Failed to received encrypted session key");
             // return
         }
         // let count = recv_result.unwrap();
@@ -880,7 +880,7 @@ pub async fn start_communication(
         // println!("Dec key: {:?}", decoded_key);
         if let Ok(count) = recv_result {
             // remote_addr = remote_adr;
-            println!("Received {}bytes", count);
+            eprintln!("Received {}bytes", count);
             let decoded_key = decrypter.decrypt(&buf[..count]);
 
             // let _res = req_sender.send(Vec::from(&buf[..count]));
@@ -907,7 +907,7 @@ pub async fn start_communication(
                 // println!("Got session key: {:?}", sym_key);
                 session_key = SessionKey::from_key(&sym_key.try_into().unwrap());
             } else {
-                println!("Unable to decode key");
+                eprintln!("Unable to decode key");
                 // return receiver;
             }
         }
@@ -916,17 +916,17 @@ pub async fn start_communication(
 
     let send_remote_addr_result = dedicated_socket.send(&encr_address).await;
     if send_remote_addr_result.is_err() {
-        println!(
+        eprintln!(
             "Failed to send Neighbor's external address: {:?}",
             send_remote_addr_result
         );
     } else {
-        println!("External address sent with success");
+        eprintln!("External address sent with success");
     }
     let mut buf = [0u8; 128];
     let recv_my_ext_addr_res = dedicated_socket.recv(&mut buf).await;
     if recv_my_ext_addr_res.is_err() {
-        println!(
+        eprintln!(
             "Unable to recv my external address from remote: {:?}",
             recv_my_ext_addr_res
         );
@@ -934,7 +934,7 @@ pub async fn start_communication(
     let count = recv_my_ext_addr_res.unwrap();
     let decode_result = session_key.decrypt(&buf[..count]);
     if decode_result.is_err() {
-        println!(
+        eprintln!(
             "Unable to decode received data with session key: {:?}",
             decode_result
         );
@@ -942,7 +942,7 @@ pub async fn start_communication(
     let decoded_data = decode_result.unwrap();
     let my_ext_addr_res = std::str::from_utf8(&decoded_data);
     if my_ext_addr_res.is_err() {
-        println!(
+        eprintln!(
             "Failed to parse string from received data: {:?}",
             my_ext_addr_res
         );

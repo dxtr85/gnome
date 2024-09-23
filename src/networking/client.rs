@@ -37,7 +37,7 @@ pub async fn run_client(
     // Fourth make socket connect to new address
     // Then move previous points out from this function
     //     so that in operates on dedicated socket it receives as argument
-    println!("SKT CLIENT");
+    eprintln!("SKT CLIENT");
     let (socket, send_addr) = if let Some((sock, net_set)) = target_host {
         (sock, net_set.get_predicted_addr(0))
     } else {
@@ -45,14 +45,14 @@ pub async fn run_client(
         let client_addr: SocketAddr = SocketAddr::new("0.0.0.0".parse().unwrap(), 0);
         let result = UdpSocket::bind(client_addr).await;
         if result.is_err() {
-            println!("SKT couldn't bind to address");
+            eprintln!("SKT couldn't bind to address");
             return;
             // return receiver;
         }
         let socket = result.unwrap();
         let result = socket.set_broadcast(true);
         if result.is_err() {
-            println!("SKT couldn't enable broadcast");
+            eprintln!("SKT couldn't enable broadcast");
             return;
             // return receiver;
         }
@@ -61,7 +61,7 @@ pub async fn run_client(
 
     let send_result = socket.send_to(pub_key_pem.as_bytes(), send_addr).await;
     if send_result.is_err() {
-        println!("Unable te send broadcast message: {:?}", send_result);
+        eprintln!("Unable te send broadcast message: {:?}", send_result);
         return;
         // return receiver;
     }
@@ -71,7 +71,7 @@ pub async fn run_client(
     spawn(time_out(timeout_sec, Some(t_send)));
     while timeout.try_recv().is_err() {
         if swarm_names.is_empty() {
-            println!("User is not subscribed to any Swarms");
+            eprintln!("User is not subscribed to any Swarms");
             return;
             // return receiver;
         }
@@ -86,7 +86,7 @@ pub async fn run_client(
         )
         .await;
     }
-    println!("Client is done");
+    eprintln!("Client is done");
     // receiver
 }
 
@@ -140,7 +140,7 @@ async fn establish_secure_connection(
     // println!("Dec key: {:?}", decoded_key);
     // if let Ok((count, remote_adr)) = recv_result {
     //     remote_addr = remote_adr;
-    println!("Received {} bytes", count);
+    eprintln!("Received {} bytes", count);
     let decoded_key = decrypter.decrypt(&recv_buf[..count]);
 
     // let _res = req_sender.send(Vec::from(&recv_buf[..count]));
@@ -169,7 +169,7 @@ async fn establish_secure_connection(
         // println!("Got session key: {:?}", sym_key);
         session_key = SessionKey::from_key(&sym_key.try_into().unwrap());
     } else {
-        println!("Unable to decode key");
+        eprintln!("Unable to decode key");
         // return resp_receiver;
         return;
     }
@@ -183,7 +183,7 @@ async fn establish_secure_connection(
     let mut recv_buf = [0u8; 1100];
     let recv_result = dedicated_socket.recv(&mut recv_buf).await;
     if let Ok(count) = recv_result {
-        println!("Received {} bytes", count);
+        eprintln!("Received {} bytes", count);
         let decr_res = session_key.decrypt(&recv_buf[..count]);
         if let Ok(remote_pubkey_pem) = decr_res {
             let remote_id_pub_key_pem =
@@ -199,11 +199,11 @@ async fn establish_secure_connection(
                 remote_id_pub_key_pem,
             ));
         } else {
-            println!("Failed to decrypt message");
+            eprintln!("Failed to decrypt message");
             return;
         }
     } else {
-        println!("Failed to receive data from remote");
+        eprintln!("Failed to receive data from remote");
         return;
     }
 
@@ -274,21 +274,21 @@ pub async fn prepare_and_serve(
 ) {
     let encr = Encrypter::create_from_data(&pub_key_pem).unwrap();
     let remote_gnome_id = GnomeId(encr.hash());
-    println!("Remote GnomeId: {}", remote_gnome_id);
+    eprintln!("Remote GnomeId: {}", remote_gnome_id);
     // println!("Decrypted PEM using session key:\n {:?}", pub_key_pem);
     send_subscribed_swarm_names(&dedicated_socket, &swarm_names).await;
 
     let mut remote_names: Vec<String> = vec![];
     receive_remote_swarm_names(&dedicated_socket, &mut remote_names).await;
     if remote_names.is_empty() {
-        println!("Neighbor {} did not provide swarm list", remote_gnome_id);
+        eprintln!("Neighbor {} did not provide swarm list", remote_gnome_id);
         return;
     }
 
     let mut common_names = vec![];
     distil_common_names(&mut common_names, swarm_names, &remote_names);
     if common_names.is_empty() {
-        println!("No common interests with {}", remote_gnome_id);
+        eprintln!("No common interests with {}", remote_gnome_id);
         return;
     }
     let (shared_sender, swarm_extend_receiver) = channel();

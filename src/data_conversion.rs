@@ -153,7 +153,7 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
             let config = match bytes[data_idx] {
                 254 => {
                     let c_id: CastID = CastID(bytes[data_idx + 9]);
-                    println!("StartBroadcast config {}, {:?}", gnome_id, c_id);
+                    eprintln!("StartBroadcast config {}, {:?}", gnome_id, c_id);
                     data_idx += 10;
                     Configuration::StartBroadcast(gnome_id, c_id)
                 }
@@ -327,7 +327,7 @@ pub fn bytes_to_cast_message(bytes: &[u8]) -> Result<CastMessage, ConversionErro
         Ok(CastMessage::new_broadcast(c_id, data))
     } else if dgram_header & 0b11000000 == 128 {
         // TODO: multicast
-        println!("received a multicast");
+        eprintln!("received a multicast");
         Ok(CastMessage::new_multicast(c_id, data))
     } else if dgram_header & 0b11000000 == 64 {
         // TODO: unicast
@@ -1012,7 +1012,7 @@ fn parse_network_settings(bytes: &[u8]) -> NetworkSettings {
         16 => Nat::SymmetricWithPortControl,
         32 => Nat::Symmetric,
         _ => {
-            println!("Unrecognized NatType while parsing: {}", raw_nat_type);
+            eprintln!("Unrecognized NatType while parsing: {}", raw_nat_type);
             Nat::Unknown
         }
     };
@@ -1048,7 +1048,7 @@ fn parse_network_settings(bytes: &[u8]) -> NetworkSettings {
         let array: [u8; 16] = ip_bytes.try_into().unwrap();
         IpAddr::from(array)
     } else {
-        println!("Unable to parse IP addr from: {:?}", ip_bytes);
+        eprintln!("Unable to parse IP addr from: {:?}", ip_bytes);
         IpAddr::from([0, 0, 0, 0])
     };
     NetworkSettings {

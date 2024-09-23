@@ -42,7 +42,7 @@ async fn read_bytes_from_socket(
         Ok(Vec::from(&buf[..count]))
         // }
     } else {
-        println!("SKTd{:?}", recv_result);
+        eprintln!("SKTd{:?}", recv_result);
         Err("Disconnected".to_string())
     }
 }
@@ -144,22 +144,22 @@ async fn race_tasks(
     let mut buf = [0u8; 1500];
     // let mut buf2 = [0u8; 1500];
     let mut buf2 = [0u8; 1];
-    println!("Waiting for initial tokens");
+    eprintln!("Waiting for initial tokens");
     task::sleep(Duration::from_millis(1)).await;
     let max_tokens = if let Ok(Token::Provision(tkns)) = token_reciever.try_recv() {
         tkns * 1000
     } else {
-        println!("Did not receive Provision as first token message");
-        println!("setting max_tokens to 10kB/s");
+        eprintln!("Did not receive Provision as first token message");
+        eprintln!("setting max_tokens to 10kB/s");
         10240
     };
     let mut token_dispenser = TokenDispenser::new(max_tokens);
-    println!("Max tokens: {}", max_tokens);
+    eprintln!("Max tokens: {}", max_tokens);
     let mut requested_tokens: u64 = 0;
     loop {
         // print!("l");
         if let Ok((swarm_name, snd, cast_snd, recv)) = extend_receiver.try_recv() {
-            println!("Extend req: {}", swarm_name);
+            eprintln!("Extend req: {}", swarm_name);
             //TODO: extend senders and receivers, force send message
             // informing remote about new swarm neighbor
             for i in 0u8..64 {
@@ -206,7 +206,7 @@ async fn race_tasks(
                     // println!("Now I have: {}", token_dispenser.available_tokens);
                 }
                 other => {
-                    println!("Unexpected Token message: {:?}", other);
+                    eprintln!("Unexpected Token message: {:?}", other);
                 }
             }
         }
@@ -247,7 +247,7 @@ async fn race_tasks(
             // We could use Err for token provisioning
             // Err = 0 would mean actual error with local stream, when not from socket
             // when from socket error numbers would have a meaning assigned
-            println!("SRVC Error received: {:?}", _err);
+            eprintln!("SRVC Error received: {:?}", _err);
             // TODO: should end serving this socket
             for (sender, _c_snd) in senders.values() {
                 let _send_result = sender.send(Message::bye());
@@ -291,7 +291,7 @@ async fn race_tasks(
                                         // println!("send result2: {:?}", _send_result);
                                     }
                                 } else {
-                                    println!("Failed to decode incoming stream");
+                                    eprintln!("Failed to decode incoming stream");
                                 }
                             } else if dgram_header & 0b11000000 == 64 {
                                 let c_id = deciph[1];
@@ -304,7 +304,7 @@ async fn race_tasks(
                                         let message = CastMessage::new_request(n_req);
                                         let _send_result = cast_sender.send(message);
                                         if _send_result.is_err() {
-                                            println!("Unable to pass NeighborRequest to gnome");
+                                            eprintln!("Unable to pass NeighborRequest to gnome");
                                         }
                                     }
                                     254 => {
@@ -314,7 +314,7 @@ async fn race_tasks(
                                         let message = CastMessage::new_response(n_resp);
                                         let _send_result = cast_sender.send(message);
                                         if _send_result.is_err() {
-                                            println!("Unable to pass NeighborResponseto gnome");
+                                            eprintln!("Unable to pass NeighborResponseto gnome");
                                         }
                                     }
                                     _ => {
@@ -325,7 +325,7 @@ async fn race_tasks(
                                                 // TODO: if failed maybe we are no longer interested?
                                                 // Maybe send back a bye if possible?
                                                 // Remove given Sender/Receiver pair
-                                                println!("send result3: {:?}", _send_result);
+                                                eprintln!("send result3: {:?}", _send_result);
                                             }
                                         }
                                     }
@@ -339,14 +339,14 @@ async fn race_tasks(
                                     // TODO: if failed maybe we are no longer interested?
                                     // Maybe send back a bye if possible?
                                     // Remove given Sender/Receiver pair
-                                    println!("send result4: {:?}", _send_result);
+                                    eprintln!("send result4: {:?}", _send_result);
                                 }
                                 // }
                             } else {
-                                println!("Unable to decode message");
+                                eprintln!("Unable to decode message");
                             }
                         } else {
-                            println!("Got a message on new channel...");
+                            eprintln!("Got a message on new channel...");
                             // TODO: maybe we should instantiate a new
                             // Neighbor for a new swarm?
                             // For this we need Sender<Subscription> ?
@@ -356,7 +356,7 @@ async fn race_tasks(
                             if let NeighborRequest::CreateNeighbor(remote_gnome_id, swarm_name) =
                                 neighbor_request
                             {
-                                println!("Create neighbor");
+                                eprintln!("Create neighbor");
                                 let (s1, r1) = channel();
                                 let (s2, r2) = channel();
                                 let (s3, r3) = channel();
@@ -378,11 +378,11 @@ async fn race_tasks(
                             }
                         }
                     } else {
-                        println!("Failed to decipher incoming stream {}", count);
+                        eprintln!("Failed to decipher incoming stream {}", count);
                     }
                 }
             } else {
-                println!("SRCV Unable to recv supposedly ready data");
+                eprintln!("SRCV Unable to recv supposedly ready data");
             }
         } else {
             let bytes = result.unwrap();
@@ -400,7 +400,7 @@ async fn race_tasks(
                     available_tokens - len
                 };
             } else {
-                println!("Waiting for tokens...");
+                eprintln!("Waiting for tokens...");
                 let _ = token_sender.send(Token::Request(2 * len));
                 task::sleep(Duration::from_millis(1)).await;
                 let res = token_reciever.recv();
@@ -410,7 +410,7 @@ async fn race_tasks(
                         token_dispenser.take(len);
                         let _send_result = socket.send(&ciphered).await;
                     }
-                    Ok(other) => println!("Received unexpected Token: {:?}", other),
+                    Ok(other) => eprintln!("Received unexpected Token: {:?}", other),
                     Err(e) => {
                         panic!("Error while waiting for Tokens: {:?}", e);
                     }
@@ -488,7 +488,7 @@ pub async fn serve_socket(
         Receiver<WrappedMessage>,
     )>,
 ) {
-    println!("SRVC Racing tasks");
+    eprintln!("SRVC Racing tasks");
     race_tasks(
         session_key,
         socket,
@@ -500,5 +500,5 @@ pub async fn serve_socket(
         extend_receiver,
     )
     .await;
-    println!("SRVC Racing tasks over");
+    eprintln!("SRVC Racing tasks over");
 }

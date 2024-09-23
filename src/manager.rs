@@ -204,7 +204,7 @@ impl Manager {
                                 swarm_id, swarm_name, user_req, user_res,
                             ));
                         } else {
-                            println!("Unable to join a swarm.");
+                            eprintln!("Unable to join a swarm.");
                         }
                     }
                     ToGnomeManager::Disconnect => {
@@ -225,7 +225,7 @@ impl Manager {
         while let Ok(request) = self.receiver.try_recv() {
             match request {
                 GnomeToManager::NeighboringSwarm(swarm_id, gnome_id, swarm_name) => {
-                    println!("Manager got info about a swarm: '{}'", swarm_name);
+                    eprintln!("Manager got info about a swarm: '{}'", swarm_name);
                     // println!("DER size: {}", self.pub_key_der.len());
                     if let Some(list) = self.neighboring_swarms.get_mut(&swarm_name) {
                         list.push((swarm_id, gnome_id));
@@ -235,9 +235,9 @@ impl Manager {
                     }
                 }
                 GnomeToManager::AddNeighborToSwarm(_swarm_id, swarm_name, new_neighbor) => {
-                    println!("Mgr recvd add neigh to {}", swarm_name);
+                    eprintln!("Mgr recvd add neigh to {}", swarm_name);
                     if let Some(id) = self.name_to_id.get(&swarm_name) {
-                        println!("found this swarm!");
+                        eprintln!("found this swarm!");
                         self.add_neighbor_to_a_swarm(*id, new_neighbor);
                         //TODO: notify gnome that provided new neighbor
                     }
@@ -249,17 +249,17 @@ impl Manager {
     pub fn add_neighbor_to_a_swarm(&mut self, id: SwarmID, neighbor: Neighbor) {
         if let Some(mgr_sender) = self.swarms.get_mut(&id) {
             match mgr_sender.send(ManagerToGnome::AddNeighbor(neighbor)) {
-                Ok(()) => println!("Added neighbor to existing swarm"),
-                Err(e) => println!("Failed adding neighbor to existing swarm: {:?}", e),
+                Ok(()) => eprintln!("Added neighbor to existing swarm"),
+                Err(e) => eprintln!("Failed adding neighbor to existing swarm: {:?}", e),
             }
         } else {
-            println!("No swarm with id: {:?}", id);
+            eprintln!("No swarm with id: {:?}", id);
         }
     }
     fn notify_other_swarms(&self, swarm_id: SwarmID, swarm_name: String) {
         for (id, sender) in &self.swarms {
             if *id != swarm_id {
-                println!("Informing others");
+                eprintln!("Informing others");
                 let _ = sender.send(ManagerToGnome::SwarmJoined(swarm_name.clone()));
             }
         }
@@ -298,7 +298,7 @@ impl Manager {
                 data: &mut Vec<u8>,
                 signature: &[u8],
             ) -> bool {
-                println!("Verify time: {:?}", swarm_time);
+                eprintln!("Verify time: {:?}", swarm_time);
                 // println!("PubKey DER: '{:?}' len: {}", key, key.len());
                 let res: std::result::Result<RsaPublicKey, rsa::pkcs1::Error> =
                     DecodeRsaPublicKey::from_pkcs1_der(key);
@@ -310,7 +310,7 @@ impl Manager {
                     pub_key.hash(&mut hasher);
                     let id: u64 = hasher.finish();
                     if id != gnome_id.0 {
-                        println!("Verify FAIL: GnomeId mismatch!");
+                        eprintln!("Verify FAIL: GnomeId mismatch!");
                         return false;
                     }
                     // println!("PubKey decoded!");
@@ -359,7 +359,7 @@ impl Manager {
                     data.pop();
                     result.is_ok()
                 } else {
-                    println!("Unable to decode PubKey");
+                    eprintln!("Unable to decode PubKey");
                     false
                 }
             }
@@ -431,9 +431,9 @@ impl Manager {
             // println!("swarm '{}' created ", name);
             // let sender = swarm.sender.clone();
             // let receiver = swarm.receiver.take();
-            println!("Joined `{}` swarm", name);
+            eprintln!("Joined `{}` swarm", name);
             self.notify_networking(name.clone(), sender.clone(), band_send, net_settings_recv);
-            println!("inserting swarm");
+            eprintln!("inserting swarm");
             self.swarms.insert(swarm_id, send);
             self.name_to_id.insert(name, swarm_id);
             Ok((swarm_id, (sender, receiver)))
@@ -456,7 +456,7 @@ impl Manager {
             token_sender: avail_bandwith_sender,
             network_settings_receiver,
         });
-        println!("notification sent: {:?}", r);
+        eprintln!("notification sent: {:?}", r);
     }
 
     pub fn print_status(&self, id: &SwarmID) {
@@ -470,7 +470,7 @@ impl Manager {
             let _ = mgr_sender.send(ManagerToGnome::Disconnect);
             // let jh = swarm.join_handle.take().unwrap();
             // let _ = jh.join();
-            println!("Leaving SwarmID:`{:?}`", id);
+            eprintln!("Leaving SwarmID:`{:?}`", id);
         }
         // drop(self)
     }

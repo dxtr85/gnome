@@ -34,7 +34,7 @@ pub async fn subscriber(
 ) {
     let mut swarms: HashMap<String, Sender<ToGnome>> = HashMap::with_capacity(10);
     let mut names: Vec<String> = Vec::with_capacity(10);
-    println!("Subscriber service started");
+    eprintln!("Subscriber service started");
     let mut notify_holepunch = true;
     let sleep_time = Duration::from_millis(256);
     loop {
@@ -51,7 +51,7 @@ pub async fn subscriber(
                 swarms.insert(notif_bundle.swarm_name.clone(), notif_bundle.request_sender);
                 names.push(notif_bundle.swarm_name.clone());
                 // TODO: inform existing sockets about new subscription
-                println!("Added swarm in networking: {}", notif_bundle.swarm_name);
+                eprintln!("Added swarm in networking: {}", notif_bundle.swarm_name);
                 // TODO: serve err results
                 let _ = sub_sender.send(Subscription::Added(notif_bundle.swarm_name.clone()));
                 if notify_holepunch {
@@ -64,7 +64,7 @@ pub async fn subscriber(
                 // TODO: sockets should be able to respond if they want to join
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                println!("subscriber disconnected from Manager");
+                eprintln!("subscriber disconnected from Manager");
                 break;
             }
             Err(_) => {}
@@ -76,7 +76,7 @@ pub async fn subscriber(
                     if let Some(sender) = swarms.get(&swarm) {
                         let _ = sender.send(ToGnome::AddNeighbor(neighbor));
                     } else {
-                        println!("No sender for {} found", swarm);
+                        eprintln!("No sender for {} found", swarm);
                     }
                 }
                 Subscription::ProvideList => {
@@ -111,7 +111,7 @@ pub async fn subscriber(
                 // }
                 // }
                 other => {
-                    println!("Unexpected msg: {:?}", other)
+                    eprintln!("Unexpected msg: {:?}", other)
                 }
             }
         }

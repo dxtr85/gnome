@@ -18,7 +18,7 @@ pub async fn token_dispenser(
     // bandwith
     band_reciever: Receiver<Sender<u64>>,
 ) {
-    println!("Starting token dispenser service");
+    eprintln!("Starting token dispenser service");
     let mut tokens_available_from_buffer = max_buffer_size_bytes;
     let mut tokens_available_from_time_pass = bandwith_bytes_sec;
 
@@ -198,7 +198,7 @@ pub async fn token_dispenser(
                                     //     tokens_available_from_buffer = 0;
                                     //     // We do not send tokens in this case
                                 } else {
-                                    println!(
+                                    eprintln!(
                                         "Do not have enough tokens from buffer {}, req: {}",
                                         tokens_available_from_buffer, req_size
                                     );

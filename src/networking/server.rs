@@ -22,14 +22,14 @@ pub async fn run_server(
     token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     pub_key_pem: String,
 ) {
-    println!("--------------------------------------");
-    println!("- - - - - - - - SERVER - - - - - - - -");
-    println!("- Listens on: {:?}   -", socket.local_addr().unwrap());
-    println!("--------------------------------------");
+    eprintln!("--------------------------------------");
+    eprintln!("- - - - - - - - SERVER - - - - - - - -");
+    eprintln!("- Listens on: {:?}   -", socket.local_addr().unwrap());
+    eprintln!("--------------------------------------");
     // println!("My Pubkey PEM:\n {:?}", pub_key_pem);
     let loc_encr = Encrypter::create_from_data(&pub_key_pem).unwrap();
     let gnome_id = GnomeId(loc_encr.hash());
-    println!("My GnomeId: {}", gnome_id);
+    eprintln!("My GnomeId: {}", gnome_id);
     loop {
         let mut remote_gnome_id: GnomeId = GnomeId(0);
         let mut session_key: SessionKey = SessionKey::from_key(&[0; 32]);
@@ -63,7 +63,7 @@ pub async fn run_server(
             // encrypter,
             remote_pub_key_pem,
         ));
-        println!("--------------------------------------");
+        eprintln!("--------------------------------------");
     }
 }
 
@@ -81,7 +81,7 @@ async fn establish_secure_connection(
     loop {
         let result = socket.recv_from(&mut bytes).await;
         if result.is_err() {
-            println!("Failed to receive data on socket: {:?}", result);
+            eprintln!("Failed to receive data on socket: {:?}", result);
             return None;
         }
         (count, remote_addr) = result.unwrap();
@@ -93,10 +93,10 @@ async fn establish_secure_connection(
     if id_pub_key_pem == pub_key_pem {
         return None;
     }
-    println!("SKT Received {} bytes", count);
+    eprintln!("SKT Received {} bytes", count);
     let result = Encrypter::create_from_data(id_pub_key_pem);
     if result.is_err() {
-        println!("Failed to build Encripter from received PEM: {:?}", result);
+        eprintln!("Failed to build Encripter from received PEM: {:?}", result);
         return None;
     }
     let encr = result.unwrap();
@@ -112,45 +112,45 @@ async fn establish_secure_connection(
     let bytes_to_send = Vec::from(&key);
     let encr_res = encr.encrypt(&bytes_to_send);
     if encr_res.is_err() {
-        println!("Failed to encrypt symmetric key: {:?}", encr_res);
+        eprintln!("Failed to encrypt symmetric key: {:?}", encr_res);
         return None;
     }
-    println!("Encrypted symmetric key");
+    eprintln!("Encrypted symmetric key");
 
     let encrypted_data = encr_res.unwrap();
     // let res = socket.send_to(&encrypted_data, remote_addr).await;
     let res = dedicated_socket.send_to(&encrypted_data, remote_addr).await;
     if res.is_err() {
-        println!("Failed to send encrypted symmetric key: {:?}", res);
+        eprintln!("Failed to send encrypted symmetric key: {:?}", res);
         return None;
     }
-    println!("Sent encrypted symmetric key {}", encrypted_data.len());
+    eprintln!("Sent encrypted symmetric key {}", encrypted_data.len());
 
     *session_key = SessionKey::from_key(&key);
 
     let mut r_buf = [0u8; 32];
     let r_res = dedicated_socket.recv_from(&mut r_buf).await;
     if r_res.is_err() {
-        println!("Failed to receive ping from Neighbor");
+        eprintln!("Failed to receive ping from Neighbor");
         return None;
     }
     let (_count, remote_addr) = r_res.unwrap();
     let conn_result = dedicated_socket.connect(remote_addr).await;
     if conn_result.is_err() {
-        println!("Unable to connect dedicated socket: {:?}", conn_result);
+        eprintln!("Unable to connect dedicated socket: {:?}", conn_result);
         return None;
     }
 
     let my_encrypted_pubkey = session_key.encrypt(pub_key_pem.as_bytes());
     let res2 = dedicated_socket.send(&my_encrypted_pubkey).await;
     if res2.is_err() {
-        println!("Error sending encrypted pubkey response: {:?}", res2);
+        eprintln!("Error sending encrypted pubkey response: {:?}", res2);
         return None;
     }
-    println!("Sent encrypted public key");
+    eprintln!("Sent encrypted public key");
 
     *remote_gnome_id = GnomeId(encr.hash());
-    println!("Remote GnomeId: {}", remote_gnome_id);
+    eprintln!("Remote GnomeId: {}", remote_gnome_id);
     Some((dedicated_socket, id_pub_key_pem.to_string()))
 }
 
@@ -222,7 +222,7 @@ async fn prepare_and_serve(
     // encrypter: Encrypter,
     pub_key_pem: String,
 ) {
-    println!("Waiting for data from remote...");
+    eprintln!("Waiting for data from remote...");
     let mut remote_names = vec![];
     receive_remote_swarm_names(&dedicated_socket, &mut remote_names).await;
 

@@ -40,7 +40,7 @@ pub async fn collect_subscribed_swarm_names(
                     *names = nnames.to_owned();
                     break;
                 }
-                _ => println!("Unexpected message: {:?}", subs_msg),
+                _ => eprintln!("Unexpected message: {:?}", subs_msg),
             };
         }
         // yield_now().await;
@@ -68,7 +68,7 @@ pub async fn send_subscribed_swarm_names(
     // let send_result = socket.send_to(&bytes, remote_addr).await;
     let send_result = socket.send(&buf).await;
     if let Ok(count) = send_result {
-        println!("SKT Sent {} bytes", count);
+        eprintln!("SKT Sent {} bytes", count);
     }
 }
 
@@ -157,7 +157,7 @@ pub fn create_a_neighbor_for_each_swarm(
             remote_names.clone(),
             // pub_key_pem.clone(),
         );
-        println!("Request include neighbor");
+        eprintln!("Request include neighbor");
         let _ = sender.send(Subscription::IncludeNeighbor(name, neighbor));
         ch_pairs.push((s1, s2, r3));
     }
@@ -277,7 +277,7 @@ pub async fn identify_nat(socket: &UdpSocket) -> Nat {
 
     let mut millis_remaining = 1000;
     let mut received_responses = Vec::new();
-    println!("Waiting for STUN to respond...");
+    eprintln!("Waiting for STUN to respond...");
     while millis_remaining > 0 && received_responses.len() < 2 {
         let t1 = sleep(Duration::from_millis(1)).fuse();
         let t2 = receive_response(socket).fuse();
@@ -288,13 +288,13 @@ pub async fn identify_nat(socket: &UdpSocket) -> Nat {
                  millis_remaining-=1;
              },
             result2 = t2 => {
-                println!("Received a response: {:?}", result2);
+                eprintln!("Received a response: {:?}", result2);
                 received_responses.push(result2)}
         };
         yield_now().await;
     }
     if received_responses.is_empty() {
-        println!("NAT type: Symmetric ");
+        eprintln!("NAT type: Symmetric ");
         Nat::Symmetric
     } else {
         let mut first_response_received = false;
@@ -307,13 +307,13 @@ pub async fn identify_nat(socket: &UdpSocket) -> Nat {
             }
         }
         if first_response_received {
-            println!("NAT type: FullCone ");
+            eprintln!("NAT type: FullCone ");
             Nat::FullCone
         } else if second_response_received {
-            println!("NAT type: AddressRestrictedCone ");
+            eprintln!("NAT type: AddressRestrictedCone ");
             Nat::AddressRestrictedCone
         } else {
-            println!("NAT type: Unknown ");
+            eprintln!("NAT type: Unknown ");
             Nat::Unknown
         }
     }
@@ -324,7 +324,7 @@ async fn receive_response(socket: &UdpSocket) -> StunMessage {
     let mut bytes: [u8; 128] = [0; 128];
     let _res = socket.recv_from(&mut bytes).await;
     let response = stun_decode(&bytes.clone());
-    println!("Received a response: {:?}", response);
+    eprintln!("Received a response: {:?}", response);
     response
 }
 
@@ -418,10 +418,10 @@ pub async fn discover_port_allocation_rule(socket: &UdpSocket) -> (PortAllocatio
             let p3_and_p4_eq = port_3 == port_4;
             if p1_and_p2_eq && p3_and_p4_eq {
                 if port_1 == port_3 {
-                    println!("Port allocation: FullCone, delta p: 0");
+                    eprintln!("Port allocation: FullCone, delta p: 0");
                     (PortAllocationRule::FullCone, 0)
                 } else {
-                    println!(
+                    eprintln!(
                         "Port allocation: AddressSensitive, delta p: {}",
                         port_3 - port_2
                     );
@@ -434,7 +434,7 @@ pub async fn discover_port_allocation_rule(socket: &UdpSocket) -> (PortAllocatio
                 let d1 = port_2 - port_1;
                 let d2 = port_3 - port_2;
                 let d3 = port_4 - port_3;
-                println!(
+                eprintln!(
                     "Port allocation: PortSensitive delta p: {} {} {}",
                     d1, d2, d3
                 );
@@ -463,18 +463,18 @@ pub async fn discover_network_settings(socket: &mut UdpSocket) -> NetworkSetting
         let port = public_addr.port();
         my_settings.pub_port = port;
         if is_there_nat {
-            println!("NAT detected, identifying...");
+            eprintln!("NAT detected, identifying...");
             let nat = identify_nat(socket).await;
             my_settings.nat_type = nat;
             let port_allocation = discover_port_allocation_rule(socket).await;
             my_settings.port_allocation = port_allocation;
         } else {
-            println!("We have a public IP!");
+            eprintln!("We have a public IP!");
             my_settings.nat_type = Nat::None;
             my_settings.port_allocation = (PortAllocationRule::FullCone, 0);
         }
     } else {
-        println!("Unable to tell if there is NAT: {:?}", behind_a_nat);
+        eprintln!("Unable to tell if there is NAT: {:?}", behind_a_nat);
     }
     my_settings
 }
