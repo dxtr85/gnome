@@ -32,6 +32,7 @@ pub enum ToGnomeManager {
 }
 pub enum FromGnomeManager {
     SwarmJoined(SwarmID, String, Sender<ToGnome>, Receiver<GnomeToApp>),
+    Disconnected,
 }
 pub struct Manager {
     gnome_id: GnomeId,
@@ -208,20 +209,25 @@ impl Manager {
                         }
                     }
                     ToGnomeManager::Disconnect => {
-                        // TODO: do all necessary stuff
-                        break;
+                        for to_gnome in self.swarms.values() {
+                            let _ = to_gnome.send(ManagerToGnome::Disconnect);
+                        }
                     }
                 }
             }
-            self.serve_gnome_requests();
             let sleep_time = Duration::from_nanos(sleep_nanos);
+            if self.serve_gnome_requests() {
+                let _ = resp_sender.send(FromGnomeManager::Disconnected);
+                sleep(sleep_time).await;
+                break;
+            }
             sleep(sleep_time).await;
         }
         self.finish();
         // join.await;
     }
 
-    fn serve_gnome_requests(&mut self) {
+    fn serve_gnome_requests(&mut self) -> bool {
         while let Ok(request) = self.receiver.try_recv() {
             match request {
                 GnomeToManager::NeighboringSwarm(swarm_id, gnome_id, swarm_name) => {
@@ -242,8 +248,10 @@ impl Manager {
                         //TODO: notify gnome that provided new neighbor
                     }
                 }
+                GnomeToManager::Disconnected => return true,
             }
         }
+        false
     }
 
     pub fn add_neighbor_to_a_swarm(&mut self, id: SwarmID, neighbor: Neighbor) {
