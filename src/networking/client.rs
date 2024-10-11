@@ -21,9 +21,10 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
 use swarm_consensus::GnomeId;
 use swarm_consensus::NetworkSettings;
+use swarm_consensus::SwarmName;
 
 pub async fn run_client(
-    swarm_names: Vec<String>,
+    swarm_names: Vec<SwarmName>,
     sender: Sender<Subscription>,
     decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
@@ -107,7 +108,7 @@ async fn establish_secure_connection(
     sender: Sender<Subscription>,
     decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
-    swarm_names: Vec<String>,
+    swarm_names: Vec<SwarmName>,
 ) {
     let mut remote_gnome_id: GnomeId = GnomeId(0);
     let session_key: SessionKey; // = SessionKey::from_key(&[0; 32]);
@@ -266,7 +267,7 @@ pub async fn prepare_and_serve(
     dedicated_socket: UdpSocket,
     // remote_gnome_id: GnomeId,
     session_key: SessionKey,
-    swarm_names: Vec<String>,
+    swarm_names: Vec<SwarmName>,
     sender: Sender<Subscription>,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     // encrypter: Encrypter,
@@ -278,7 +279,7 @@ pub async fn prepare_and_serve(
     // println!("Decrypted PEM using session key:\n {:?}", pub_key_pem);
     send_subscribed_swarm_names(&dedicated_socket, &swarm_names).await;
 
-    let mut remote_names: Vec<String> = vec![];
+    let mut remote_names: Vec<SwarmName> = vec![];
     receive_remote_swarm_names(&dedicated_socket, &mut remote_names).await;
     if remote_names.is_empty() {
         eprintln!("Neighbor {} did not provide swarm list", remote_gnome_id);

@@ -79,7 +79,7 @@ pub async fn run_networking_tasks(
     let mut swarm_names = vec![];
     sub_recv_one =
         collect_subscribed_swarm_names(&mut swarm_names, sub_send_two.clone(), sub_recv_one).await;
-    swarm_names.sort();
+    // swarm_names.sort();
     spawn(run_client(
         swarm_names,
         sub_send_two.clone(),
@@ -104,7 +104,7 @@ pub async fn run_networking_tasks(
     // 2. We also always need to run_client and try to run_server.
     // 2. We need te establish if we have a public_ip.
 
-    // // Uncomment it later
+    // TODO: Uncomment it later
     // let behind_nat_result = are_we_behind_a_nat(
     //     &UdpSocket::bind(SocketAddr::new("0.0.0.0".parse().unwrap(), 0))
     //         .await

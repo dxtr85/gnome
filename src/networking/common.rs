@@ -5,6 +5,7 @@ use crate::networking::stun::{
 use crate::networking::subscription::Subscription;
 use async_std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use async_std::task::{sleep, yield_now};
+use swarm_consensus::SwarmName;
 // use bytes::{BufMut, BytesMut};
 use futures::{
     future::FutureExt, // for `.fuse()`
@@ -21,7 +22,7 @@ use swarm_consensus::{
 };
 
 pub async fn collect_subscribed_swarm_names(
-    names: &mut Vec<String>,
+    names: &mut Vec<SwarmName>,
     sender: Sender<Subscription>,
     receiver: Receiver<Subscription>,
 ) -> Receiver<Subscription> {
@@ -51,14 +52,14 @@ pub async fn collect_subscribed_swarm_names(
 
 pub async fn send_subscribed_swarm_names(
     socket: &UdpSocket,
-    names: &Vec<String>,
+    names: &Vec<SwarmName>,
     // remote_addr: SocketAddr,
 ) {
     // let mut buf = BytesMut::with_capacity(1030);
     let mut buf = Vec::new();
     for name in names {
         for a_byte in name.as_bytes() {
-            buf.push(*a_byte);
+            buf.push(a_byte);
         }
         // TODO split with some other value
         buf.push(255);
@@ -73,9 +74,9 @@ pub async fn send_subscribed_swarm_names(
 }
 
 pub fn distil_common_names(
-    common_names: &mut Vec<String>,
-    names: Vec<String>,
-    remote_names: &Vec<String>,
+    common_names: &mut Vec<SwarmName>,
+    names: Vec<SwarmName>,
+    remote_names: &Vec<SwarmName>,
 ) {
     for name in remote_names {
         // let name = String::from_utf8(bts).unwrap();
@@ -88,14 +89,19 @@ pub fn distil_common_names(
 pub async fn receive_remote_swarm_names(
     socket: &UdpSocket,
     // recv_buf: &mut BytesMut,
-    remote_names: &mut Vec<String>,
+    remote_names: &mut Vec<SwarmName>,
 ) {
     let mut recv_buf = [0u8; 1024];
     *remote_names = if let Ok(count) = socket.recv(&mut recv_buf).await {
+        // eprintln!(
+        //     "Recv buf (count: {}): {:?}",
+        //     count,
+        //     &recv_buf[..count] // String::from_utf8(recv_buf[..count].try_into().unwrap()).unwrap()
+        // );
         recv_buf[..count]
             // TODO split by some reasonable delimiter
             .split(|n| n == &255u8)
-            .map(|bts| String::from_utf8(bts.to_vec()).unwrap())
+            .map(|bts| SwarmName::from(bts.to_vec()).unwrap())
             .collect()
     } else {
         Vec::new()
@@ -122,8 +128,8 @@ pub async fn receive_remote_swarm_names(
 // that has been connected.
 //
 pub fn create_a_neighbor_for_each_swarm(
-    common_names: Vec<String>,
-    remote_names: Vec<String>,
+    common_names: Vec<SwarmName>,
+    remote_names: Vec<SwarmName>,
     sender: Sender<Subscription>,
     remote_gnome_id: GnomeId,
     ch_pairs: &mut Vec<(
@@ -132,7 +138,7 @@ pub fn create_a_neighbor_for_each_swarm(
         Receiver<WrappedMessage>,
     )>,
     shared_sender: Sender<(
-        String,
+        SwarmName,
         Sender<Message>,
         Sender<CastMessage>,
         Receiver<WrappedMessage>,

@@ -19,7 +19,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, TryRecvError};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{GnomeId, NetworkSettings};
+use swarm_consensus::{GnomeId, NetworkSettings, SwarmName};
 use swarm_consensus::{Nat, PortAllocationRule};
 
 // let puncher = "tudbut.de:4277";
@@ -50,7 +50,7 @@ pub async fn holepunch(
     sub_sender: Sender<Subscription>,
     decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
-    receiver: Receiver<String>,
+    receiver: Receiver<SwarmName>,
     pub_key_pem: String,
 ) {
     let mut magic_ports = MagicPorts::new();
@@ -76,7 +76,7 @@ pub async fn holepunch(
             // println!("Error receiving swarm_name: {:?}", recv_result);
             // return;
         }
-        let swarm_name: String = recv_result.unwrap();
+        let swarm_name: SwarmName = recv_result.unwrap();
         let bind_port = magic_ports.next();
         spawn(holepunch_task(
             puncher,
@@ -120,7 +120,7 @@ async fn holepunch_task(
     decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     pub_key_pem: String,
-    swarm_name: String,
+    swarm_name: SwarmName,
     mut bind_port: u16,
 ) {
     let magic_ports = MagicPorts::new();
@@ -135,7 +135,7 @@ async fn holepunch_task(
 
     let my_settings = discover_network_settings(&mut holepunch).await;
     let mut remote_socket_opt =
-        ask_proxy_for_remote_socket(&holepunch, puncher, swarm_name.clone(), true).await;
+        ask_proxy_for_remote_socket(&holepunch, puncher, swarm_name.to_string(), true).await;
     if remote_socket_opt.is_none() {
         eprintln!("Unable to receive remote socket addr");
         return;
@@ -146,7 +146,7 @@ async fn holepunch_task(
     if remote_1_addr == my_settings.pub_ip {
         eprintln!("Proxy returned my own IP, trying again...");
         remote_socket_opt =
-            ask_proxy_for_remote_socket(&holepunch, puncher, swarm_name.clone(), true).await;
+            ask_proxy_for_remote_socket(&holepunch, puncher, swarm_name.to_string(), true).await;
     }
     if remote_socket_opt.is_none() {
         eprintln!("Unable to receive remote socket addr");
@@ -364,11 +364,11 @@ async fn holepunch_task(
 async fn ask_proxy_for_remote_socket(
     holepunch: &UdpSocket,
     puncher: SocketAddr,
-    swarm_name: String,
+    searched_name: String,
     keep_waiting: bool,
 ) -> Option<(IpAddr, u16)> {
     let timeout_sec: Duration = Duration::from_secs(5);
-    let bytes = swarm_name.as_bytes();
+    let bytes = searched_name.as_bytes();
     let mut buf = vec![0_u8; 200];
     buf[..bytes.len().min(200)].copy_from_slice(&bytes[..bytes.len().min(200)]);
     // Initial request
@@ -794,7 +794,7 @@ pub async fn cluster_punch_it(
 
 pub async fn start_communication(
     dedicated_socket: UdpSocket,
-    swarm_names: Vec<String>,
+    swarm_names: Vec<SwarmName>,
     pub_key_pem: String,
     decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,

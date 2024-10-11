@@ -8,6 +8,7 @@ use crate::data_conversion::neighbor_request_to_bytes;
 use crate::data_conversion::neighbor_response_to_bytes;
 use crate::networking::subscription::Subscription;
 use crate::networking::token::Token;
+use swarm_consensus::SwarmName;
 
 use async_std::net::UdpSocket;
 use async_std::task;
@@ -120,13 +121,13 @@ async fn race_tasks(
     token_reciever: Receiver<Token>,
     sub_sender: Sender<Subscription>,
     shared_sender: Sender<(
-        String,
+        SwarmName,
         Sender<Message>,
         Sender<CastMessage>,
         Receiver<WrappedMessage>,
     )>,
     extend_receiver: Receiver<(
-        String,
+        SwarmName,
         Sender<Message>,
         Sender<CastMessage>,
         Receiver<WrappedMessage>,
@@ -476,13 +477,13 @@ pub async fn serve_socket(
     token_reciever: Receiver<Token>,
     sender: Sender<Subscription>,
     shared_sender: Sender<(
-        String,
+        SwarmName,
         Sender<Message>,
         Sender<CastMessage>,
         Receiver<WrappedMessage>,
     )>,
     extend_receiver: Receiver<(
-        String,
+        SwarmName,
         Sender<Message>,
         Sender<CastMessage>,
         Receiver<WrappedMessage>,

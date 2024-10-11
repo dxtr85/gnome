@@ -25,6 +25,7 @@ use swarm_consensus::PortAllocationRule;
 use swarm_consensus::Requirement;
 use swarm_consensus::Signature;
 use swarm_consensus::SwarmID;
+use swarm_consensus::SwarmName;
 use swarm_consensus::SwarmSyncRequestParams;
 use swarm_consensus::SwarmSyncResponse;
 use swarm_consensus::SwarmTime;
@@ -514,6 +515,7 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, bytes: &mut Vec<u8>)
             put_u16(bytes, sync_response.chill_phase);
             put_u64(bytes, sync_response.founder.0);
             put_u32(bytes, sync_response.swarm_time.0);
+            put_u32(bytes, sync_response.round_start.0);
             bytes.push(sync_response.swarm_type.as_byte());
             put_u64(bytes, sync_response.app_root_hash);
             bytes.push(sync_response.key_reg_size);
@@ -580,7 +582,7 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, bytes: &mut Vec<u8>) {
     match n_req {
         NeighborRequest::SwarmJoinedInfo(swarm_name) => {
             bytes.push(255);
-            for byte in swarm_name.bytes() {
+            for byte in swarm_name.as_bytes() {
                 bytes.push(byte);
             }
         }
@@ -596,7 +598,7 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, bytes: &mut Vec<u8>) {
             for byte in g_id.0.to_be_bytes() {
                 bytes.push(byte);
             }
-            for byte in swarm_name.bytes() {
+            for byte in swarm_name.as_bytes() {
                 bytes.push(byte);
             }
         }
@@ -659,7 +661,7 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
     let bytes_len = bytes.len();
     match bytes[0] {
         255 => {
-            let swarm_name = String::from_utf8(bytes[data_idx + 1..bytes_len].to_vec()).unwrap();
+            let swarm_name = SwarmName::from(bytes[data_idx + 1..bytes_len].to_vec()).unwrap();
             NeighborRequest::SwarmJoinedInfo(swarm_name)
         }
         254 => {
@@ -681,7 +683,8 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
                 bytes[data_idx + 7],
                 bytes[data_idx + 8],
             ]));
-            let swarm_name = String::from_utf8(bytes[data_idx + 9..bytes_len].to_vec()).unwrap();
+            // let swarm_name = String::from_utf8(bytes[data_idx + 9..bytes_len].to_vec()).unwrap();
+            let swarm_name = SwarmName::from(bytes[data_idx + 9..bytes_len].to_vec()).unwrap();
             NeighborRequest::CreateNeighbor(gnome_id, swarm_name)
         }
         252 => {
@@ -837,25 +840,31 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
                 bytes[data_idx + 13],
                 bytes[data_idx + 14],
             ]));
-            let swarm_type = SwarmType::from(bytes[data_idx + 15]);
-            let app_root_hash = as_u64_be(&[
+            let round_start: SwarmTime = SwarmTime(as_u32_be(&[
+                bytes[data_idx + 15],
                 bytes[data_idx + 16],
                 bytes[data_idx + 17],
                 bytes[data_idx + 18],
-                bytes[data_idx + 19],
+            ]));
+            let swarm_type = SwarmType::from(bytes[data_idx + 19]);
+            let app_root_hash = as_u64_be(&[
                 bytes[data_idx + 20],
                 bytes[data_idx + 21],
                 bytes[data_idx + 22],
                 bytes[data_idx + 23],
+                bytes[data_idx + 24],
+                bytes[data_idx + 25],
+                bytes[data_idx + 26],
+                bytes[data_idx + 27],
             ]);
-            let key_reg_size = bytes[data_idx + 24];
-            let capability_size = bytes[data_idx + 25];
-            let policy_size = bytes[data_idx + 26];
-            let broadcast_size = bytes[data_idx + 27];
-            let multicast_size = bytes[data_idx + 28];
-            let more_key_reg_messages = bytes[data_idx + 29] != 0;
+            let key_reg_size = bytes[data_idx + 28];
+            let capability_size = bytes[data_idx + 29];
+            let policy_size = bytes[data_idx + 30];
+            let broadcast_size = bytes[data_idx + 31];
+            let multicast_size = bytes[data_idx + 32];
+            let more_key_reg_messages = bytes[data_idx + 33] != 0;
             let mut key_reg_pairs = vec![];
-            let mut idx = data_idx + 30;
+            let mut idx = data_idx + 34;
             while idx < bytes_len {
                 let mut g_vec = [0; 8];
                 for i in 0..8 {
@@ -872,6 +881,7 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
                 chill_phase,
                 founder,
                 swarm_time,
+                round_start,
                 swarm_type,
                 app_root_hash,
                 key_reg_size,

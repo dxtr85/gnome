@@ -15,14 +15,14 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{NetworkSettings, ToGnome};
+use swarm_consensus::{NetworkSettings, SwarmName, ToGnome};
 
 pub async fn direct_punching_service(
     // host_ip: IpAddr,
     subscription_sender: Sender<Subscription>,
     decrypter: Decrypter,
     token_endpoints_sender: Sender<(Sender<Token>, Receiver<Token>)>,
-    swarm_endpoints_receiver: Receiver<(String, Sender<ToGnome>, Receiver<NetworkSettings>)>,
+    swarm_endpoints_receiver: Receiver<(SwarmName, Sender<ToGnome>, Receiver<NetworkSettings>)>,
     pub_key_pem: String,
 ) {
     println!("Waiting for direct connect requests.");
@@ -55,7 +55,7 @@ pub async fn direct_punching_service(
     // Then we receive trough settings_result external ip and port
     // of joining party and use our predicted ip and port to connect to it.
 
-    let mut swarms: HashMap<String, (Sender<ToGnome>, Receiver<NetworkSettings>)> =
+    let mut swarms: HashMap<SwarmName, (Sender<ToGnome>, Receiver<NetworkSettings>)> =
         HashMap::with_capacity(10);
     let (send_other_network_settings, recv_other_network_settings) = channel();
     let (send_my_network_settings, recv_my_network_settings) = channel();
@@ -95,7 +95,7 @@ pub async fn direct_punching_service(
         } else {
             let recv_result = recv_my_network_settings.try_recv();
             if let Ok(my_settings) = recv_result {
-                println!("My: {:?}", my_settings);
+                eprintln!("My: {:?}", my_settings);
                 let request = ToGnome::NetworkSettingsUpdate(
                     true,
                     my_settings.pub_ip,
@@ -121,7 +121,7 @@ async fn socket_maintainer(
     decrypter: Decrypter,
     token_endpoints_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     my_network_settings_sender: Sender<NetworkSettings>,
-    other_network_settings_reciever: Receiver<(String, NetworkSettings)>,
+    other_network_settings_reciever: Receiver<(SwarmName, NetworkSettings)>,
 ) {
     let mut swarm_names = vec![];
     // println!("SM start");
@@ -156,7 +156,7 @@ async fn socket_maintainer(
             // TODO: discover with stun server
             println!("recvd other!");
             let _ = my_network_settings_sender.send(my_settings);
-            swarm_names.sort();
+            // swarm_names.sort();
             spawn(punch_and_communicate(
                 socket,
                 bind_addr,
@@ -208,7 +208,7 @@ async fn punch_and_communicate(
     sub_sender: Sender<Subscription>,
     decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
-    swarm_names: Vec<String>,
+    swarm_names: Vec<SwarmName>,
     (my_settings, other_settings): (NetworkSettings, NetworkSettings),
 ) {
     if other_settings.no_nat() {

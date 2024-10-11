@@ -6,6 +6,7 @@ pub use std::net::IpAddr;
 use std::path::PathBuf;
 use swarm_consensus::GnomeId;
 use swarm_consensus::NetworkSettings;
+use swarm_consensus::SwarmName;
 mod crypto;
 mod data_conversion;
 mod manager;
@@ -39,6 +40,7 @@ pub mod prelude {
     pub use swarm_consensus::NetworkSettings;
     pub use swarm_consensus::PortAllocationRule;
     pub use swarm_consensus::SwarmID;
+    pub use swarm_consensus::SwarmName;
     pub use swarm_consensus::SyncData;
     pub use swarm_consensus::ToGnome;
 }
@@ -124,20 +126,27 @@ pub fn init(
     // println!("Pub key: {:?}", res);
     let (mut gmgr, networking_receiver) =
         // create_manager_and_receiver(gnome_id, Some(network_settings));
-        create_manager_and_receiver(gnome_id,pub_key_der,priv_key_pem, None, decrypter.clone().unwrap());
+        create_manager_and_receiver(gnome_id, pub_key_der, priv_key_pem, None, decrypter.clone().unwrap(), req_receiver,
+        resp_sender.clone());
 
     // let app_sync_hash = 0; // TODO when we read data from disk we update app_sync_hash
     if let Ok((swarm_id, (user_req, user_res))) =
         // gmgr.join_a_swarm("trzat".to_string(), Some(neighbor_network_settings), None)
-        gmgr.join_a_swarm("/".to_string(), app_sync_hash, None, None)
+        gmgr.join_a_swarm(
+            SwarmName::new(GnomeId::any(), "/".to_string()).unwrap(),
+            app_sync_hash,
+            None,
+            None,
+        )
     {
+        let _ = resp_sender.send(FromGnomeManager::MyID(gnome_id));
         let _ = resp_sender.send(FromGnomeManager::SwarmJoined(
             swarm_id,
-            "/".to_string(),
+            SwarmName::new(GnomeId::any(), "/".to_string()).unwrap(),
             user_req,
             user_res,
         ));
-        eprintln!("Joined `/` swarm");
+        eprintln!("Joined `any /` swarm");
     }
 
     // let _join = spawn(activate_gnome(
@@ -187,16 +196,9 @@ pub fn init(
     //       of total bandwith available.
     //       If we are between min and min_off we can stay in this configuration.
     //
-    spawn(gmgr.do_your_job(req_receiver, resp_sender, app_sync_hash));
+    spawn(gmgr.do_your_job(app_sync_hash));
     (req_sender, resp_receiver)
 }
-// fn start(
-//     gnome_id: GnomeId,
-//     network_settings: Option<NetworkSettings>,
-//     sender: Sender<NotificationBundle>,
-// ) -> Manager {
-//     Manager::new(gnome_id, network_settings, sender)
-// }
 
 pub fn create_manager_and_receiver(
     gnome_id: GnomeId,
@@ -204,6 +206,8 @@ pub fn create_manager_and_receiver(
     priv_key_pem: String,
     network_settings: Option<NetworkSettings>,
     decrypter: Decrypter,
+    req_receiver: Receiver<ToGnomeManager>,
+    resp_sender: Sender<FromGnomeManager>,
 ) -> (Manager, Receiver<NotificationBundle>) {
     let (networking_sender, networking_receiver) = channel();
     // let network_settings = None;
@@ -215,6 +219,8 @@ pub fn create_manager_and_receiver(
         network_settings,
         networking_sender,
         decrypter,
+        req_receiver,
+        resp_sender,
     );
     (mgr, networking_receiver)
 }

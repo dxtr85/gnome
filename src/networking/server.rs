@@ -13,6 +13,7 @@ use async_std::task::spawn;
 use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use swarm_consensus::GnomeId;
+use swarm_consensus::SwarmName;
 
 pub async fn run_server(
     // host_ip: IpAddr,
@@ -52,7 +53,7 @@ pub async fn run_server(
             collect_subscribed_swarm_names(&mut swarm_names, sub_sender.clone(), sub_receiver)
                 .await;
 
-        swarm_names.sort();
+        // swarm_names.sort();
         spawn(prepare_and_serve(
             dedicated_socket,
             remote_gnome_id,
@@ -217,7 +218,7 @@ async fn prepare_and_serve(
     remote_gnome_id: GnomeId,
     session_key: SessionKey,
     sub_sender: Sender<Subscription>,
-    swarm_names: Vec<String>,
+    swarm_names: Vec<SwarmName>,
     token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     // encrypter: Encrypter,
     pub_key_pem: String,

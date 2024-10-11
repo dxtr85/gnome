@@ -4,15 +4,15 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{Nat, Neighbor, NetworkSettings, NotificationBundle, ToGnome};
+use swarm_consensus::{Nat, Neighbor, NetworkSettings, NotificationBundle, SwarmName, ToGnome};
 
 #[derive(Debug)]
 pub enum Subscription {
-    Added(String),
+    Added(SwarmName),
     // Removed(String),
     ProvideList,
-    List(Vec<String>),
-    IncludeNeighbor(String, Neighbor),
+    List(Vec<SwarmName>),
+    IncludeNeighbor(SwarmName, Neighbor),
     Distribute(IpAddr, u16, Nat),
     // Decode(Box<Vec<u8>>),
     // KeyDecoded(Box<[u8; 32]>),
@@ -29,11 +29,11 @@ pub async fn subscriber(
     // sub_sender_two: Sender<Subscription>,
     notification_receiver: Receiver<NotificationBundle>,
     token_dispenser_send: Sender<Sender<u64>>,
-    holepunch_sender: Sender<String>,
-    direct_punch_sender: Sender<(String, Sender<ToGnome>, Receiver<NetworkSettings>)>,
+    holepunch_sender: Sender<SwarmName>,
+    direct_punch_sender: Sender<(SwarmName, Sender<ToGnome>, Receiver<NetworkSettings>)>,
 ) {
-    let mut swarms: HashMap<String, Sender<ToGnome>> = HashMap::with_capacity(10);
-    let mut names: Vec<String> = Vec::with_capacity(10);
+    let mut swarms: HashMap<SwarmName, Sender<ToGnome>> = HashMap::with_capacity(10);
+    let mut names: Vec<SwarmName> = Vec::with_capacity(10);
     eprintln!("Subscriber service started");
     let mut notify_holepunch = true;
     let sleep_time = Duration::from_millis(256);
@@ -70,9 +70,10 @@ pub async fn subscriber(
             Err(_) => {}
         }
         if let Ok(sub) = sub_receiver.try_recv() {
-            // println!("Received: {:?}", sub);
+            // eprintln!("Received: {:?}", sub);
             match sub {
                 Subscription::IncludeNeighbor(swarm, neighbor) => {
+                    // eprintln!("keys: {:?}", swarms.keys());
                     if let Some(sender) = swarms.get(&swarm) {
                         let _ = sender.send(ToGnome::AddNeighbor(neighbor));
                     } else {
