@@ -195,16 +195,6 @@ impl Manager {
                                     ));
                                 }
                             }
-                            // // TODO this needs rework, maybe some ongoing requests queue
-                            // if let Ok(response) = self.receiver.recv() {
-                            //     if let GnomeToManager::AddNeighborToSwarm(_s_id, s_name, neighbor) =
-                            //         response
-                            //     {
-                            //         if s_name == swarm_name {
-                            //             neighbors.push(neighbor);
-                            //         }
-                            //     }
-                            // }
                         }
                         if let Ok((swarm_id, (user_req, user_res))) =
                             self.join_a_swarm(swarm_name.clone(), app_sync_hash, None, None)

@@ -48,7 +48,7 @@ pub mod prelude {
 pub fn init(
     work_dir: String,
     app_sync_hash: u64,
-) -> (Sender<ToGnomeManager>, Receiver<FromGnomeManager>) {
+) -> (Sender<ToGnomeManager>, Receiver<FromGnomeManager>, GnomeId) {
     // ) {
     // println!("init start");
     let (req_sender, req_receiver) = channel();
@@ -197,7 +197,7 @@ pub fn init(
     //       If we are between min and min_off we can stay in this configuration.
     //
     spawn(gmgr.do_your_job(app_sync_hash));
-    (req_sender, resp_receiver)
+    (req_sender, resp_receiver, gnome_id)
 }
 
 pub fn create_manager_and_receiver(
