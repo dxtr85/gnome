@@ -64,7 +64,7 @@ pub async fn subscriber(
                 // TODO: sockets should be able to respond if they want to join
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                eprintln!("subscriber disconnected from Manager");
+                eprintln!("Subscriber disconnected");
                 break;
             }
             Err(_) => {}

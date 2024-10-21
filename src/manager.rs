@@ -210,7 +210,8 @@ impl Manager {
                         }
                     }
                     ToGnomeManager::Disconnect => {
-                        for (to_gnome, _neighbors) in self.swarms.values() {
+                        for (s_id, (to_gnome, _neighbors)) in &self.swarms {
+                            eprintln!("Sending disconnect request to swarm: {:?}", s_id);
                             let _ = to_gnome.send(ManagerToGnome::Disconnect);
                         }
                     }
@@ -224,7 +225,7 @@ impl Manager {
             }
             sleep(sleep_time).await;
         }
-        self.finish();
+        // self.finish();
         // join.await;
     }
 
