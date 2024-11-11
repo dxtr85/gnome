@@ -56,6 +56,7 @@ async fn read_bytes_from_local_stream(
 ) -> Result<Vec<u8>, String> {
     // println!("read_bytes_from_local_stream");
     let sleep_time = Duration::from_micros(100);
+    let mut to_drop = vec![];
     loop {
         for (id, receiver) in receivers.iter_mut() {
             let next_option = receiver.try_recv();
@@ -103,10 +104,28 @@ async fn read_bytes_from_local_stream(
                         return Ok(merged_bytes);
                     }
                 }
+            } else {
+                let err = next_option.err().unwrap();
+                match err {
+                    std::sync::mpsc::TryRecvError::Disconnected => {
+                        to_drop.push(*id);
+                    }
+                    _other => {
+                        // eprintln!("Next option: {:?}", other);
+                    }
+                }
             }
+        }
+        while let Some(id) = to_drop.pop() {
+            receivers.remove(&id);
+        }
+        if receivers.is_empty() {
+            eprintln!("End serving socket with no local receivers");
+            break;
         }
         task::sleep(sleep_time).await;
     }
+    Err("No receivers".to_string())
     // Err(ConnError::LocalStreamClosed)
 }
 
@@ -274,6 +293,10 @@ async fn race_tasks(
         };
         if let Err(_err) = result {
             eprintln!("SRVC Error received: {:?}", _err);
+            if &_err == "No receivers" {
+                // eprintln!("No receivers, terminating!");
+                break;
+            }
             // TODO: should end serving this socket
             for (sender, _c_snd) in senders.values() {
                 let _send_result = sender.send(Message::bye());
