@@ -292,6 +292,7 @@ pub async fn prepare_and_serve(
         eprintln!("No common interests with {}", remote_gnome_id);
         return;
     }
+    // eprintln!("Common swarm names: {:?}", common_names);
     let (shared_sender, swarm_extend_receiver) = channel();
 
     let mut ch_pairs = vec![];

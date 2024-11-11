@@ -178,23 +178,27 @@ impl Manager {
             if let Ok(request) = self.req_receiver.try_recv() {
                 match request {
                     ToGnomeManager::JoinSwarm(swarm_name) => {
+                        eprintln!("Manager Received JoinSwarm({})", swarm_name);
                         if self.name_to_id.get(&swarm_name).is_some() {
                             eprintln!("Not joining {}, we are already there", swarm_name);
                             continue;
                         }
                         if let Some(pairs) = self.neighboring_swarms.get(&swarm_name) {
-                            eprintln!(
-                                "Existing neighbors already in newly joining swarm… {:?}",
-                                pairs
-                            );
+                            eprintln!("Existing neighbors already in {}: ", swarm_name);
                             for (s_id, g_id) in pairs {
-                                if let Some((to_gnome, neighbors)) = self.swarms.get(s_id) {
-                                    let _ = to_gnome.send(ManagerToGnome::ProvideNeighborsToSwarm(
-                                        swarm_name.clone(),
-                                        *g_id,
-                                    ));
+                                eprint!("{} in {}… ", g_id, swarm_name);
+                                if let Some((to_gnome, _neighbors)) = self.swarms.get(s_id) {
+                                    let _res =
+                                        to_gnome.send(ManagerToGnome::ProvideNeighborsToSwarm(
+                                            swarm_name.clone(),
+                                            *g_id,
+                                        ));
+                                    eprintln!("request sent: {:?}", _res);
                                 }
                             }
+                        } else {
+                            eprintln!("No pairs found in neighboring swarms");
+                            eprintln!("Joining {}… with hash: {}", swarm_name, app_sync_hash);
                         }
                         if let Ok((swarm_id, (user_req, user_res))) =
                             self.join_a_swarm(swarm_name.clone(), app_sync_hash, None, None)
@@ -258,13 +262,13 @@ impl Manager {
                         .send(FromGnomeManager::NewSwarmAvailable(swarm_name));
                 }
                 GnomeToManager::AddNeighborToSwarm(_swarm_id, swarm_name, new_neighbor) => {
-                    eprintln!("Mgr recvd add neigh to {}", swarm_name);
-                    eprintln!("Founder: {:?}", swarm_name.founder.0.to_be_bytes());
-                    for name in self.name_to_id.keys() {
-                        eprintln!("Key: {:?}", name.founder.0.to_be_bytes());
-                    }
+                    eprintln!("Mgr recvd add {} to {}", new_neighbor.id, swarm_name);
+                    // eprintln!("Founder: {:?}", swarm_name.founder.0.to_be_bytes());
+                    // for name in self.name_to_id.keys() {
+                    //     eprintln!("Key: {:?}", name.founder.0.to_be_bytes());
+                    // }
                     if let Some(id) = self.name_to_id.get(&swarm_name) {
-                        eprintln!("found this swarm!");
+                        // eprintln!("found this swarm!");
                         self.add_neighbor_to_a_swarm(*id, new_neighbor);
                         //TODO: notify gnome that provided new neighbor
                     }
@@ -286,7 +290,7 @@ impl Manager {
             match to_gnome.send(ManagerToGnome::AddNeighbor(neighbor)) {
                 Ok(()) => {
                     neighbors.push(n_id);
-                    eprintln!("Added neighbor to existing swarm")
+                    eprintln!("Added {} to existing swarm {}", n_id, id.0)
                 }
                 Err(e) => eprintln!("Failed adding neighbor to existing swarm: {:?}", e),
             }
@@ -307,20 +311,20 @@ impl Manager {
         } else {
             vec![]
         };
-        eprintln!("notify_other_swarms");
+        // eprintln!("notify_other_swarms");
         for (id, (sender, n_ids)) in &self.swarms {
             if *id != swarm_id {
-                eprintln!("testing swarm {:?}", id);
+                // eprintln!("testing swarm {:?}", id);
                 let mut not_yet_notified = vec![];
                 for n in n_ids {
-                    eprintln!("testing n_id: {:?}", n);
+                    // eprintln!("testing n_id: {:?}", n);
                     if !already_notified.contains(n) {
-                        eprintln!("this one was not notified!");
+                        // eprintln!("this one was not notified!");
                         not_yet_notified.push(*n);
                     }
                 }
                 if !not_yet_notified.is_empty() {
-                    eprintln!("Informing others");
+                    eprintln!("Informing others about new swarm");
                     let _ = sender.send(ManagerToGnome::SwarmJoined(
                         swarm_name.clone(),
                         not_yet_notified.clone(),
@@ -508,7 +512,7 @@ impl Manager {
             // let receiver = swarm.receiver.take();
             eprintln!("Joined `{}` swarm", name);
             self.notify_networking(name.clone(), sender.clone(), band_send, net_settings_recv);
-            eprintln!("inserting swarm");
+            // eprintln!("inserting swarm");
             self.swarms.insert(swarm_id, (send, n_ids));
             self.name_to_id.insert(name, swarm_id);
             Ok((swarm_id, (sender, receiver)))
@@ -524,14 +528,14 @@ impl Manager {
         avail_bandwith_sender: Sender<u64>,
         network_settings_receiver: Receiver<NetworkSettings>,
     ) {
-        // println!("About to send notification");
+        eprintln!("Notifying network about {}", swarm_name);
         let r = self.to_networking.send(NotificationBundle {
             swarm_name,
             request_sender: sender,
             token_sender: avail_bandwith_sender,
             network_settings_receiver,
         });
-        eprintln!("notification sent: {:?}", r);
+        // eprintln!("Network notified: {:?}", r);
     }
 
     pub fn print_status(&self, id: &SwarmID) {

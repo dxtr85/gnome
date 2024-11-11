@@ -73,8 +73,8 @@ pub async fn subscriber(
             // eprintln!("Received: {:?}", sub);
             match sub {
                 Subscription::IncludeNeighbor(swarm, neighbor) => {
-                    // eprintln!("keys: {:?}", swarms.keys());
                     if let Some(sender) = swarms.get(&swarm) {
+                        eprintln!("Subscription req add {} to {}", neighbor.id, swarm);
                         let _ = sender.send(ToGnome::AddNeighbor(neighbor));
                     } else {
                         eprintln!("No sender for {} found", swarm);

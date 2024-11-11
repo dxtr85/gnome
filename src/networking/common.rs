@@ -78,6 +78,10 @@ pub fn distil_common_names(
     names: Vec<SwarmName>,
     remote_names: &Vec<SwarmName>,
 ) {
+    // eprintln!(
+    //     "Finding common from my:\n{:?}\n\nand his:\n{:?}",
+    //     names, remote_names
+    // );
     for name in remote_names {
         // let name = String::from_utf8(bts).unwrap();
         if names.contains(&name) {
@@ -98,6 +102,7 @@ pub async fn receive_remote_swarm_names(
         //     count,
         //     &recv_buf[..count] // String::from_utf8(recv_buf[..count].try_into().unwrap()).unwrap()
         // );
+        // eprintln!("Reading SwarmNames gnome/networking/common");
         recv_buf[..count]
             // TODO split by some reasonable delimiter
             .split(|n| n == &255u8)
@@ -163,7 +168,7 @@ pub fn create_a_neighbor_for_each_swarm(
             remote_names.clone(),
             // pub_key_pem.clone(),
         );
-        eprintln!("Request include neighbor");
+        eprintln!("Request include {} to {}", neighbor.id, name);
         let _ = sender.send(Subscription::IncludeNeighbor(name, neighbor));
         ch_pairs.push((s1, s2, r3));
     }

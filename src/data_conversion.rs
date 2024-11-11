@@ -154,7 +154,7 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
             let config = match bytes[data_idx] {
                 254 => {
                     let c_id: CastID = CastID(bytes[data_idx + 9]);
-                    eprintln!("StartBroadcast config {}, {:?}", gnome_id, c_id);
+                    // eprintln!("StartBroadcast config {}, {:?}", gnome_id, c_id);
                     data_idx += 10;
                     Configuration::StartBroadcast(gnome_id, c_id)
                 }
@@ -328,7 +328,7 @@ pub fn bytes_to_cast_message(bytes: &[u8]) -> Result<CastMessage, ConversionErro
         Ok(CastMessage::new_broadcast(c_id, data))
     } else if dgram_header & 0b11000000 == 128 {
         // TODO: multicast
-        eprintln!("received a multicast");
+        // eprintln!("received a multicast");
         Ok(CastMessage::new_multicast(c_id, data))
     } else if dgram_header & 0b11000000 == 64 {
         // TODO: unicast
@@ -661,6 +661,7 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
     let bytes_len = bytes.len();
     match bytes[0] {
         255 => {
+            // eprintln!("Reading SwarmNames gnome/data_conversion");
             let swarm_name = SwarmName::from(bytes[data_idx + 1..bytes_len].to_vec()).unwrap();
             NeighborRequest::SwarmJoinedInfo(swarm_name)
         }
@@ -685,6 +686,10 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
             ]));
             // let swarm_name = String::from_utf8(bytes[data_idx + 9..bytes_len].to_vec()).unwrap();
             let swarm_name = SwarmName::from(bytes[data_idx + 9..bytes_len].to_vec()).unwrap();
+            // eprintln!(
+            //     "Reading SwarmNames gnome/data_conversion (CreateNeighbor for {})",
+            //     swarm_name
+            // );
             NeighborRequest::CreateNeighbor(gnome_id, swarm_name)
         }
         252 => {

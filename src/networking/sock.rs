@@ -8,6 +8,8 @@ use crate::data_conversion::neighbor_request_to_bytes;
 use crate::data_conversion::neighbor_response_to_bytes;
 use crate::networking::subscription::Subscription;
 use crate::networking::token::Token;
+use swarm_consensus::CastID;
+use swarm_consensus::CastType;
 use swarm_consensus::SwarmName;
 
 use async_std::net::UdpSocket;
@@ -48,6 +50,7 @@ async fn read_bytes_from_socket(
     }
 }
 
+//TODO: drop receiver on error
 async fn read_bytes_from_local_stream(
     receivers: &mut HashMap<u8, Receiver<WrappedMessage>>,
 ) -> Result<Vec<u8>, String> {
@@ -70,7 +73,7 @@ async fn read_bytes_from_local_stream(
                         } else {
                             192
                         };
-                        // println!("Cast: {:?}", c_msg);
+                        // eprintln!("Sending cast over network: {:?}", c_msg);
                         let c_id = c_msg.id();
                         let mut merged_bytes = Vec::with_capacity(10);
                         merged_bytes.push(dgram_header);
@@ -109,6 +112,7 @@ async fn read_bytes_from_local_stream(
 
 // In order for sockets to collect tokens
 // we utilize WrappedMessage to send NoOp
+// TODO: drop task when no local receivers or closed socket
 async fn race_tasks(
     session_key: SessionKey,
     socket: UdpSocket,
@@ -135,8 +139,10 @@ async fn race_tasks(
 ) {
     let mut senders: HashMap<u8, (Sender<Message>, Sender<CastMessage>)> = HashMap::new();
     let mut receivers: HashMap<u8, Receiver<WrappedMessage>> = HashMap::new();
+    let mut out_of_order_recvd = HashMap::new();
     let min_tokens_threshold: u64 = 1500;
     let mut available_tokens: u64 = min_tokens_threshold;
+    let mut new_channel_mappings: HashMap<u8, SwarmName> = HashMap::new();
     // println!("racing: {:?}", send_recv_pairs);
     for (i, (sender, c_sender, receiver)) in send_recv_pairs.into_iter().enumerate() {
         senders.insert(i as u8, (sender, c_sender));
@@ -163,18 +169,36 @@ async fn race_tasks(
             eprintln!("Extend req: {}", swarm_name);
             //TODO: extend senders and receivers, force send message
             // informing remote about new swarm neighbor
-            for i in 0u8..64 {
-                if let std::collections::hash_map::Entry::Vacant(e) = senders.entry(i) {
-                    // !senders.contains_key(&i) {
-                    // senders.insert(i, (snd, cast_snd));
+            let mut new_id = 255;
+            for (stored_id, name) in new_channel_mappings.iter() {
+                if name.founder.0 == swarm_name.founder.0
+                    && name.name == swarm_name.name
+                    && !senders.contains_key(stored_id)
+                {
+                    new_id = *stored_id;
+                }
+            }
+            new_channel_mappings.remove(&new_id);
+            if new_id < 64 {
+                // eprintln!("Mamma mia!");
+                if let std::collections::hash_map::Entry::Vacant(e) = senders.entry(new_id) {
                     e.insert((snd, cast_snd));
-                    receivers.insert(i, recv);
-                    // TODO: define a preamble containing i and some recognizable pattern
-                    // in order to be sent in newly defined channel
-                    // let bytes = swarm_name.as_bytes();
-                    // let ciphered = session_key.encrypt(bytes);
-                    // let _send_result = socket.send(&ciphered).await;
-                    break;
+                    receivers.insert(new_id, recv);
+                } else {
+                    eprintln!("This was not expected to happen");
+                }
+            } else {
+                for i in 0u8..64 {
+                    if let std::collections::hash_map::Entry::Vacant(e) = senders.entry(i) {
+                        e.insert((snd, cast_snd));
+                        receivers.insert(i, recv);
+                        // TODO: define a preamble containing i and some recognizable pattern
+                        // in order to be sent in newly defined channel
+                        // let bytes = swarm_name.as_bytes();
+                        // let ciphered = session_key.encrypt(bytes);
+                        // let _send_result = socket.send(&ciphered).await;
+                        break;
+                    }
                 }
             }
         }
@@ -240,14 +264,15 @@ async fn race_tasks(
 
         pin_mut!(t1, t2);
 
+        // TODO: upper layer requests creation of a new channel, and then
+        // sends CreateNeighbor over new channel.
+        // This means that gnome joining a new swarm establishes new channel with
+        // his Neighbor over existing UDP socket
         let (from_socket, result) = select! {
             result1 = t1 =>  (true, result1),
             result2 = t2 => (false, result2),
         };
         if let Err(_err) = result {
-            // We could use Err for token provisioning
-            // Err = 0 would mean actual error with local stream, when not from socket
-            // when from socket error numbers would have a meaning assigned
             eprintln!("SRVC Error received: {:?}", _err);
             // TODO: should end serving this socket
             for (sender, _c_snd) in senders.values() {
@@ -257,7 +282,7 @@ async fn race_tasks(
             // } else {
         }
         if from_socket {
-            // println!("From soket");
+            // eprintln!("From soket");
             // Here we read entire bytestream after being notified
             // that there is incoming data
             let read_result = socket.recv(&mut buf).await;
@@ -270,7 +295,7 @@ async fn race_tasks(
                     let decr_res = session_key.decrypt(&buf[..count]);
                     // buf = BytesMut::zeroed(1100);
                     if let Ok(mut deciph) = decr_res {
-                        // println!("Decrypted: {:?}", deciph);
+                        // eprintln!("Decrypted: {:?}", deciph);
                         // let deciph = Bytes::from(deciph);
                         // let mut byte_iterator = deciph.into_iter();
                         // let dgram_header = byte_iterator.next().unwrap();
@@ -283,7 +308,7 @@ async fn race_tasks(
                                 // let deciphered = &deciph[1..];
                                 // println!("received a regular message: {:?}", deciphered);
                                 if let Ok(message) = bytes_to_message(deciph) {
-                                    // println!("decode OK: {:?}", message);
+                                    // eprintln!("decode OK: {:?}", message);
                                     let _send_result = sender.send(message);
                                     if _send_result.is_err() {
                                         // TODO: if failed maybe we are no longer interested?
@@ -303,6 +328,7 @@ async fn race_tasks(
                                         // let n_req = bytes_to_neighbor_request(&deciph[2..]);
                                         let n_req = bytes_to_neighbor_request(deciph);
                                         let message = CastMessage::new_request(n_req);
+                                        // eprintln!("Decr req: {:?}", message);
                                         let _send_result = cast_sender.send(message);
                                         if _send_result.is_err() {
                                             eprintln!("Unable to pass NeighborRequest to gnome");
@@ -313,14 +339,19 @@ async fn race_tasks(
                                         deciph.drain(0..2);
                                         let n_resp = bytes_to_neighbor_response(deciph);
                                         let message = CastMessage::new_response(n_resp);
+                                        // eprintln!("Decr resp: {:?}", message);
+                                        // eprintln!("Socket sending {:?} up…", message.content);
                                         let _send_result = cast_sender.send(message);
                                         if _send_result.is_err() {
-                                            eprintln!("Unable to pass NeighborResponseto gnome");
+                                            eprintln!(
+                                                "Unable to pass NeighborResponseto gnome: {}",
+                                                _send_result.err().unwrap()
+                                            );
                                         }
                                     }
                                     _ => {
                                         if let Ok(message) = bytes_to_cast_message(&deciph) {
-                                            // println!("decode OK: {:?}", message);
+                                            // eprintln!("Decr other: {:?}", message);
                                             let _send_result = cast_sender.send(message);
                                             if _send_result.is_err() {
                                                 // TODO: if failed maybe we are no longer interested?
@@ -334,7 +365,7 @@ async fn race_tasks(
                                 // } else {
                                 //     println!("Failed to decode incoming stream");
                             } else if let Ok(message) = bytes_to_cast_message(&deciph) {
-                                // println!("decode OK: {:?}", message);
+                                // eprintln!("Decr other2: {:?}", message);
                                 let _send_result = cast_sender.send(message);
                                 if _send_result.is_err() {
                                     // TODO: if failed maybe we are no longer interested?
@@ -348,34 +379,66 @@ async fn race_tasks(
                             }
                         } else {
                             eprintln!("Got a message on new channel...");
+                            // eprintln!("Defined channels count: {}", senders.len());
                             // TODO: maybe we should instantiate a new
                             // Neighbor for a new swarm?
                             // For this we need Sender<Subscription> ?
-                            deciph.drain(0..2);
-                            let neighbor_request = bytes_to_neighbor_request(deciph);
-                            // println!("NR: {:?}", neighbor_request);
-                            if let NeighborRequest::CreateNeighbor(remote_gnome_id, swarm_name) =
-                                neighbor_request
-                            {
-                                eprintln!("Create neighbor");
-                                let (s1, r1) = channel();
-                                let (s2, r2) = channel();
-                                let (s3, r3) = channel();
-                                let neighbor = Neighbor::from_id_channel_time(
-                                    remote_gnome_id,
-                                    r1,
-                                    r2,
-                                    s3,
-                                    shared_sender.clone(),
-                                    SwarmTime(0),
-                                    SwarmTime(7),
-                                    vec![],
-                                );
-                                let _ = shared_sender.send((swarm_name.clone(), s1, s2, r3));
 
-                                // TODO: we need to pass this neighbor up
-                                let _ = sub_sender
-                                    .send(Subscription::IncludeNeighbor(swarm_name, neighbor));
+                            // TODO: unmask it
+                            deciph.drain(0..1);
+                            let cast_id = CastID(deciph.drain(0..1).next().unwrap());
+                            let neighbor_request = bytes_to_neighbor_request(deciph);
+                            // eprintln!("NR: {:?}", neighbor_request);
+                            match neighbor_request {
+                                NeighborRequest::CreateNeighbor(remote_gnome_id, swarm_name) => {
+                                    // eprintln!(
+                                    //     "Create neighbor {} for {}",
+                                    //     remote_gnome_id, swarm_name
+                                    // );
+                                    new_channel_mappings.insert(swarm_id, swarm_name.clone());
+                                    let (s1, r1) = channel();
+                                    let (s2, r2) = channel();
+                                    let (s3, r3) = channel();
+                                    if let Some((id, msg)) = out_of_order_recvd.remove(&swarm_id) {
+                                        // for (id, msg) in msgs.into_iter() {
+                                        let _ = s2.send(CastMessage {
+                                            c_type: CastType::Unicast,
+                                            id,
+                                            content: CastContent::Request(msg),
+                                        });
+                                        // }
+                                    }
+                                    let neighbor = Neighbor::from_id_channel_time(
+                                        remote_gnome_id,
+                                        r1,
+                                        r2,
+                                        s3,
+                                        shared_sender.clone(),
+                                        SwarmTime(0),
+                                        SwarmTime(7),
+                                        vec![],
+                                    );
+                                    let _ = shared_sender.send((swarm_name.clone(), s1, s2, r3));
+
+                                    // TODO: we need to pass this neighbor up
+                                    // eprintln!(
+                                    //     "Socket requests add {} to {}",
+                                    //     neighbor.id, swarm_name
+                                    // );
+                                    let _ = sub_sender
+                                        .send(Subscription::IncludeNeighbor(swarm_name, neighbor));
+                                }
+                                other => {
+                                    //TODO: maybe store this message temporarily until we receive CreateNeighbor?
+                                    out_of_order_recvd.insert(swarm_id, (cast_id, other));
+                                    // .entry(swarm_id)
+                                    // .or_insert(vec![])
+                                    // .push((cast_id, other));
+                                    eprintln!(
+                                        "Unexpected Neighbor request received on new channel!"
+                                    );
+                                    eprintln!("Was expecting: NeighborRequest::CreateNeighbor");
+                                }
                             }
                         }
                     } else {
