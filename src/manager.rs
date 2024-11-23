@@ -368,11 +368,11 @@ impl Manager {
                 data: &mut Vec<u8>,
                 signature: &[u8],
             ) -> bool {
-                eprintln!("Verify time: {:?}", swarm_time);
+                // eprintln!("Verify time: {:?}", swarm_time);
                 // println!("PubKey DER: '{:?}' len: {}", key, key.len());
                 let res: std::result::Result<RsaPublicKey, rsa::pkcs1::Error> =
                     DecodeRsaPublicKey::from_pkcs1_der(key);
-                // println!("decode res: {:?}", res);
+                eprintln!("SwarmTime: {:?}", swarm_time);
                 // let res = DecodeRsaPublicKey::from_pkcs1_pem(&key[..key.len() - 4]);
                 // let pub_key: RsaPublicKey;
                 if let Ok(pub_key) = res {
@@ -393,7 +393,7 @@ impl Manager {
                         data.push(st_byte);
                     }
                     let mut result = verifier.verify(data, &signature_three);
-                    // println!("Ver res: {:?}", result);
+                    eprintln!("Ver res: {:?}", result);
 
                     // TODO: dirty hack to check against two more neighboring SwarmTimes
                     let mut last_byte = swarm_time.0 + 1;
@@ -410,7 +410,7 @@ impl Manager {
                             result = verifier.verify(data, &signature_three);
                         }
                     }
-                    // println!("Ver res 2: {:?}", result);
+                    eprintln!("Ver res 2: {:?}", result);
                     if result.is_err() {
                         data.pop();
                         data.pop();
@@ -421,7 +421,7 @@ impl Manager {
                         }
                         result = verifier.verify(data, &signature_three);
                     }
-                    // println!("verify: {:?}", result);
+                    eprintln!("verify: {:?}", result);
                     // Remove timestamp
                     data.pop();
                     data.pop();
