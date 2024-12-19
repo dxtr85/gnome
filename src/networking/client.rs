@@ -59,12 +59,16 @@ pub async fn run_client(
         }
         (socket, ("255.255.255.255".parse().unwrap(), 1026))
     };
+    // eprintln!("Predicted addr: {:?}", send_addr);
+    // eprintln!("Pubkey PEM: \n{}", pub_key_pem);
 
     let send_result = socket.send_to(pub_key_pem.as_bytes(), send_addr).await;
     if send_result.is_err() {
         eprintln!("Unable te send broadcast message: {:?}", send_result);
         return;
         // return receiver;
+    } else {
+        eprintln!("Send result: {:?}", send_result);
     }
 
     let timeout_sec = Duration::from_secs(5);
@@ -110,6 +114,7 @@ async fn establish_secure_connection(
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,
 ) {
+    // eprintln!("In establish secure connection {:?}", socket);
     let mut remote_gnome_id: GnomeId = GnomeId(0);
     let session_key: SessionKey; // = SessionKey::from_key(&[0; 32]);
     let remote_addr: SocketAddr; // = "0.0.0.0:0".parse().unwrap();
@@ -133,6 +138,7 @@ async fn establish_secure_connection(
     let recv_result = socket.recv_from(&mut recv_buf).await;
     if recv_result.is_ok() {
         (count, remote_addr) = recv_result.unwrap();
+        eprintln!("Got {} bytes back from: {:?}", count, remote_addr);
     } else {
         return;
     }

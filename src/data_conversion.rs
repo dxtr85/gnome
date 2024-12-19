@@ -517,7 +517,7 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, bytes: &mut Vec<u8>)
             put_u32(bytes, sync_response.swarm_time.0);
             put_u32(bytes, sync_response.round_start.0);
             bytes.push(sync_response.swarm_type.as_byte());
-            put_u64(bytes, sync_response.app_root_hash);
+            // put_u64(bytes, sync_response.app_root_hash);
             bytes.push(sync_response.key_reg_size);
             bytes.push(sync_response.capability_size);
             bytes.push(sync_response.policy_size);
@@ -619,7 +619,7 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, bytes: &mut Vec<u8>) {
             bytes.push(sync_req_params.sync_policy as u8);
             bytes.push(sync_req_params.sync_broadcast as u8);
             bytes.push(sync_req_params.sync_multicast as u8);
-            put_u64(bytes, sync_req_params.app_root_hash);
+            // put_u64(bytes, sync_req_params.app_root_hash);
         }
         NeighborRequest::SubscribeRequest(is_bcast, cast_id) => {
             bytes.push(249);
@@ -715,21 +715,21 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
             let sync_policy = bytes[data_idx + 3] > 0;
             let sync_broadcast = bytes[data_idx + 4] > 0;
             let sync_multicast = bytes[data_idx + 5] > 0;
-            let mut app_root_hash: u64 = ((bytes[data_idx + 6]) as u64) << 56;
-            app_root_hash += ((bytes[data_idx + 7]) as u64) << 48;
-            app_root_hash += ((bytes[data_idx + 8]) as u64) << 40;
-            app_root_hash += ((bytes[data_idx + 9]) as u64) << 32;
-            app_root_hash += ((bytes[data_idx + 10]) as u64) << 24;
-            app_root_hash += ((bytes[data_idx + 11]) as u64) << 16;
-            app_root_hash += ((bytes[data_idx + 12]) as u64) << 8;
-            app_root_hash += (bytes[data_idx + 13]) as u64;
+            // let mut app_root_hash: u64 = ((bytes[data_idx + 6]) as u64) << 56;
+            // app_root_hash += ((bytes[data_idx + 7]) as u64) << 48;
+            // app_root_hash += ((bytes[data_idx + 8]) as u64) << 40;
+            // app_root_hash += ((bytes[data_idx + 9]) as u64) << 32;
+            // app_root_hash += ((bytes[data_idx + 10]) as u64) << 24;
+            // app_root_hash += ((bytes[data_idx + 11]) as u64) << 16;
+            // app_root_hash += ((bytes[data_idx + 12]) as u64) << 8;
+            // app_root_hash += (bytes[data_idx + 13]) as u64;
             let sync_req_params = SwarmSyncRequestParams {
                 sync_key_reg,
                 sync_capability,
                 sync_policy,
                 sync_broadcast,
                 sync_multicast,
-                app_root_hash,
+                // app_root_hash,
             };
             NeighborRequest::SwarmSyncRequest(sync_req_params)
         }
@@ -852,24 +852,24 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
                 bytes[data_idx + 18],
             ]));
             let swarm_type = SwarmType::from(bytes[data_idx + 19]);
-            let app_root_hash = as_u64_be(&[
-                bytes[data_idx + 20],
-                bytes[data_idx + 21],
-                bytes[data_idx + 22],
-                bytes[data_idx + 23],
-                bytes[data_idx + 24],
-                bytes[data_idx + 25],
-                bytes[data_idx + 26],
-                bytes[data_idx + 27],
-            ]);
-            let key_reg_size = bytes[data_idx + 28];
-            let capability_size = bytes[data_idx + 29];
-            let policy_size = bytes[data_idx + 30];
-            let broadcast_size = bytes[data_idx + 31];
-            let multicast_size = bytes[data_idx + 32];
-            let more_key_reg_messages = bytes[data_idx + 33] != 0;
+            // let app_root_hash = as_u64_be(&[
+            //     bytes[data_idx + 20],
+            //     bytes[data_idx + 21],
+            //     bytes[data_idx + 22],
+            //     bytes[data_idx + 23],
+            //     bytes[data_idx + 24],
+            //     bytes[data_idx + 25],
+            //     bytes[data_idx + 26],
+            //     bytes[data_idx + 27],
+            // ]);
+            let key_reg_size = bytes[data_idx + 20];
+            let capability_size = bytes[data_idx + 21];
+            let policy_size = bytes[data_idx + 22];
+            let broadcast_size = bytes[data_idx + 23];
+            let multicast_size = bytes[data_idx + 24];
+            let more_key_reg_messages = bytes[data_idx + 25] != 0;
             let mut key_reg_pairs = vec![];
-            let mut idx = data_idx + 34;
+            let mut idx = data_idx + 26;
             while idx < bytes_len {
                 let mut g_vec = [0; 8];
                 for i in 0..8 {
@@ -888,7 +888,7 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
                 swarm_time,
                 round_start,
                 swarm_type,
-                app_root_hash,
+                // app_root_hash,
                 key_reg_size,
                 capability_size,
                 policy_size,

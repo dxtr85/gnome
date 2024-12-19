@@ -169,7 +169,7 @@ impl Manager {
         mut self,
         // req_receiver: Receiver<ToGnomeManager>,
         // resp_sender: Sender<FromGnomeManager>,
-        app_sync_hash: u64,
+        // app_sync_hash: u64,
     ) {
         // let min_sleep_nanos: u64 = 1 << 7;
         // let max_sleep_nanos: u64 = 1 << 27;
@@ -198,10 +198,10 @@ impl Manager {
                             }
                         } else {
                             eprintln!("No pairs found in neighboring swarms");
-                            eprintln!("Joining {}… with hash: {}", swarm_name, app_sync_hash);
+                            eprintln!("Joining {}… ", swarm_name,);
                         }
                         if let Ok((swarm_id, (user_req, user_res))) =
-                            self.join_a_swarm(swarm_name.clone(), app_sync_hash, None, None)
+                            self.join_a_swarm(swarm_name.clone(), None, None)
                         {
                             if !swarm_name.founder.is_any() {
                                 self.notify_other_swarms(swarm_id, swarm_name.clone());
@@ -348,15 +348,18 @@ impl Manager {
     pub fn join_a_swarm(
         &mut self,
         name: SwarmName,
-        app_sync_hash: u64,
-        neighbor_network_settings: Option<NetworkSettings>,
+        // app_sync_hash: u64,
+        neighbor_network_settings: Option<Vec<NetworkSettings>>,
         neighbors: Option<Vec<Neighbor>>,
     ) -> Result<(SwarmID, (Sender<ToGnome>, Receiver<GnomeToApp>)), String> {
         if let Some(swarm_id) = self.next_avail_swarm_id() {
             let (band_send, band_recv) = channel();
             let (net_settings_send, net_settings_recv) = channel();
             if let Some(neighbor_settings) = neighbor_network_settings {
-                let _ = net_settings_send.send(neighbor_settings);
+                eprintln!("Sending neighbor settings: {:?}", neighbor_settings);
+                for setting in neighbor_settings {
+                    let _ = net_settings_send.send(setting);
+                }
             }
             let mgr_sender = self.sender.clone();
             let (send, recv) = channel();
@@ -493,7 +496,7 @@ impl Manager {
             };
             let (sender, receiver) = Swarm::join(
                 name.clone(),
-                app_sync_hash,
+                // app_sync_hash,
                 swarm_id,
                 self.gnome_id,
                 self.pub_key_der.clone(),

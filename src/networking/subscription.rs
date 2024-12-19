@@ -43,6 +43,7 @@ pub async fn subscriber(
         match recv_result {
             Ok(notif_bundle) => {
                 // TODO: only one punching service for all swarms!
+                eprintln!("Received Bundle");
                 let _ = direct_punch_sender.send((
                     notif_bundle.swarm_name.clone(),
                     notif_bundle.request_sender.clone(),

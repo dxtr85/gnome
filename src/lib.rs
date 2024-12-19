@@ -3,6 +3,7 @@ use rsa::pkcs1::RsaPublicKey;
 use rsa::pkcs8::der::Decode;
 use std::fs::read_to_string;
 pub use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use swarm_consensus::GnomeId;
 use swarm_consensus::NetworkSettings;
@@ -47,7 +48,8 @@ pub mod prelude {
 
 pub fn init(
     work_dir: String,
-    app_sync_hash: u64,
+    neighbor_settings: Option<Vec<NetworkSettings>>,
+    // app_sync_hash: u64,
 ) -> (Sender<ToGnomeManager>, Receiver<FromGnomeManager>, GnomeId) {
     // ) {
     // println!("init start");
@@ -130,12 +132,16 @@ pub fn init(
         resp_sender.clone());
 
     // let app_sync_hash = 0; // TODO when we read data from disk we update app_sync_hash
+    // let ns = NetworkSettings::new_not_natted(IpAddr::V4(Ipv4Addr::new(100, 127, 65, 53)), 1026);
+    // let ns = NetworkSettings::new_not_natted(IpAddr::V4(Ipv4Addr::new(100, 112, 244, 78)), 1026);
+    // let neighbor_settings = Some(ns);
+    // let neighbor_settings = None;
     if let Ok((swarm_id, (user_req, user_res))) =
         // gmgr.join_a_swarm("trzat".to_string(), Some(neighbor_network_settings), None)
         gmgr.join_a_swarm(
             SwarmName::new(GnomeId::any(), "/".to_string()).unwrap(),
-            app_sync_hash,
-            None,
+            // app_sync_hash,
+            neighbor_settings,
             None,
         )
     {
@@ -196,7 +202,7 @@ pub fn init(
     //       of total bandwith available.
     //       If we are between min and min_off we can stay in this configuration.
     //
-    spawn(gmgr.do_your_job(app_sync_hash));
+    spawn(gmgr.do_your_job());
     (req_sender, resp_receiver, gnome_id)
 }
 

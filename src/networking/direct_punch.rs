@@ -25,7 +25,7 @@ pub async fn direct_punching_service(
     swarm_endpoints_receiver: Receiver<(SwarmName, Sender<ToGnome>, Receiver<NetworkSettings>)>,
     pub_key_pem: String,
 ) {
-    println!("Waiting for direct connect requests.");
+    eprintln!("Waiting for direct connect requests.");
 
     // TODO: here we need to write a new procedure.
     // It all depends on NAT and port assignment rule,
@@ -79,6 +79,7 @@ pub async fn direct_punching_service(
         // print!("dps");
         if let Ok((swarm_name, to_gnome_sender, net_set_recv)) = swarm_endpoints_receiver.try_recv()
         {
+            eprintln!("DPunch received channels for {}", swarm_name);
             swarms.insert(swarm_name, (to_gnome_sender, net_set_recv));
         }
         if !waiting_for_my_settings {
@@ -86,8 +87,9 @@ pub async fn direct_punching_service(
                 let settings_result = net_set_recv.try_recv();
                 // match settings_result {
                 if let Ok(other_settings) = settings_result {
+                    // eprintln!("Got some other settings");
                     let _ = send_other_network_settings.send((swarm_name.clone(), other_settings));
-                    println!("His: {:?}", other_settings);
+                    eprintln!("His: {:?}", other_settings);
                     waiting_for_my_settings = true;
                     send_to_gnome = Some(to_gnome_sender.clone());
                 }
@@ -154,7 +156,7 @@ async fn socket_maintainer(
                 swarm_names.push(swarm_name.clone());
             }
             // TODO: discover with stun server
-            println!("recvd other!");
+            eprintln!("recvd other!");
             let _ = my_network_settings_sender.send(my_settings);
             // swarm_names.sort();
             spawn(punch_and_communicate(
@@ -183,14 +185,14 @@ async fn update_my_pub_addr(
         let new_ip = our_addr.ip();
         let new_port = our_addr.port();
         if new_ip != my_settings.pub_ip {
-            println!(
+            eprintln!(
                 "My pub IP has changed from {:?} to {:?}",
                 my_settings.pub_ip, new_ip
             );
             my_settings.pub_ip = new_ip;
         }
         if new_port != my_settings.pub_port {
-            println!(
+            eprintln!(
                 "My pub port has changed from {:?} to {:?}",
                 my_settings.pub_port, new_port
             );
@@ -212,7 +214,7 @@ async fn punch_and_communicate(
     (my_settings, other_settings): (NetworkSettings, NetworkSettings),
 ) {
     if other_settings.no_nat() {
-        println!("DP Case 0 - there is no NAT");
+        eprintln!("DP Case 0 - there is no NAT for {:?}", other_settings);
         run_client(
             swarm_names.clone(),
             sub_sender,

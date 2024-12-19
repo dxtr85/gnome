@@ -104,7 +104,7 @@ pub async fn run_networking_tasks(
     // 2. We also always need to run_client and try to run_server.
     // 2. We need te establish if we have a public_ip.
 
-    // TODO: Uncomment it later
+    // TODO: if we are NOT behind a NAT what do we do with Neighbor's NetworkSettings?
     // let behind_nat_result = are_we_behind_a_nat(
     //     &UdpSocket::bind(SocketAddr::new("0.0.0.0".parse().unwrap(), 0))
     //         .await
@@ -119,25 +119,25 @@ pub async fn run_networking_tasks(
     // } else {
     //     we_are_behind_nat = true;
     // }
-    // // 3. a) If we are not behind a NAT then we are done.
-    // //    b) Other way we are behind a NAT.
+    // 3. a) If we are not behind a NAT then we are done - no, we are not!!!
+    //    b) Other way we are behind a NAT.
     // if we_are_behind_nat {
-    //     // In case we are behind a NAT we need to run direct_punch and holepunch
-    //     // Both of those services need a sophisticated procedure for connection establishment.
-    //     spawn(direct_punching_service(
-    //         // host_ip,
-    //         sub_send_two.clone(),
-    //         // req_sender.clone(),
-    //         // resp_receiver,
-    //         decrypter.clone(),
-    //         token_pipes_sender.clone(),
-    //         recv_pair,
-    //         // receiver,
-    //         pub_key_pem.clone(),
-    //         // swarm_name.clone(),
-    //         // net_set_recv,
-    //         // None,
-    //     ));
+    // In case we are behind a NAT we need to run direct_punch and holepunch
+    // Both of those services need a sophisticated procedure for connection establishment.
+    spawn(direct_punching_service(
+        // host_ip,
+        sub_send_two.clone(),
+        // req_sender.clone(),
+        // resp_receiver,
+        decrypter.clone(),
+        token_pipes_sender.clone(),
+        recv_pair,
+        // receiver,
+        pub_key_pem.clone(),
+        // swarm_name.clone(),
+        // net_set_recv,
+        // None,
+    ));
     //     // let puncher = "tudbut.de:4277";
     //     let puncher = SocketAddr::new("217.160.249.125".parse().unwrap(), 4277);
     //     spawn(holepunch(
