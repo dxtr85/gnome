@@ -9,6 +9,7 @@ use crate::networking::common::receive_remote_swarm_names;
 use crate::networking::common::send_subscribed_swarm_names;
 use crate::networking::common::time_out;
 use crate::networking::subscription::Subscription;
+use crate::networking::tcp_client::run_tcp_client;
 use async_std::net::UdpSocket;
 use async_std::task::spawn;
 use futures::{
@@ -38,8 +39,10 @@ pub async fn run_client(
     // Fourth make socket connect to new address
     // Then move previous points out from this function
     //     so that in operates on dedicated socket it receives as argument
-    eprintln!("SKT CLIENT");
+    eprintln!("SKT CLIENT {:?}", target_host);
+    let mut tcp_addr = None;
     let (socket, send_addr) = if let Some((sock, net_set)) = target_host {
+        tcp_addr = Some(net_set.get_predicted_addr(0));
         (sock, net_set.get_predicted_addr(0))
     } else {
         // let result = UdpSocket::bind(SocketAddr::new(host_ip, 0)).await;
@@ -91,7 +94,19 @@ pub async fn run_client(
         )
         .await;
     }
-    eprintln!("Client is done");
+    eprintln!(" TCP ADDR: {:?} {:?}", tcp_addr, swarm_names);
+    if let Some(addr) = tcp_addr {
+        run_tcp_client(
+            swarm_names,
+            sender,
+            decrypter,
+            pipes_sender,
+            pub_key_pem,
+            addr,
+        )
+        .await
+    }
+    // eprintln!("Client is done");
     // receiver
 }
 

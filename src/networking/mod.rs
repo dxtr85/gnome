@@ -8,6 +8,8 @@ mod server;
 mod sock;
 mod stun;
 mod subscription;
+mod tcp_client;
+mod tcp_server;
 mod token;
 use self::client::run_client;
 use self::common::are_we_behind_a_nat;
@@ -15,8 +17,10 @@ use self::holepunch::holepunch;
 use self::server::run_server;
 use self::sock::serve_socket;
 use self::subscription::subscriber;
+use self::tcp_server::run_tcp_server;
 use self::token::{token_dispenser, Token};
 use crate::crypto::Decrypter;
+use async_std::net::TcpListener;
 use async_std::net::UdpSocket;
 use async_std::task::spawn;
 use std::net::SocketAddr;
@@ -49,6 +53,7 @@ pub async fn run_networking_tasks(
 ) {
     let server_addr: SocketAddr = SocketAddr::new("0.0.0.0".parse().unwrap(), server_port);
     let bind_result = UdpSocket::bind(server_addr).await;
+    let tcp_bind_result = TcpListener::bind(server_addr).await;
     let (sub_send_one, mut sub_recv_one) = channel();
     let (sub_send_two, sub_recv_two) = channel();
     let (token_dispenser_send, token_dispenser_recv) = channel();
@@ -89,6 +94,20 @@ pub async fn run_networking_tasks(
         None,
     ));
     // .await;
+    if let Ok(listener) = tcp_bind_result {
+        let mut my_names = vec![];
+        sub_recv_one =
+            collect_subscribed_swarm_names(&mut my_names, sub_send_two.clone(), sub_recv_one).await;
+        eprintln!("Run TCP server with swarm names: {:?}", my_names);
+        spawn(run_tcp_server(
+            listener,
+            sub_send_two.clone(),
+            // sub_recv_one,
+            token_pipes_sender.clone(),
+            pub_key_pem.clone(),
+            my_names,
+        ));
+    }
     if let Ok(socket) = bind_result {
         spawn(run_server(
             socket,
@@ -99,6 +118,7 @@ pub async fn run_networking_tasks(
         ));
         // .await;
     };
+
     //TODO: We need to organize how and which networking services get started.
     // 1. We always need to run basic services like token_dispenser and subscriber.
     // 2. We also always need to run_client and try to run_server.
