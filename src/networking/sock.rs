@@ -1,11 +1,9 @@
+use super::common::read_bytes_from_local_stream;
 use crate::crypto::SessionKey;
 use crate::data_conversion::bytes_to_cast_message;
 use crate::data_conversion::bytes_to_message;
 use crate::data_conversion::bytes_to_neighbor_request;
 use crate::data_conversion::bytes_to_neighbor_response;
-use crate::data_conversion::message_to_bytes;
-use crate::data_conversion::neighbor_request_to_bytes;
-use crate::data_conversion::neighbor_response_to_bytes;
 use crate::networking::subscription::Subscription;
 use crate::networking::token::Token;
 use swarm_consensus::CastID;
@@ -48,85 +46,6 @@ async fn read_bytes_from_socket(
         eprintln!("SKTd{:?}", recv_result);
         Err("Disconnected".to_string())
     }
-}
-
-//TODO: drop receiver on error
-async fn read_bytes_from_local_stream(
-    receivers: &mut HashMap<u8, Receiver<WrappedMessage>>,
-) -> Result<Vec<u8>, String> {
-    // println!("read_bytes_from_local_stream");
-    let sleep_time = Duration::from_micros(100);
-    let mut to_drop = vec![];
-    loop {
-        for (id, receiver) in receivers.iter_mut() {
-            let next_option = receiver.try_recv();
-            if let Ok(message) = next_option {
-                // TODO: here we need to add a Datagram header
-                // indicating type of message and id
-                let mut dgram_header = *id;
-                match message {
-                    WrappedMessage::NoOp => return Ok(vec![]),
-                    WrappedMessage::Cast(c_msg) => {
-                        dgram_header += if c_msg.is_unicast() {
-                            64
-                        } else if c_msg.is_multicast() {
-                            128
-                        } else {
-                            192
-                        };
-                        // eprintln!("Sending cast over network: {:?}", c_msg);
-                        let c_id = c_msg.id();
-                        let mut merged_bytes = Vec::with_capacity(10);
-                        merged_bytes.push(dgram_header);
-                        merged_bytes.push(c_id.0);
-                        match c_msg.content {
-                            CastContent::Data(data) => {
-                                // let data = c_msg.get_data().unwrap();
-                                // for a_byte in data.bytes() {
-                                //     merged_bytes.push(a_byte);
-                                // }
-                                merged_bytes.append(&mut data.bytes());
-                            }
-                            CastContent::Request(n_req) => {
-                                neighbor_request_to_bytes(n_req, &mut merged_bytes);
-                            }
-                            CastContent::Response(n_resp) => {
-                                neighbor_response_to_bytes(n_resp, &mut merged_bytes);
-                            }
-                        }
-                        return Ok(merged_bytes);
-                    }
-                    WrappedMessage::Regular(message) => {
-                        let mut bytes = message_to_bytes(message);
-                        let mut merged_bytes = Vec::with_capacity(bytes.len() + 1);
-                        merged_bytes.push(dgram_header);
-                        merged_bytes.append(&mut bytes);
-                        return Ok(merged_bytes);
-                    }
-                }
-            } else {
-                let err = next_option.err().unwrap();
-                match err {
-                    std::sync::mpsc::TryRecvError::Disconnected => {
-                        to_drop.push(*id);
-                    }
-                    _other => {
-                        // eprintln!("Next option: {:?}", other);
-                    }
-                }
-            }
-        }
-        while let Some(id) = to_drop.pop() {
-            receivers.remove(&id);
-        }
-        if receivers.is_empty() {
-            eprintln!("End serving socket with no local receivers");
-            break;
-        }
-        task::sleep(sleep_time).await;
-    }
-    Err("No receivers".to_string())
-    // Err(ConnError::LocalStreamClosed)
 }
 
 // In order for sockets to collect tokens
@@ -506,9 +425,9 @@ async fn race_tasks(
         }
     }
 }
-struct TokenDispenser {
-    available_tokens: u64,
-    token_slots: [u64; 8],
+pub struct TokenDispenser {
+    pub available_tokens: u64,
+    pub token_slots: [u64; 8],
 }
 impl TokenDispenser {
     pub fn new(value: u64) -> Self {

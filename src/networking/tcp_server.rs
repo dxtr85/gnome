@@ -1,3 +1,4 @@
+use super::tcp_common::serve_socket;
 use super::Token;
 use crate::crypto::Encrypter;
 use crate::crypto::{generate_symmetric_key, SessionKey};
@@ -215,18 +216,17 @@ async fn prepare_and_serve(
     let _ = token_pipes_sender.send((token_send, token_recv_two));
     //TODO: serve connection
     eprintln!("Now it's time for work!");
-    // TODO: logic similar to that in race tasks, except we can run in parallel, without racing
-    // race_tasks(
-    //     session_key,
-    //     socket,
-    //     send_recv_pairs,
-    //     token_sender,
-    //     token_reciever,
-    //     sender,
-    //     shared_sender,
-    //     extend_receiver,
-    // )
-    // .await;
+    serve_socket(
+        session_key,
+        reader,
+        ch_pairs,
+        token_send_two,
+        token_recv,
+        sub_sender,
+        shared_sender,
+        swarm_extend_receiver,
+    )
+    .await;
 }
 
 async fn receive_remote_swarm_names(

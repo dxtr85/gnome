@@ -9,6 +9,7 @@ mod sock;
 mod stun;
 mod subscription;
 mod tcp_client;
+mod tcp_common;
 mod tcp_server;
 mod token;
 use self::client::run_client;

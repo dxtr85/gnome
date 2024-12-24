@@ -1,4 +1,4 @@
-use super::serve_socket;
+use super::tcp_common::serve_socket;
 use super::Token;
 use crate::crypto::Decrypter;
 use crate::crypto::Encrypter;
@@ -10,7 +10,6 @@ use crate::networking::subscription::Subscription;
 use async_std::io::ReadExt;
 use async_std::io::WriteExt;
 use async_std::net::TcpStream;
-use async_std::net::UdpSocket;
 use async_std::task::spawn;
 use futures::{
     future::FutureExt, // for `.fuse()`
@@ -18,12 +17,11 @@ use futures::{
     select,
 };
 use std::net::IpAddr;
-// use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
 use swarm_consensus::GnomeId;
-// use swarm_consensus::NetworkSettings;
 use swarm_consensus::SwarmName;
+use swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
 
 pub async fn run_tcp_client(
     swarm_names: Vec<SwarmName>,
@@ -76,18 +74,6 @@ pub async fn run_tcp_client(
     // receiver
 }
 
-async fn wait_for_bytes(socket: &UdpSocket) {
-    let mut recv_buf = [0u8; 1024];
-    loop {
-        let recv_result = socket.peek_from(&mut recv_buf).await;
-        if recv_result.is_ok() {
-            let (count, _remote_addr) = recv_result.unwrap();
-            if count > 1 {
-                break;
-            }
-        }
-    }
-}
 async fn establish_secure_connection(
     mut stream: TcpStream,
     sender: Sender<Subscription>,
@@ -130,11 +116,11 @@ async fn establish_secure_connection(
     // println!("Dec key: {:?}", decoded_key);
     // if let Ok((count, remote_adr)) = recv_result {
     //     remote_addr = remote_adr;
-    eprintln!("Received {} bytes 1", count);
+    // eprintln!("Received {} bytes 1", count);
     let decoded_key = decrypter.decrypt(&recv_buf[..count]);
 
     if let Ok(sym_key) = decoded_key {
-        eprintln!("Got session key: {:?}", sym_key);
+        // eprintln!("Got session key: {:?}", sym_key);
         session_key = SessionKey::from_key(&sym_key.try_into().unwrap());
     } else {
         eprintln!("Unable to decode key");
@@ -151,7 +137,7 @@ async fn establish_secure_connection(
     let mut recv_buf = [0u8; 1100];
     let recv_result = stream.read(&mut recv_buf).await;
     if let Ok(count) = recv_result {
-        eprintln!("Received {} bytes 2", count);
+        // eprintln!("Received {} bytes 2", count);
         let decr_res = session_key.decrypt(&recv_buf[..count]);
         if let Ok(remote_pubkey_pem) = decr_res {
             let remote_id_pub_key_pem =
@@ -200,8 +186,8 @@ pub async fn prepare_and_serve(
     }
 
     let mut common_names = vec![];
-    eprintln!("My swarm names: {:?}", swarm_names);
-    eprintln!("His swarm names: {:?}", remote_names);
+    // eprintln!("My swarm names: {:?}", swarm_names);
+    // eprintln!("His swarm names: {:?}", remote_names);
     distil_common_names(&mut common_names, swarm_names, &remote_names);
     if common_names.is_empty() {
         eprintln!("No common interests with {}", remote_gnome_id);
@@ -225,19 +211,17 @@ pub async fn prepare_and_serve(
     let (token_send, token_recv) = channel();
     let (token_send_two, token_recv_two) = channel();
     let _ = pipes_sender.send((token_send, token_recv_two));
-    // serve_socket(
-    //     session_key,
-    //     stream,
-    //     ch_pairs,
-    //     token_send_two,
-    //     token_recv,
-    //     sender,
-    //     shared_sender,
-    //     swarm_extend_receiver,
-    // )
-    // .await;
-    // TODO: serve TCP stream
-    eprintln!("TCP client is ready to serve!");
+    serve_socket(
+        session_key,
+        stream,
+        ch_pairs,
+        token_send_two,
+        token_recv,
+        sender,
+        shared_sender,
+        swarm_extend_receiver,
+    )
+    .await;
 }
 
 async fn receive_remote_swarm_names(

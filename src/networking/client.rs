@@ -77,13 +77,14 @@ pub async fn run_client(
     let timeout_sec = Duration::from_secs(5);
     let (t_send, timeout) = channel();
     spawn(time_out(timeout_sec, Some(t_send)));
-    while timeout.try_recv().is_err() {
+    let mut success = false;
+    while timeout.try_recv().is_err() && !success {
         if swarm_names.is_empty() {
             eprintln!("User is not subscribed to any Swarms");
             return;
             // return receiver;
         }
-        establish_secure_connection(
+        success = establish_secure_connection(
             &socket,
             sender.clone(),
             // req_sender.clone(),
@@ -94,7 +95,11 @@ pub async fn run_client(
         )
         .await;
     }
-    eprintln!(" TCP ADDR: {:?} {:?}", tcp_addr, swarm_names);
+    if success {
+        tcp_addr = None;
+    } else {
+        eprintln!(" TCP ADDR: {:?} {:?}", tcp_addr, swarm_names);
+    }
     if let Some(addr) = tcp_addr {
         run_tcp_client(
             swarm_names,
@@ -128,7 +133,7 @@ async fn establish_secure_connection(
     decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,
-) {
+) -> bool {
     // eprintln!("In establish secure connection {:?}", socket);
     let mut remote_gnome_id: GnomeId = GnomeId(0);
     let session_key: SessionKey; // = SessionKey::from_key(&[0; 32]);
@@ -148,14 +153,14 @@ async fn establish_secure_connection(
         _result2 = t2 => true,
     };
     if timed_out {
-        return;
+        return false;
     }
     let recv_result = socket.recv_from(&mut recv_buf).await;
     if recv_result.is_ok() {
         (count, remote_addr) = recv_result.unwrap();
         eprintln!("Got {} bytes back from: {:?}", count, remote_addr);
     } else {
-        return;
+        return false;
     }
 
     // let mut decoded_key: Option<[u8; 32]> = None;
@@ -193,7 +198,7 @@ async fn establish_secure_connection(
     } else {
         eprintln!("Unable to decode key");
         // return resp_receiver;
-        return;
+        return false;
     }
 
     let dedicated_socket = UdpSocket::bind(SocketAddr::new(socket.local_addr().unwrap().ip(), 0))
@@ -220,13 +225,14 @@ async fn establish_secure_connection(
                 // encr,
                 remote_id_pub_key_pem,
             ));
+            return true;
         } else {
             eprintln!("Failed to decrypt message");
-            return;
+            return false;
         }
     } else {
         eprintln!("Failed to receive data from remote");
-        return;
+        return false;
     }
 
     // return;

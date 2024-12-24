@@ -1,11 +1,16 @@
-use crate::crypto::Encrypter;
+use crate::data_conversion::message_to_bytes;
+use crate::data_conversion::neighbor_request_to_bytes;
+use crate::data_conversion::neighbor_response_to_bytes;
 use crate::networking::stun::{
     build_request, stun_decode, stun_send, StunChangeRequest, StunMessage,
 };
 use crate::networking::subscription::Subscription;
 use async_std::net::{IpAddr, Ipv4Addr, UdpSocket};
+use async_std::task;
 use async_std::task::{sleep, yield_now};
+use std::collections::HashMap;
 use swarm_consensus::SwarmName;
+use swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
 // use bytes::{BufMut, BytesMut};
 use futures::{
     future::FutureExt, // for `.fuse()`
@@ -16,10 +21,7 @@ use std::cmp::min;
 use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{
-    CastMessage, GnomeId, Message, Nat, Neighbor, NetworkSettings, PortAllocationRule, SwarmTime,
-    WrappedMessage,
-};
+use swarm_consensus::{GnomeId, Nat, NetworkSettings, PortAllocationRule};
 
 pub async fn collect_subscribed_swarm_names(
     names: &mut Vec<SwarmName>,
@@ -488,4 +490,86 @@ pub async fn discover_network_settings(socket: &mut UdpSocket) -> NetworkSetting
         eprintln!("Unable to tell if there is NAT: {:?}", behind_a_nat);
     }
     my_settings
+}
+
+//TODO: drop receiver on error
+pub async fn read_bytes_from_local_stream(
+    receivers: &mut HashMap<u8, Receiver<WrappedMessage>>,
+) -> Result<Vec<u8>, String> {
+    // println!("read_bytes_from_local_stream");
+    let sleep_time = Duration::from_micros(100);
+    let mut to_drop = vec![];
+    loop {
+        for (id, receiver) in receivers.iter_mut() {
+            let next_option = receiver.try_recv();
+            if let Ok(message) = next_option {
+                // TODO: here we need to add a Datagram header
+                // indicating type of message and id
+                let mut dgram_header = *id;
+                match message {
+                    WrappedMessage::NoOp => return Ok(vec![]),
+                    WrappedMessage::Cast(c_msg) => {
+                        dgram_header += if c_msg.is_unicast() {
+                            64
+                        } else if c_msg.is_multicast() {
+                            128
+                        } else {
+                            192
+                        };
+                        // eprintln!("Sending cast over network: {:?}", c_msg);
+                        let c_id = c_msg.id();
+                        let mut merged_bytes = Vec::with_capacity(10);
+                        merged_bytes.push(dgram_header);
+                        merged_bytes.push(c_id.0);
+                        match c_msg.content {
+                            CastContent::Data(data) => {
+                                // let data = c_msg.get_data().unwrap();
+                                // for a_byte in data.bytes() {
+                                //     merged_bytes.push(a_byte);
+                                // }
+                                merged_bytes.append(&mut data.bytes());
+                            }
+                            CastContent::Request(n_req) => {
+                                // eprint!("Request");
+                                neighbor_request_to_bytes(n_req, &mut merged_bytes);
+                            }
+                            CastContent::Response(n_resp) => {
+                                // eprint!("Response");
+                                neighbor_response_to_bytes(n_resp, &mut merged_bytes);
+                            }
+                        }
+                        // eprintln!(" constructed: {:?}", merged_bytes);
+                        return Ok(merged_bytes);
+                    }
+                    WrappedMessage::Regular(message) => {
+                        let mut bytes = message_to_bytes(message);
+                        let mut merged_bytes = Vec::with_capacity(bytes.len() + 1);
+                        merged_bytes.push(dgram_header);
+                        merged_bytes.append(&mut bytes);
+                        return Ok(merged_bytes);
+                    }
+                }
+            } else {
+                let err = next_option.err().unwrap();
+                match err {
+                    std::sync::mpsc::TryRecvError::Disconnected => {
+                        to_drop.push(*id);
+                    }
+                    _other => {
+                        // eprintln!("Next option: {:?}", other);
+                    }
+                }
+            }
+        }
+        while let Some(id) = to_drop.pop() {
+            receivers.remove(&id);
+        }
+        if receivers.is_empty() {
+            eprintln!("End serving socket with no local receivers");
+            break;
+        }
+        task::sleep(sleep_time).await;
+    }
+    Err("No receivers".to_string())
+    // Err(ConnError::LocalStreamClosed)
 }
