@@ -140,6 +140,7 @@ async fn establish_secure_connection(
     let encrypted_data = encr_res.unwrap();
     // let res = socket.send_to(&encrypted_data, remote_addr).await;
     let res = writer.write(&encrypted_data).await;
+    let _f_res = writer.flush().await;
     // let res = dedicated_socket.send_to(&encrypted_data, remote_addr).await;
     if res.is_err() {
         eprintln!("Failed to send encrypted symmetric key: {:?}", res);
@@ -166,6 +167,7 @@ async fn establish_secure_connection(
     let my_encrypted_pubkey = session_key.encrypt(pub_key_pem.as_bytes());
     // let res2 = dedicated_socket.send(&my_encrypted_pubkey).await;
     let res2 = writer.write(&my_encrypted_pubkey).await;
+    let _f_res2 = writer.flush().await;
     if res2.is_err() {
         eprintln!("Error sending encrypted pubkey response: {:?}", res2);
         return None;
@@ -269,6 +271,7 @@ pub async fn send_subscribed_swarm_names(
     // println!("After split: {:?}", &buf);
     // let send_result = socket.send_to(&bytes, remote_addr).await;
     let send_result = socket.write(&buf).await;
+    let _f_result = socket.flush().await;
     if let Ok(count) = send_result {
         eprintln!("SKT Sent {} bytes", count);
     }

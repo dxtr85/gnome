@@ -41,6 +41,7 @@ pub async fn run_tcp_client(
 
     // let send_result = socket.send_to(pub_key_pem.as_bytes(), send_addr).await;
     let send_result = stream.write(pub_key_pem.as_bytes()).await;
+    let _flush_result = stream.flush().await;
     if send_result.is_err() {
         eprintln!("Unable te send broadcast message: {:?}", send_result);
         return;
@@ -264,6 +265,7 @@ pub async fn send_subscribed_swarm_names(
     // println!("After split: {:?}", &buf);
     // let send_result = socket.send_to(&bytes, remote_addr).await;
     let send_result = socket.write(&buf).await;
+    let _flush_result = socket.flush().await;
     if let Ok(count) = send_result {
         eprintln!("SKT Sent {} bytes", count);
     }

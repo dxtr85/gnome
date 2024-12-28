@@ -79,6 +79,7 @@ pub async fn serve_socket(
     let mut token_dispenser = TokenDispenser::new(max_tokens);
     eprintln!("Max tokens: {}", max_tokens);
     let mut requested_tokens: u64 = 0;
+    let mut incomplete_msg: Option<(usize, Vec<u8>)> = None;
     loop {
         // print!("l");
         if let Ok((swarm_name, snd, cast_snd, recv)) = extend_receiver.try_recv() {
@@ -214,12 +215,37 @@ pub async fn serve_socket(
             // TODO: first two bytes always indicate the size of encrypted message,
             //       and take only this many following bytes to decrypt a message
             let mut encrypted_messages = vec![];
-            while let Some(b1) = b_iter.next() {
+            if let Some((missing_bytes, mut msg_bytes)) = incomplete_msg.take() {
+                // eprintln!("Some incomplete msg, missing size: {}", missing_bytes);
+                for i in 0..missing_bytes {
+                    if let Some(byte) = b_iter.next() {
+                        msg_bytes.push(byte);
+                    } else {
+                        incomplete_msg = Some((missing_bytes - i, msg_bytes.clone()));
+                        break;
+                    }
+                }
+                if incomplete_msg.is_some() {
+                    continue;
+                } else {
+                    // eprintln!("completed a partial message");
+                    encrypted_messages.push(msg_bytes);
+                }
+            }
+            'outer: while let Some(b1) = b_iter.next() {
                 let b2 = b_iter.next().unwrap();
                 let m_size = u16::from_be_bytes([b1, b2]) as usize;
+                // eprintln!("incoming size: {}", m_size);
                 let mut encrypted = Vec::with_capacity(m_size);
-                for _i in 0..m_size {
-                    encrypted.push(b_iter.next().unwrap());
+                for i in 0..m_size {
+                    if let Some(byte) = b_iter.next() {
+                        encrypted.push(byte);
+                    } else {
+                        // eprintln!("incomplete msg size: {}", m_size);
+                        incomplete_msg = Some((m_size - i, encrypted));
+                        // eprintln!("Built incomplete msg, missing size: {}", m_size - i);
+                        break 'outer;
+                    }
                 }
                 encrypted_messages.push(encrypted);
             }
@@ -405,6 +431,7 @@ pub async fn serve_socket(
             let mut ciphered = session_key.encrypt(&bytes);
             // eprintln!("{:?}", ciphered);
             let actual_len = ciphered.len();
+            // eprintln!("Encrypted {} bytes…", actual_len);
             let size_bytes = (actual_len as u16).to_be_bytes();
             let mut total_bytes = Vec::with_capacity(2 + actual_len);
             total_bytes.push(size_bytes[0]);
@@ -415,6 +442,7 @@ pub async fn serve_socket(
             let taken = token_dispenser.take(len);
             if taken == len {
                 let _send_result = stream.write(&total_bytes).await;
+                let _flush_result = stream.flush().await;
                 available_tokens = if len > available_tokens {
                     0
                 } else {
