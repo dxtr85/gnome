@@ -198,6 +198,9 @@ pub async fn serve_socket(
             if &_err == "No receivers" {
                 eprintln!("No receivers, terminating!");
                 break;
+            } else if from_socket {
+                eprintln!("Connection error, terminating!");
+                break;
             }
             // TODO: should end serving this socket
             for (sender, _c_snd) in senders.values() {
@@ -449,6 +452,7 @@ async fn read_bytes_from_remote(
         // let bytes: Vec<u8> = (count as u16).to_be_bytes().into_iter().collect();
         Ok(Vec::from(&buf[0..count]))
     } else {
+        eprintln!("TCP read error: {:?}", read_result.err().unwrap());
         Err(String::new())
     }
 }
