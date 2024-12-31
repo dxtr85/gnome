@@ -972,6 +972,7 @@ pub async fn start_communication(
     // }
     // let swarm_names = vec![swarm_name];
     spawn(prepare_and_serve(
+        gnome_id,
         dedicated_socket,
         // remote_gnome_id,
         session_key,

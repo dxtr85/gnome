@@ -21,9 +21,9 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
 use swarm_consensus::GnomeId;
 use swarm_consensus::SwarmName;
-use swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
 
 pub async fn run_tcp_client(
+    my_id: GnomeId,
     swarm_names: Vec<SwarmName>,
     sender: Sender<Subscription>,
     decrypter: Decrypter,
@@ -51,7 +51,7 @@ pub async fn run_tcp_client(
     }
 
     let timeout_sec = Duration::from_secs(5);
-    let (t_send, timeout) = channel();
+    let (t_send, _timeout) = channel();
     spawn(time_out(timeout_sec, Some(t_send)));
     // while timeout.try_recv().is_err() {
     if swarm_names.is_empty() {
@@ -61,6 +61,7 @@ pub async fn run_tcp_client(
     }
     eprintln!("TCP Client swarm_names: {:?}", swarm_names);
     establish_secure_connection(
+        my_id,
         stream.clone(),
         sender.clone(),
         // req_sender.clone(),
@@ -76,6 +77,7 @@ pub async fn run_tcp_client(
 }
 
 async fn establish_secure_connection(
+    my_id: GnomeId,
     mut stream: TcpStream,
     sender: Sender<Subscription>,
     decrypter: Decrypter,
@@ -83,7 +85,7 @@ async fn establish_secure_connection(
     swarm_names: Vec<SwarmName>,
 ) {
     eprintln!("In establish secure TCP connection ");
-    let mut remote_gnome_id: GnomeId = GnomeId(0);
+    // let mut remote_gnome_id: GnomeId = GnomeId(0);
     let session_key: SessionKey; // = SessionKey::from_key(&[0; 32]);
                                  // let remote_addr: SocketAddr; // = "0.0.0.0:0".parse().unwrap();
     let mut recv_buf = [0u8; 1100];
@@ -144,6 +146,7 @@ async fn establish_secure_connection(
             let remote_id_pub_key_pem =
                 std::str::from_utf8(&remote_pubkey_pem).unwrap().to_string();
             spawn(prepare_and_serve(
+                my_id,
                 stream,
                 // remote_gnome_id,
                 session_key,
@@ -155,15 +158,16 @@ async fn establish_secure_connection(
             ));
         } else {
             eprintln!("Failed to decrypt message");
-            return;
+            // return;
         }
     } else {
         eprintln!("Failed to receive data from remote");
-        return;
+        // return;
     }
 }
 
 pub async fn prepare_and_serve(
+    my_id: GnomeId,
     mut stream: TcpStream,
     // remote_gnome_id: GnomeId,
     session_key: SessionKey,
@@ -175,7 +179,7 @@ pub async fn prepare_and_serve(
 ) {
     let encr = Encrypter::create_from_data(&pub_key_pem).unwrap();
     let remote_gnome_id = GnomeId(encr.hash());
-    eprintln!("Remote GnomeId: {}", remote_gnome_id);
+    eprintln!("TCP client Remote GnomeId: {}", remote_gnome_id);
     // println!("Decrypted PEM using session key:\n {:?}", pub_key_pem);
     send_subscribed_swarm_names(&mut stream, &swarm_names).await;
 
@@ -184,17 +188,25 @@ pub async fn prepare_and_serve(
     if remote_names.is_empty() {
         eprintln!("Neighbor {} did not provide swarm list", remote_gnome_id);
         return;
+    } else {
+        eprintln!("TCP Client Remote names from bytes: {:?}", remote_names);
     }
 
     let mut common_names = vec![];
     // eprintln!("My swarm names: {:?}", swarm_names);
     // eprintln!("His swarm names: {:?}", remote_names);
-    distil_common_names(&mut common_names, swarm_names, &remote_names);
+    distil_common_names(
+        my_id,
+        remote_gnome_id,
+        &mut common_names,
+        swarm_names,
+        &mut remote_names,
+    );
     if common_names.is_empty() {
         eprintln!("No common interests with {}", remote_gnome_id);
         return;
     }
-    // eprintln!("Common swarm names: {:?}", common_names);
+    eprintln!("TCP Common swarm names: {:?}", common_names);
     let (shared_sender, swarm_extend_receiver) = channel();
 
     let mut ch_pairs = vec![];

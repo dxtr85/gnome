@@ -26,7 +26,8 @@ use async_std::net::UdpSocket;
 use async_std::task::spawn;
 use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver};
-use swarm_consensus::NotificationBundle;
+use subscription::Requestor;
+use swarm_consensus::{Notification, NotificationBundle};
 
 // #[derive(Debug)]
 // enum ConnError {
@@ -48,7 +49,7 @@ pub async fn run_networking_tasks(
     server_port: u16,
     buffer_size_bytes: u64,
     uplink_bandwith_bytes_sec: u64,
-    notification_receiver: Receiver<NotificationBundle>,
+    notification_receiver: Receiver<Notification>,
     decrypter: Decrypter,
     pub_key_pem: String,
 ) {
@@ -56,6 +57,7 @@ pub async fn run_networking_tasks(
     let bind_result = UdpSocket::bind(server_addr).await;
     let tcp_bind_result = TcpListener::bind(server_addr).await;
     let (sub_send_one, mut sub_recv_one) = channel();
+    let (sub_send_one_bis, mut sub_recv_one_bis) = channel();
     let (sub_send_two, sub_recv_two) = channel();
     let (token_dispenser_send, token_dispenser_recv) = channel();
     let (holepunch_sender, holepunch_receiver) = channel();
@@ -64,6 +66,7 @@ pub async fn run_networking_tasks(
     spawn(subscriber(
         // host_ip,
         sub_send_one,
+        sub_send_one_bis,
         // decrypter.clone(),
         // token_pipes_sender.clone(),
         // pub_key_pem.clone(),
@@ -83,8 +86,13 @@ pub async fn run_networking_tasks(
     ));
 
     let mut swarm_names = vec![];
-    sub_recv_one =
-        collect_subscribed_swarm_names(&mut swarm_names, sub_send_two.clone(), sub_recv_one).await;
+    sub_recv_one = collect_subscribed_swarm_names(
+        &mut swarm_names,
+        Requestor::Udp,
+        sub_send_two.clone(),
+        sub_recv_one,
+    )
+    .await;
     // swarm_names.sort();
     spawn(run_client(
         swarm_names,
@@ -96,17 +104,17 @@ pub async fn run_networking_tasks(
     ));
     // .await;
     if let Ok(listener) = tcp_bind_result {
-        let mut my_names = vec![];
-        sub_recv_one =
-            collect_subscribed_swarm_names(&mut my_names, sub_send_two.clone(), sub_recv_one).await;
-        eprintln!("Run TCP server with swarm names: {:?}", my_names);
+        // let mut my_names = vec![];
+        // sub_recv_one =
+        //     collect_subscribed_swarm_names(&mut my_names, sub_send_two.clone(), sub_recv_one).await;
+        // eprintln!("Run TCP server with swarm names: {:?}", my_names);
         spawn(run_tcp_server(
             listener,
             sub_send_two.clone(),
-            // sub_recv_one,
+            sub_recv_one_bis,
             token_pipes_sender.clone(),
             pub_key_pem.clone(),
-            my_names,
+            // my_names,
         ));
     }
     if let Ok(socket) = bind_result {
@@ -118,6 +126,8 @@ pub async fn run_networking_tasks(
             pub_key_pem.clone(),
         ));
         // .await;
+    } else {
+        eprintln!("Failed to bind socket: {:?}", bind_result.err().unwrap());
     };
 
     //TODO: We need to organize how and which networking services get started.

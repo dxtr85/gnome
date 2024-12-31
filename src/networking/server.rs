@@ -7,6 +7,7 @@ use crate::networking::common::create_a_neighbor_for_each_swarm;
 use crate::networking::common::distil_common_names;
 use crate::networking::common::receive_remote_swarm_names;
 use crate::networking::common::send_subscribed_swarm_names;
+use crate::networking::subscription::Requestor;
 use crate::networking::subscription::Subscription;
 use async_std::net::UdpSocket;
 use async_std::task::spawn;
@@ -47,15 +48,21 @@ pub async fn run_server(
             continue;
         }
         let (dedicated_socket, remote_pub_key_pem) = optional_sock.unwrap();
+        eprintln!("UDP server got a dedicated socket");
 
         let mut swarm_names = Vec::new();
-        sub_receiver =
-            collect_subscribed_swarm_names(&mut swarm_names, sub_sender.clone(), sub_receiver)
-                .await;
+        sub_receiver = collect_subscribed_swarm_names(
+            &mut swarm_names,
+            Requestor::Udp,
+            sub_sender.clone(),
+            sub_receiver,
+        )
+        .await;
 
         // swarm_names.sort();
         spawn(prepare_and_serve(
             dedicated_socket,
+            gnome_id,
             remote_gnome_id,
             session_key,
             sub_sender.clone(),
@@ -66,6 +73,7 @@ pub async fn run_server(
         ));
         eprintln!("--------------------------------------");
     }
+    // eprintln!("UDP server is done");
 }
 
 async fn establish_secure_connection(
@@ -151,7 +159,7 @@ async fn establish_secure_connection(
     eprintln!("Sent encrypted public key");
 
     *remote_gnome_id = GnomeId(encr.hash());
-    eprintln!("Remote GnomeId: {}", remote_gnome_id);
+    eprintln!("UDP Remote GnomeId: {}", remote_gnome_id);
     Some((dedicated_socket, id_pub_key_pem.to_string()))
 }
 
@@ -215,6 +223,7 @@ async fn establish_secure_connection(
 
 async fn prepare_and_serve(
     dedicated_socket: UdpSocket,
+    my_id: GnomeId,
     remote_gnome_id: GnomeId,
     session_key: SessionKey,
     sub_sender: Sender<Subscription>,
@@ -230,7 +239,13 @@ async fn prepare_and_serve(
     let mut common_names = vec![];
 
     send_subscribed_swarm_names(&dedicated_socket, &swarm_names).await;
-    distil_common_names(&mut common_names, swarm_names, &remote_names);
+    distil_common_names(
+        my_id,
+        remote_gnome_id,
+        &mut common_names,
+        swarm_names,
+        &mut remote_names,
+    );
 
     let (shared_sender, swarm_extend_receiver) = channel();
     let mut ch_pairs = vec![];

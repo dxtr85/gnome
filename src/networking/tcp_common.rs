@@ -4,7 +4,6 @@ use crate::data_conversion::bytes_to_cast_message;
 use crate::data_conversion::bytes_to_message;
 use crate::data_conversion::bytes_to_neighbor_request;
 use crate::data_conversion::bytes_to_neighbor_response;
-use aes_gcm::aead::Buffer;
 use async_std::io::ReadExt;
 use async_std::io::WriteExt;
 use async_std::task;
@@ -63,9 +62,9 @@ pub async fn serve_socket(
         senders.insert(i as u8, (sender, c_sender));
         receivers.insert(i as u8, receiver);
     }
-    let mut buf = [0u8; 1500];
-    let mut buf2 = [0u8; 1500];
-    let mut count: u16 = 0;
+    // let buf = [0u8; 1500];
+    // let mut buf2 = [0u8; 1500];
+    // let count: u16 = 0;
     // let mut buf2 = [0u8; 1];
     eprintln!("Waiting for initial tokens");
     task::sleep(Duration::from_millis(1)).await;
@@ -83,7 +82,7 @@ pub async fn serve_socket(
     loop {
         // print!("l");
         if let Ok((swarm_name, snd, cast_snd, recv)) = extend_receiver.try_recv() {
-            eprintln!("Extend req: {}", swarm_name);
+            eprintln!("TCP Extend req: {}", swarm_name);
             //TODO: extend senders and receivers, force send message
             // informing remote about new swarm neighbor
             let mut new_id = 255;
@@ -116,6 +115,16 @@ pub async fn serve_socket(
                         // let _send_result = socket.send(&ciphered).await;
                         break;
                     }
+                }
+            }
+            if let Some((id, msg)) = out_of_order_recvd.remove(&new_id) {
+                if let Some((_snd, c_snd)) = senders.get(&new_id) {
+                    eprintln!("TCP Sending delayed request: {:?}", msg);
+                    let _ = c_snd.send(CastMessage {
+                        c_type: CastType::Unicast,
+                        id,
+                        content: CastContent::Request(msg),
+                    });
                 }
             }
         }
@@ -354,7 +363,7 @@ pub async fn serve_socket(
                         eprintln!("Unable to decode message");
                     }
                 } else {
-                    eprintln!("Got a message on new channel...");
+                    eprintln!("TCP Got a message on new channel...");
                     // eprintln!("Defined channels count: {}", senders.len());
                     // TODO: maybe we should instantiate a new
                     // Neighbor for a new swarm?
@@ -364,13 +373,13 @@ pub async fn serve_socket(
                     deciph.drain(0..1);
                     let cast_id = CastID(deciph.drain(0..1).next().unwrap());
                     let neighbor_request = bytes_to_neighbor_request(deciph);
-                    // eprintln!("NR: {:?}", neighbor_request);
+                    eprintln!("NR: {:?}", neighbor_request);
                     match neighbor_request {
                         NeighborRequest::CreateNeighbor(remote_gnome_id, swarm_name) => {
-                            // eprintln!(
-                            //     "Create neighbor {} for {}",
-                            //     remote_gnome_id, swarm_name
-                            // );
+                            eprintln!(
+                                "TCP Create neighbor {} for {} {}",
+                                remote_gnome_id, swarm_id, swarm_name
+                            );
                             new_channel_mappings.insert(swarm_id, swarm_name.clone());
                             let (s1, r1) = channel();
                             let (s2, r2) = channel();
@@ -405,12 +414,15 @@ pub async fn serve_socket(
                                 .send(Subscription::IncludeNeighbor(swarm_name, neighbor));
                         }
                         other => {
+                            eprintln!(
+                                "TCP Unexpected Neighbor request for {:?} received on new channel!: {:?}",
+                                swarm_id,other
+                            );
                             //TODO: maybe store this message temporarily until we receive CreateNeighbor?
                             out_of_order_recvd.insert(swarm_id, (cast_id, other));
                             // .entry(swarm_id)
                             // .or_insert(vec![])
                             // .push((cast_id, other));
-                            eprintln!("Unexpected Neighbor request received on new channel!");
                             eprintln!("Was expecting: NeighborRequest::CreateNeighbor");
                         }
                     }
@@ -443,11 +455,12 @@ pub async fn serve_socket(
             if taken == len {
                 let _send_result = stream.write(&total_bytes).await;
                 let _flush_result = stream.flush().await;
-                available_tokens = if len > available_tokens {
-                    0
-                } else {
-                    available_tokens - len
-                };
+                // available_tokens = if len > available_tokens {
+                //     0
+                // } else {
+                //     available_tokens - len
+                // };
+                available_tokens = available_tokens.saturating_sub(len);
             } else {
                 eprintln!("Waiting for tokens...");
                 let _ = token_sender.send(Token::Request(2 * len));

@@ -2,9 +2,9 @@ use crate::crypto::Decrypter;
 use async_std::task::sleep;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::Duration;
-use swarm_consensus::NetworkSettings;
 use swarm_consensus::SwarmName;
 use swarm_consensus::SwarmTime;
+use swarm_consensus::{NetworkSettings, Notification};
 // use crate::gnome::NetworkSettings;
 // use crate::swarm::{Swarm, SwarmID};
 use crate::NotificationBundle;
@@ -48,7 +48,7 @@ pub struct Manager {
     neighboring_swarms: HashMap<SwarmName, Vec<(SwarmID, GnomeId)>>,
     name_to_id: HashMap<SwarmName, SwarmID>,
     network_settings: NetworkSettings,
-    to_networking: Sender<NotificationBundle>,
+    to_networking: Sender<Notification>,
     decrypter: Decrypter,
     req_receiver: Receiver<ToGnomeManager>,
     resp_sender: Sender<FromGnomeManager>,
@@ -106,7 +106,7 @@ impl Manager {
         pub_key_der: Vec<u8>,
         priv_key_pem: String,
         network_settings: Option<NetworkSettings>,
-        to_networking: Sender<NotificationBundle>,
+        to_networking: Sender<Notification>,
         decrypter: Decrypter,
         req_receiver: Receiver<ToGnomeManager>,
         resp_sender: Sender<FromGnomeManager>,
@@ -242,6 +242,20 @@ impl Manager {
                         .send(FromGnomeManager::SwarmFounderDetermined(
                             swarm_id, founder_id,
                         ));
+                    let mut g_name = SwarmName {
+                        founder: GnomeId::any(),
+                        name: "/".to_string(),
+                    };
+                    if let Some(e_id) = self.name_to_id.remove(&g_name) {
+                        if e_id == swarm_id {
+                            eprintln!("Updating existing name_to_id mapping");
+                            g_name.founder = founder_id;
+                        }
+                        self.name_to_id.insert(g_name, e_id);
+                    }
+                    let _ = self
+                        .to_networking
+                        .send(Notification::SetFounder(founder_id));
                 }
                 GnomeToManager::NeighboringSwarm(swarm_id, gnome_id, swarm_name) => {
                     eprintln!("Manager got info about a swarm: '{}'", swarm_name);
@@ -532,12 +546,14 @@ impl Manager {
         network_settings_receiver: Receiver<NetworkSettings>,
     ) {
         eprintln!("Notifying network about {}", swarm_name);
-        let r = self.to_networking.send(NotificationBundle {
-            swarm_name,
-            request_sender: sender,
-            token_sender: avail_bandwith_sender,
-            network_settings_receiver,
-        });
+        let r = self
+            .to_networking
+            .send(Notification::AddSwarm(NotificationBundle {
+                swarm_name,
+                request_sender: sender,
+                token_sender: avail_bandwith_sender,
+                network_settings_receiver,
+            }));
         // eprintln!("Network notified: {:?}", r);
     }
 

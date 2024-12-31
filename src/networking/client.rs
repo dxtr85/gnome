@@ -39,6 +39,8 @@ pub async fn run_client(
     // Fourth make socket connect to new address
     // Then move previous points out from this function
     //     so that in operates on dedicated socket it receives as argument
+    let encr = Encrypter::create_from_data(&pub_key_pem).unwrap();
+    let my_id = GnomeId(encr.hash());
     eprintln!("SKT CLIENT {:?}", target_host);
     let mut tcp_addr = None;
     let (socket, send_addr) = if let Some((sock, net_set)) = target_host {
@@ -71,7 +73,7 @@ pub async fn run_client(
         return;
         // return receiver;
     } else {
-        eprintln!("Send result: {:?}", send_result);
+        eprintln!("UDP Send result: {:?}", send_result);
     }
 
     let timeout_sec = Duration::from_secs(5);
@@ -85,6 +87,7 @@ pub async fn run_client(
             // return receiver;
         }
         success = establish_secure_connection(
+            my_id,
             &socket,
             sender.clone(),
             // req_sender.clone(),
@@ -95,6 +98,7 @@ pub async fn run_client(
         )
         .await;
     }
+    eprintln!("UDP connection success: {}", success);
     if success {
         tcp_addr = None;
     } else {
@@ -102,6 +106,7 @@ pub async fn run_client(
     }
     if let Some(addr) = tcp_addr {
         run_tcp_client(
+            my_id,
             swarm_names,
             sender,
             decrypter,
@@ -128,13 +133,14 @@ async fn wait_for_bytes(socket: &UdpSocket) {
     }
 }
 async fn establish_secure_connection(
+    my_id: GnomeId,
     socket: &UdpSocket,
     sender: Sender<Subscription>,
     decrypter: Decrypter,
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,
 ) -> bool {
-    // eprintln!("In establish secure connection {:?}", socket);
+    eprintln!("UDP Client trying to establish secure connection");
     let mut remote_gnome_id: GnomeId = GnomeId(0);
     let session_key: SessionKey; // = SessionKey::from_key(&[0; 32]);
     let remote_addr: SocketAddr; // = "0.0.0.0:0".parse().unwrap();
@@ -158,45 +164,19 @@ async fn establish_secure_connection(
     let recv_result = socket.recv_from(&mut recv_buf).await;
     if recv_result.is_ok() {
         (count, remote_addr) = recv_result.unwrap();
-        eprintln!("Got {} bytes back from: {:?}", count, remote_addr);
+        // eprintln!("UDP Got {} bytes back from: {:?}", count, remote_addr);
     } else {
+        eprintln!("UDP Failed to retrieve bytes from remote");
         return false;
     }
 
-    // let mut decoded_key: Option<[u8; 32]> = None;
-    // println!("Dec key: {:?}", decoded_key);
-    // if let Ok((count, remote_adr)) = recv_result {
-    //     remote_addr = remote_adr;
-    eprintln!("Received {} bytes", count);
+    eprintln!("UDP Received {} bytes", count);
     let decoded_key = decrypter.decrypt(&recv_buf[..count]);
-
-    // let _res = req_sender.send(Vec::from(&recv_buf[..count]));
-    // println!("Sent decode request: {:?}", _res);
-    // loop {
-    //     let response = resp_receiver.try_recv();
-    //     if let Ok(symmetric_key) = response {
-    //         // match subs_resp {
-    //         //     Subscription::KeyDecoded(symmetric_key) => {
-    //         //         // decoded_port = port;
-    //         decoded_key = Some(symmetric_key);
-    //         break;
-    //         //     }
-    //         //     Subscription::DecodeFailure => {
-    //         //         println!("Failed decoding symmetric key!");
-    //         //         break;
-    //         //     }
-    //         //     _ => println!("Unexpected message: {:?}", subs_resp),
-    //         // }
-    //     } else {
-    //         // println!("rec: {:?}", response);
-    //     }
-    //     yield_now().await
-    // }
     if let Ok(sym_key) = decoded_key {
         // println!("Got session key: {:?}", sym_key);
         session_key = SessionKey::from_key(&sym_key.try_into().unwrap());
     } else {
-        eprintln!("Unable to decode key");
+        eprintln!("UDP Unable to decode key");
         // return resp_receiver;
         return false;
     }
@@ -210,12 +190,13 @@ async fn establish_secure_connection(
     let mut recv_buf = [0u8; 1100];
     let recv_result = dedicated_socket.recv(&mut recv_buf).await;
     if let Ok(count) = recv_result {
-        eprintln!("Received {} bytes", count);
+        eprintln!("UDP Received {} bytes", count);
         let decr_res = session_key.decrypt(&recv_buf[..count]);
         if let Ok(remote_pubkey_pem) = decr_res {
             let remote_id_pub_key_pem =
                 std::str::from_utf8(&remote_pubkey_pem).unwrap().to_string();
             spawn(prepare_and_serve(
+                my_id,
                 dedicated_socket,
                 // remote_gnome_id,
                 session_key,
@@ -227,11 +208,11 @@ async fn establish_secure_connection(
             ));
             return true;
         } else {
-            eprintln!("Failed to decrypt message");
+            eprintln!("UDP Failed to decrypt message");
             return false;
         }
     } else {
-        eprintln!("Failed to receive data from remote");
+        eprintln!("UDP Failed to receive data from remote");
         return false;
     }
 
@@ -291,6 +272,7 @@ async fn establish_secure_connection(
 // }
 
 pub async fn prepare_and_serve(
+    my_id: GnomeId,
     dedicated_socket: UdpSocket,
     // remote_gnome_id: GnomeId,
     session_key: SessionKey,
@@ -302,21 +284,30 @@ pub async fn prepare_and_serve(
 ) {
     let encr = Encrypter::create_from_data(&pub_key_pem).unwrap();
     let remote_gnome_id = GnomeId(encr.hash());
-    eprintln!("Remote GnomeId: {}", remote_gnome_id);
+    eprintln!("UDP client Remote GnomeId: {}", remote_gnome_id);
     // println!("Decrypted PEM using session key:\n {:?}", pub_key_pem);
     send_subscribed_swarm_names(&dedicated_socket, &swarm_names).await;
 
     let mut remote_names: Vec<SwarmName> = vec![];
     receive_remote_swarm_names(&dedicated_socket, &mut remote_names).await;
     if remote_names.is_empty() {
-        eprintln!("Neighbor {} did not provide swarm list", remote_gnome_id);
+        eprintln!(
+            "UDP Neighbor {} did not provide swarm list",
+            remote_gnome_id
+        );
         return;
     }
 
     let mut common_names = vec![];
-    distil_common_names(&mut common_names, swarm_names, &remote_names);
+    distil_common_names(
+        my_id,
+        remote_gnome_id,
+        &mut common_names,
+        swarm_names,
+        &mut remote_names,
+    );
     if common_names.is_empty() {
-        eprintln!("No common interests with {}", remote_gnome_id);
+        eprintln!("UDP No common interests with {}", remote_gnome_id);
         return;
     }
     // eprintln!("Common swarm names: {:?}", common_names);

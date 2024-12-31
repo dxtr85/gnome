@@ -7,6 +7,7 @@ use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use swarm_consensus::GnomeId;
 use swarm_consensus::NetworkSettings;
+use swarm_consensus::Notification;
 use swarm_consensus::SwarmName;
 mod crypto;
 mod data_conversion;
@@ -214,7 +215,7 @@ pub fn create_manager_and_receiver(
     decrypter: Decrypter,
     req_receiver: Receiver<ToGnomeManager>,
     resp_sender: Sender<FromGnomeManager>,
-) -> (Manager, Receiver<NotificationBundle>) {
+) -> (Manager, Receiver<Notification>) {
     let (networking_sender, networking_receiver) = channel();
     // let network_settings = None;
     // let mgr = start(gnome_id, network_settings, networking_sender);

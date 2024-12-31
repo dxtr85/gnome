@@ -1,16 +1,25 @@
 // use crate::crypto::Decrypter;
 use async_std::task::sleep;
+use rsa::sha2::digest::HashMarker;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{Nat, Neighbor, NetworkSettings, NotificationBundle, SwarmName, ToGnome};
+use swarm_consensus::{
+    Nat, Neighbor, NetworkSettings, Notification, NotificationBundle, SwarmName, ToGnome,
+};
+
+#[derive(Debug)]
+pub enum Requestor {
+    Udp,
+    Tcp,
+}
 
 #[derive(Debug)]
 pub enum Subscription {
     Added(SwarmName),
     // Removed(String),
-    ProvideList,
+    ProvideList(Requestor),
     List(Vec<SwarmName>),
     IncludeNeighbor(SwarmName, Neighbor),
     Distribute(IpAddr, u16, Nat),
@@ -22,12 +31,13 @@ pub enum Subscription {
 pub async fn subscriber(
     // host_ip: IpAddr,
     sub_sender: Sender<Subscription>,
+    sub_sender_bis: Sender<Subscription>,
     // decrypter: Decrypter,
     // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     // pub_key_pem: String,
     sub_receiver: Receiver<Subscription>,
     // sub_sender_two: Sender<Subscription>,
-    notification_receiver: Receiver<NotificationBundle>,
+    notification_receiver: Receiver<Notification>,
     token_dispenser_send: Sender<Sender<u64>>,
     holepunch_sender: Sender<SwarmName>,
     direct_punch_sender: Sender<(SwarmName, Sender<ToGnome>, Receiver<NetworkSettings>)>,
@@ -37,32 +47,59 @@ pub async fn subscriber(
     eprintln!("Subscriber service started");
     let mut notify_holepunch = true;
     let sleep_time = Duration::from_millis(256);
+    // let mut pending_neighbors = HashMap::new();
     loop {
         // print!("sub");
         let recv_result = notification_receiver.try_recv();
         match recv_result {
-            Ok(notif_bundle) => {
-                // TODO: only one punching service for all swarms!
-                eprintln!("Received Bundle");
-                let _ = direct_punch_sender.send((
-                    notif_bundle.swarm_name.clone(),
-                    notif_bundle.request_sender.clone(),
-                    notif_bundle.network_settings_receiver,
-                ));
-                swarms.insert(notif_bundle.swarm_name.clone(), notif_bundle.request_sender);
-                names.push(notif_bundle.swarm_name.clone());
-                // TODO: inform existing sockets about new subscription
-                eprintln!("Added swarm in networking: {}", notif_bundle.swarm_name);
-                // TODO: serve err results
-                let _ = sub_sender.send(Subscription::Added(notif_bundle.swarm_name.clone()));
-                if notify_holepunch {
-                    let h_res = holepunch_sender.send(notif_bundle.swarm_name);
-                    if h_res.is_err() {
-                        notify_holepunch = false;
+            Ok(notif) => {
+                match notif {
+                    Notification::SetFounder(founder) => {
+                        eprintln!("NotiFounder: {}", founder);
+                        for name in &mut names {
+                            if name.founder.is_any() {
+                                eprintln!("Subscription setting founder to: {}", founder);
+                                name.founder = founder;
+                            }
+                        }
+                    }
+                    Notification::AddSwarm(notif_bundle) => {
+                        // TODO: only one punching service for all swarms!
+                        // TODO: find a way to update swarm_name once founder is determined
+                        eprintln!("Received Bundle for {:?}", notif_bundle.swarm_name);
+                        let _ = direct_punch_sender.send((
+                            notif_bundle.swarm_name.clone(),
+                            notif_bundle.request_sender.clone(),
+                            notif_bundle.network_settings_receiver,
+                        ));
+                        // if let Some(neighbors) = pending_neighbors.remove(&notif_bundle.swarm_name)
+                        // {
+                        //     eprintln!("Sending pending neighbors…");
+                        //     for neighbor in neighbors {
+                        //         let _ = notif_bundle
+                        //             .request_sender
+                        //             .send(ToGnome::AddNeighbor(neighbor));
+                        //     }
+                        // }
+                        swarms.insert(notif_bundle.swarm_name.clone(), notif_bundle.request_sender);
+                        names.push(notif_bundle.swarm_name.clone());
+                        // TODO: inform existing sockets about new subscription
+                        eprintln!("Added swarm in networking: {}", notif_bundle.swarm_name);
+                        // TODO: serve err results
+                        let _ =
+                            sub_sender.send(Subscription::Added(notif_bundle.swarm_name.clone()));
+                        let _ = sub_sender_bis
+                            .send(Subscription::Added(notif_bundle.swarm_name.clone()));
+                        if notify_holepunch {
+                            let h_res = holepunch_sender.send(notif_bundle.swarm_name);
+                            if h_res.is_err() {
+                                notify_holepunch = false;
+                            }
+                        }
+                        let _ = token_dispenser_send.send(notif_bundle.token_sender);
+                        // TODO: sockets should be able to respond if they want to join
                     }
                 }
-                let _ = token_dispenser_send.send(notif_bundle.token_sender);
-                // TODO: sockets should be able to respond if they want to join
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 eprintln!("Subscriber disconnected");
@@ -77,13 +114,30 @@ pub async fn subscriber(
                     if let Some(sender) = swarms.get(&swarm) {
                         eprintln!("Subscription req add {} to {}", neighbor.id, swarm);
                         let _ = sender.send(ToGnome::AddNeighbor(neighbor));
+                    } else if swarms.len() == 1 && swarms.keys().next().unwrap().founder.is_any() {
+                        eprintln!("Setting generic swarm founder to: {}", swarm.founder);
+                        // let key = swarms.keys().next().unwrap();
+                        let existing_sender = swarms.into_values().next().unwrap();
+                        let _ = existing_sender.send(ToGnome::SetFounder(swarm.founder));
+                        let _ = existing_sender.send(ToGnome::AddNeighbor(neighbor));
+                        swarms = HashMap::new();
+                        names = vec![swarm.clone()];
+                        swarms.insert(swarm, existing_sender.clone());
                     } else {
                         eprintln!("No sender for {} found", swarm);
+                        // pending_neighbors
+                        //     .entry(swarm)
+                        //     .or_insert(vec![])
+                        //     .push(neighbor);
                     }
                 }
-                Subscription::ProvideList => {
-                    // println!("sub sending: {:?}", names);
-                    let _ = sub_sender.send(Subscription::List(names.clone()));
+                Subscription::ProvideList(req) => {
+                    eprintln!("sub sending: {:?}", names);
+                    if matches!(req, Requestor::Udp) {
+                        let _ = sub_sender.send(Subscription::List(names.clone()));
+                    } else {
+                        let _ = sub_sender_bis.send(Subscription::List(names.clone()));
+                    }
                 }
                 Subscription::Distribute(ip, port, nat) => {
                     for sender in swarms.values() {

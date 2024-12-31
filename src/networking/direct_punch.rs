@@ -1,7 +1,7 @@
 // use super::common::are_we_behind_a_nat;
 use super::common::{are_we_behind_a_nat, discover_network_settings};
 use super::token::Token;
-use crate::crypto::Decrypter;
+use crate::crypto::{Decrypter, Encrypter};
 use crate::networking::holepunch::cluster_punch_it;
 use crate::networking::{
     client::run_client,
@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{NetworkSettings, SwarmName, ToGnome};
+use swarm_consensus::{GnomeId, NetworkSettings, SwarmName, ToGnome};
 
 pub async fn direct_punching_service(
     // host_ip: IpAddr,

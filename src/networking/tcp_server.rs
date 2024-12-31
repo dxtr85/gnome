@@ -2,10 +2,11 @@ use super::tcp_common::serve_socket;
 use super::Token;
 use crate::crypto::Encrypter;
 use crate::crypto::{generate_symmetric_key, SessionKey};
+use crate::networking::common::collect_subscribed_swarm_names;
 // use crate::networking::common::collect_subscribed_swarm_names;
 use crate::networking::common::create_a_neighbor_for_each_swarm;
 use crate::networking::common::distil_common_names;
-use crate::networking::subscription::Subscription;
+use crate::networking::subscription::{Requestor, Subscription};
 use async_std::io::{ReadExt, WriteExt};
 use async_std::net::{TcpListener, TcpStream};
 use async_std::stream::StreamExt;
@@ -18,19 +19,25 @@ use swarm_consensus::SwarmName;
 pub async fn run_tcp_server(
     listener: TcpListener,
     sub_sender: Sender<Subscription>,
-    // mut sub_receiver: Receiver<Subscription>,
+    mut sub_receiver: Receiver<Subscription>,
     token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     pub_key_pem: String,
-    swarm_names: Vec<SwarmName>,
+    // swarm_names: Vec<SwarmName>,
 ) {
     let mut incoming = listener.incoming();
     eprintln!("Server listening for TCP connections…");
     while let Some(stream) = incoming.next().await {
         if let Ok(stream) = stream {
             // TODO: sub_receiver
-            // sub_receiver =
-            //     collect_subscribed_swarm_names(&mut swarm_names, sub_sender.clone(), sub_receiver)
-            //         .await;
+            let mut swarm_names = vec![];
+            sub_receiver = collect_subscribed_swarm_names(
+                &mut swarm_names,
+                Requestor::Tcp,
+                sub_sender.clone(),
+                sub_receiver,
+            )
+            .await;
+            eprintln!("TCP server swarm_names: {:?}", swarm_names);
             spawn(serve_dedicated_connection(
                 stream,
                 pub_key_pem.clone(),
@@ -50,6 +57,8 @@ async fn serve_dedicated_connection(
     token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,
 ) {
+    let loc_encr = Encrypter::create_from_data(&pub_key_pem).unwrap();
+    let gnome_id = GnomeId(loc_encr.hash());
     let (mut reader, mut writer) = (stream.clone(), stream);
     eprintln!("Got reader: {:?} and writer: {:?}", reader, writer);
     // TODO: below is a copy from UDP, needs a rewrite for TcpStreams
@@ -71,12 +80,13 @@ async fn serve_dedicated_connection(
     }
     let remote_pub_key_pem = optional_sock.unwrap();
 
-    let swarm_names = vec![SwarmName::new(GnomeId::any(), "/".to_string()).unwrap()];
+    // let swarm_names = vec![SwarmName::new(GnomeId::any(), "/".to_string()).unwrap()];
 
     // swarm_names.sort();
     spawn(prepare_and_serve(
         reader,
         writer,
+        gnome_id,
         remote_gnome_id,
         session_key,
         sub_sender.clone(),
@@ -175,13 +185,14 @@ async fn establish_secure_connection(
     eprintln!("Sent encrypted public key");
 
     *remote_gnome_id = GnomeId(encr.hash());
-    eprintln!("Remote GnomeId: {}", remote_gnome_id);
+    eprintln!("TCP Remote GnomeId: {}", remote_gnome_id);
     Some(id_pub_key_pem.to_string())
 }
 
 async fn prepare_and_serve(
     mut reader: TcpStream,
     mut writer: TcpStream,
+    my_id: GnomeId,
     remote_gnome_id: GnomeId,
     session_key: SessionKey,
     sub_sender: Sender<Subscription>,
@@ -197,9 +208,15 @@ async fn prepare_and_serve(
     let mut common_names = vec![];
 
     send_subscribed_swarm_names(&mut writer, &swarm_names).await;
-    distil_common_names(&mut common_names, swarm_names, &remote_names);
+    distil_common_names(
+        my_id,
+        remote_gnome_id,
+        &mut common_names,
+        swarm_names,
+        &mut remote_names,
+    );
 
-    eprintln!("Common names: {:?}", common_names);
+    eprintln!("TCPS Common names: {:?}", common_names);
     let (shared_sender, swarm_extend_receiver) = channel();
     let mut ch_pairs = vec![];
     create_a_neighbor_for_each_swarm(

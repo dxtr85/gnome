@@ -8,6 +8,7 @@ use crate::networking::subscription::Subscription;
 use async_std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use async_std::task;
 use async_std::task::{sleep, yield_now};
+use futures::SinkExt;
 use std::collections::HashMap;
 use swarm_consensus::SwarmName;
 use swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
@@ -23,20 +24,23 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
 use swarm_consensus::{GnomeId, Nat, NetworkSettings, PortAllocationRule};
 
+use super::subscription::Requestor;
+
 pub async fn collect_subscribed_swarm_names(
     names: &mut Vec<SwarmName>,
+    requestor: Requestor,
     sender: Sender<Subscription>,
     receiver: Receiver<Subscription>,
 ) -> Receiver<Subscription> {
     // println!("Collecting swarm names...");
-    let _ = sender.send(Subscription::ProvideList);
+    let _ = sender.send(Subscription::ProvideList(requestor));
     let sleep_time = Duration::from_millis(128);
     loop {
         if let Ok(subs_msg) = receiver.try_recv() {
             // recv_result = Ok(recv_rslt);
             match subs_msg {
-                Subscription::Added(ref name) => {
-                    names.push(name.to_owned());
+                Subscription::Added(ref _name) => {
+                    // names.push(name.to_owned());
                     continue;
                 }
                 Subscription::List(ref nnames) => {
@@ -49,6 +53,7 @@ pub async fn collect_subscribed_swarm_names(
         // yield_now().await;
         sleep(sleep_time).await;
     }
+    eprintln!("Collected swarm names: {:?}", names);
     receiver
 }
 
@@ -76,18 +81,54 @@ pub async fn send_subscribed_swarm_names(
 }
 
 pub fn distil_common_names(
+    my_id: GnomeId,
+    nb_id: GnomeId,
     common_names: &mut Vec<SwarmName>,
-    names: Vec<SwarmName>,
-    remote_names: &Vec<SwarmName>,
+    my_names: Vec<SwarmName>,
+    remote_names: &mut Vec<SwarmName>,
 ) {
-    // eprintln!(
-    //     "Finding common from my:\n{:?}\n\nand his:\n{:?}",
-    //     names, remote_names
-    // );
-    for name in remote_names {
-        // let name = String::from_utf8(bts).unwrap();
-        if names.contains(&name) {
-            common_names.push(name.to_owned());
+    eprintln!("My: {},(>? {}) nb: {}, ", my_id, my_id > nb_id, nb_id);
+    eprintln!(
+        "Finding common from my:\n{:?}\n\nand his:\n{:?}",
+        my_names, remote_names
+    );
+    if remote_names.len() == 1 && remote_names[0].founder.is_any() {
+        if my_names.len() == 1 && my_names[0].founder.is_any() {
+            //TODO: most restrictive, only when initializing network
+            if my_id > nb_id {
+                common_names.push(SwarmName {
+                    founder: my_id,
+                    name: my_names[0].name.clone(),
+                });
+                remote_names[0].founder = my_id;
+            } else {
+                common_names.push(SwarmName {
+                    founder: nb_id,
+                    name: my_names[0].name.clone(),
+                });
+                remote_names[0].founder = nb_id;
+            }
+        } else {
+            //TODO: common, a neighber is joining existing network
+            common_names.push(SwarmName {
+                founder: my_id,
+                name: my_names[0].name.clone(),
+            });
+            remote_names[0].founder = my_id;
+        }
+    } else if my_names.len() == 1 && my_names[0].founder.is_any() {
+        //TODO: common, when I am joining existing network
+        common_names.push(SwarmName {
+            founder: nb_id,
+            name: my_names[0].name.clone(),
+        });
+    } else {
+        //TODO: common, when joining an old neighbor while already in network
+        for name in remote_names {
+            // let name = String::from_utf8(bts).unwrap();
+            if my_names.contains(name) {
+                common_names.push(name.to_owned());
+            }
         }
     }
 }
@@ -153,7 +194,7 @@ pub fn create_a_neighbor_for_each_swarm(
     // encrypter: Encrypter,
     pub_key_pem: String,
 ) {
-    // println!("Neighbor: {}", neighbor_id);
+    eprintln!("Neighbor member of swarms: {:?}", remote_names);
     // println!("komon names: {:?}", common_names);
     for name in common_names {
         let (s1, r1) = channel();

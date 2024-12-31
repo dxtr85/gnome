@@ -139,6 +139,16 @@ async fn race_tasks(
                     }
                 }
             }
+            if let Some((id, msg)) = out_of_order_recvd.remove(&new_id) {
+                if let Some((_snd, c_snd)) = senders.get(&new_id) {
+                    eprintln!("UDP Sending delayed request: {:?}", msg);
+                    let _ = c_snd.send(CastMessage {
+                        c_type: CastType::Unicast,
+                        id,
+                        content: CastContent::Request(msg),
+                    });
+                }
+            }
         }
         // TODO: a different approach to token provisioning:
         // we keep here a VecDeque containing always 8 u64 elements
