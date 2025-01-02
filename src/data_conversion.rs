@@ -663,7 +663,7 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
     match bytes[0] {
         255 => {
             // eprintln!("Reading SwarmNames gnome/data_conversion");
-            let swarm_name = SwarmName::from(bytes[data_idx + 1..bytes_len].to_vec()).unwrap();
+            let swarm_name = SwarmName::from(&bytes[data_idx + 1..bytes_len]).unwrap();
             NeighborRequest::SwarmJoinedInfo(swarm_name)
         }
         254 => {
@@ -686,7 +686,7 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
                 bytes[data_idx + 8],
             ]));
             // let swarm_name = String::from_utf8(bytes[data_idx + 9..bytes_len].to_vec()).unwrap();
-            let swarm_name = SwarmName::from(bytes[data_idx + 9..bytes_len].to_vec()).unwrap();
+            let swarm_name = SwarmName::from(&bytes[data_idx + 9..bytes_len]).unwrap();
             // eprintln!(
             //     "Reading SwarmNames gnome/data_conversion (CreateNeighbor for {})",
             //     swarm_name

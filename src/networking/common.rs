@@ -68,10 +68,8 @@ pub async fn send_subscribed_swarm_names(
         for a_byte in name.as_bytes() {
             buf.push(a_byte);
         }
-        // TODO split with some other value
-        buf.push(255);
     }
-    buf.pop();
+    // buf.pop();
     // println!("After split: {:?}", &buf);
     // let send_result = socket.send_to(&bytes, remote_addr).await;
     let send_result = socket.send(&buf).await;
@@ -132,6 +130,38 @@ pub fn distil_common_names(
         }
     }
 }
+pub fn swarm_names_from_bytes(recv_buf: &[u8]) -> Vec<SwarmName> {
+    let mut recvd_names = vec![];
+    let count = recv_buf.len();
+    let mut i = 0;
+    eprintln!("SNBytes#:{}", count);
+    while i < count - 1 {
+        let name_len = recv_buf[i];
+        if name_len < 128 {
+            let sn_res = SwarmName::from(&recv_buf[i..i + name_len as usize + 1]);
+            if let Ok(sn) = sn_res {
+                recvd_names.push(sn);
+            } else {
+                eprintln!(
+                    "Error building generic SwarmName: {:?}",
+                    sn_res.err().unwrap()
+                );
+            }
+            i += name_len as usize + 1;
+            eprintln!("i:{}", i)
+        } else {
+            let sn_res = SwarmName::from(&recv_buf[i..i + name_len as usize - 127]);
+            if let Ok(sn) = sn_res {
+                recvd_names.push(sn);
+            } else {
+                eprintln!("Error building SwarmName: {:?}", sn_res.err().unwrap());
+            }
+            i += name_len as usize - 127;
+            eprintln!("i2:{}", i)
+        }
+    }
+    recvd_names
+}
 
 pub async fn receive_remote_swarm_names(
     socket: &UdpSocket,
@@ -146,11 +176,12 @@ pub async fn receive_remote_swarm_names(
         //     &recv_buf[..count] // String::from_utf8(recv_buf[..count].try_into().unwrap()).unwrap()
         // );
         // eprintln!("Reading SwarmNames gnome/networking/common");
-        recv_buf[..count]
-            // TODO split by some reasonable delimiter
-            .split(|n| n == &255u8)
-            .map(|bts| SwarmName::from(bts.to_vec()).unwrap())
-            .collect()
+        // recv_buf[..count]
+        //     // TODO split by some reasonable delimiter
+        //     .split(|n| n == &255u8)
+        //     .map(|bts| SwarmName::from(bts.to_vec()).unwrap())
+        //     .collect()
+        swarm_names_from_bytes(&recv_buf[0..count])
     } else {
         Vec::new()
     };

@@ -1,3 +1,4 @@
+use super::common::swarm_names_from_bytes;
 use super::tcp_common::serve_socket;
 use super::Token;
 use crate::crypto::Encrypter;
@@ -7,6 +8,7 @@ use crate::networking::common::collect_subscribed_swarm_names;
 use crate::networking::common::create_a_neighbor_for_each_swarm;
 use crate::networking::common::distil_common_names;
 use crate::networking::subscription::{Requestor, Subscription};
+use crate::networking::tcp_common::send_subscribed_swarm_names;
 use async_std::io::{ReadExt, WriteExt};
 use async_std::net::{TcpListener, TcpStream};
 use async_std::stream::StreamExt;
@@ -248,48 +250,11 @@ async fn prepare_and_serve(
     .await;
 }
 
-async fn receive_remote_swarm_names(
-    reader: &mut TcpStream,
-    // recv_buf: &mut BytesMut,
-    remote_names: &mut Vec<SwarmName>,
-) {
+async fn receive_remote_swarm_names(reader: &mut TcpStream, remote_names: &mut Vec<SwarmName>) {
     let mut recv_buf = [0u8; 1024];
     *remote_names = if let Ok(count) = reader.read(&mut recv_buf).await {
-        // eprintln!(
-        //     "Recv buf (count: {}): {:?}",
-        //     count,
-        //     &recv_buf[..count] // String::from_utf8(recv_buf[..count].try_into().unwrap()).unwrap()
-        // );
-        // eprintln!("Reading SwarmNames gnome/networking/common");
-        recv_buf[..count]
-            // TODO split by some reasonable delimiter
-            .split(|n| n == &255u8)
-            .map(|bts| SwarmName::from(bts.to_vec()).unwrap())
-            .collect()
+        swarm_names_from_bytes(&recv_buf[0..count])
     } else {
         Vec::new()
     };
-}
-pub async fn send_subscribed_swarm_names(
-    socket: &mut TcpStream,
-    names: &Vec<SwarmName>,
-    // remote_addr: SocketAddr,
-) {
-    // let mut buf = BytesMut::with_capacity(1030);
-    let mut buf = Vec::new();
-    for name in names {
-        for a_byte in name.as_bytes() {
-            buf.push(a_byte);
-        }
-        // TODO split with some other value
-        buf.push(255);
-    }
-    buf.pop();
-    // println!("After split: {:?}", &buf);
-    // let send_result = socket.send_to(&bytes, remote_addr).await;
-    let send_result = socket.write(&buf).await;
-    let _f_result = socket.flush().await;
-    if let Ok(count) = send_result {
-        eprintln!("SKT Sent {} bytes", count);
-    }
 }

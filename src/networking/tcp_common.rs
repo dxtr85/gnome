@@ -497,9 +497,26 @@ async fn read_bytes_from_remote(
         Err(String::new())
     }
 }
-// async fn read_bytes_from_local(
-//     stream: &mut TcpStream,
-//     receivers: &mut HashMap<u8, Receiver<WrappedMessage>>,
-// ) -> Result<Vec<u8>, ()> {
-//     Ok(vec![0])
-// }
+pub async fn send_subscribed_swarm_names(
+    socket: &mut TcpStream,
+    names: &Vec<SwarmName>,
+    // remote_addr: SocketAddr,
+) {
+    // let mut buf = BytesMut::with_capacity(1030);
+    let mut buf = Vec::new();
+    for name in names {
+        for a_byte in name.as_bytes() {
+            buf.push(a_byte);
+        }
+        // TODO split with some other value
+        // buf.push(255);
+    }
+    // buf.pop();
+    // println!("After split: {:?}", &buf);
+    // let send_result = socket.send_to(&bytes, remote_addr).await;
+    let send_result = socket.write(&buf).await;
+    let _f_result = socket.flush().await;
+    if let Ok(count) = send_result {
+        eprintln!("SKT Sent {} bytes", count);
+    }
+}
