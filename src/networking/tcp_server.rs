@@ -30,6 +30,9 @@ pub async fn run_tcp_server(
     eprintln!("Server listening for TCP connections…");
     while let Some(stream) = incoming.next().await {
         if let Ok(stream) = stream {
+            if let Ok(peer_ip) = stream.peer_addr() {
+                eprintln!("TCP conn req from: {}", peer_ip);
+            }
             // TODO: sub_receiver
             let mut swarm_names = vec![];
             sub_receiver = collect_subscribed_swarm_names(

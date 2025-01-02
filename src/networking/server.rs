@@ -98,6 +98,7 @@ async fn establish_secure_connection(
             break;
         }
     }
+    eprintln!("UDP conn req from: {}", remote_addr);
     let id_pub_key_pem = std::str::from_utf8(&bytes[..count]).unwrap();
     if id_pub_key_pem == pub_key_pem {
         return None;

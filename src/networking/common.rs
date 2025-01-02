@@ -62,7 +62,7 @@ pub async fn send_subscribed_swarm_names(
     names: &Vec<SwarmName>,
     // remote_addr: SocketAddr,
 ) {
-    // let mut buf = BytesMut::with_capacity(1030);
+    // TODO: make sure total bytes count is below 1500 bytes
     let mut buf = Vec::new();
     for name in names {
         for a_byte in name.as_bytes() {
@@ -134,7 +134,7 @@ pub fn swarm_names_from_bytes(recv_buf: &[u8]) -> Vec<SwarmName> {
     let mut recvd_names = vec![];
     let count = recv_buf.len();
     let mut i = 0;
-    eprintln!("SNBytes#:{}", count);
+    // eprintln!("SNBytes#:{}", count);
     while i < count - 1 {
         let name_len = recv_buf[i];
         if name_len < 128 {
@@ -148,7 +148,7 @@ pub fn swarm_names_from_bytes(recv_buf: &[u8]) -> Vec<SwarmName> {
                 );
             }
             i += name_len as usize + 1;
-            eprintln!("i:{}", i)
+            // eprintln!("i:{}", i)
         } else {
             let sn_res = SwarmName::from(&recv_buf[i..i + name_len as usize - 127]);
             if let Ok(sn) = sn_res {
@@ -157,7 +157,7 @@ pub fn swarm_names_from_bytes(recv_buf: &[u8]) -> Vec<SwarmName> {
                 eprintln!("Error building SwarmName: {:?}", sn_res.err().unwrap());
             }
             i += name_len as usize - 127;
-            eprintln!("i2:{}", i)
+            // eprintln!("i2:{}", i)
         }
     }
     recvd_names

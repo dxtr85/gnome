@@ -502,7 +502,7 @@ pub async fn send_subscribed_swarm_names(
     names: &Vec<SwarmName>,
     // remote_addr: SocketAddr,
 ) {
-    // let mut buf = BytesMut::with_capacity(1030);
+    // TODO: make sure total bytes count is below 1500 bytes
     let mut buf = Vec::new();
     for name in names {
         for a_byte in name.as_bytes() {

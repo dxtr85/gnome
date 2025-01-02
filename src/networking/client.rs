@@ -68,43 +68,49 @@ pub async fn run_client(
     // eprintln!("Pubkey PEM: \n{}", pub_key_pem);
 
     let send_result = socket.send_to(pub_key_pem.as_bytes(), send_addr).await;
-    if send_result.is_err() {
-        eprintln!("Unable te send broadcast message: {:?}", send_result);
-        return;
+    let try_udp = if send_result.is_err() {
+        eprintln!("Unable to send datagram: {:?}", send_result);
+        false
         // return receiver;
     } else {
         eprintln!("UDP Send result: {:?}", send_result);
+        true
+    };
+
+    let mut success = false;
+    if try_udp {
+        eprintln!("Trying to communicate over UDP…");
+        let timeout_sec = Duration::from_secs(1);
+        let (t_send, timeout) = channel();
+        spawn(time_out(timeout_sec, Some(t_send)));
+        while timeout.try_recv().is_err() && !success {
+            if swarm_names.is_empty() {
+                eprintln!("User is not subscribed to any Swarms");
+                return;
+                // return receiver;
+            }
+            success = establish_secure_connection(
+                my_id,
+                &socket,
+                sender.clone(),
+                // req_sender.clone(),
+                // resp_receiver,
+                decrypter.clone(),
+                pipes_sender.clone(),
+                swarm_names.clone(),
+            )
+            .await;
+        }
+        eprintln!("UDP connection success: {}", success);
     }
 
-    let timeout_sec = Duration::from_secs(5);
-    let (t_send, timeout) = channel();
-    spawn(time_out(timeout_sec, Some(t_send)));
-    let mut success = false;
-    while timeout.try_recv().is_err() && !success {
-        if swarm_names.is_empty() {
-            eprintln!("User is not subscribed to any Swarms");
-            return;
-            // return receiver;
-        }
-        success = establish_secure_connection(
-            my_id,
-            &socket,
-            sender.clone(),
-            // req_sender.clone(),
-            // resp_receiver,
-            decrypter.clone(),
-            pipes_sender.clone(),
-            swarm_names.clone(),
-        )
-        .await;
-    }
-    eprintln!("UDP connection success: {}", success);
     if success {
         tcp_addr = None;
     } else {
         eprintln!(" TCP ADDR: {:?} {:?}", tcp_addr, swarm_names);
     }
     if let Some(addr) = tcp_addr {
+        eprintln!("Trying to communicate over TCP…");
         run_tcp_client(
             my_id,
             swarm_names,

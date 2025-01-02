@@ -156,7 +156,7 @@ async fn socket_maintainer(
                 swarm_names.push(swarm_name.clone());
             }
             // TODO: discover with stun server
-            eprintln!("recvd other!");
+            eprintln!("DP recvd other: {:?}", other_settings);
             let _ = my_network_settings_sender.send(my_settings);
             // swarm_names.sort();
             spawn(punch_and_communicate(
@@ -198,6 +198,8 @@ async fn update_my_pub_addr(
             );
             my_settings.pub_port = new_port;
         }
+    } else {
+        eprintln!("Failed to update my public IP");
     }
     my_settings
 }
