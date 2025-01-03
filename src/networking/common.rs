@@ -140,7 +140,7 @@ pub fn swarm_names_from_bytes(recv_buf: &[u8]) -> Vec<SwarmName> {
     let count = recv_buf.len();
     let mut i = 0;
     // eprintln!("SNBytes#:{}", count);
-    while i < count - 1 {
+    while i < count  {
         let name_len = recv_buf[i];
         if name_len < 128 {
             let sn_res = SwarmName::from(&recv_buf[i..i + name_len as usize + 1]);

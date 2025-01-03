@@ -48,7 +48,7 @@ pub mod prelude {
 }
 
 pub fn init(
-    work_dir: String,
+    work_dir: PathBuf,
     neighbor_settings: Option<Vec<NetworkSettings>>,
     // app_sync_hash: u64,
 ) -> (Sender<ToGnomeManager>, Receiver<FromGnomeManager>, GnomeId) {
