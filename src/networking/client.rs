@@ -41,7 +41,7 @@ pub async fn run_client(
     //     so that in operates on dedicated socket it receives as argument
     let encr = Encrypter::create_from_data(&pub_key_pem).unwrap();
     let my_id = GnomeId(encr.hash());
-    eprintln!("SKT CLIENT {:?}", target_host);
+    // eprintln!("SKT CLIENT {:?}", target_host);
     let mut tcp_addr = None;
     let (socket, send_addr) = if let Some((sock, net_set)) = target_host {
         tcp_addr = Some(net_set.get_predicted_addr(0));
@@ -73,7 +73,7 @@ pub async fn run_client(
         false
         // return receiver;
     } else {
-        eprintln!("UDP Send result: {:?}", send_result);
+        // eprintln!("UDP Send result: {:?}", send_result);
         true
     };
 
@@ -146,7 +146,7 @@ async fn establish_secure_connection(
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,
 ) -> bool {
-    eprintln!("UDP Client trying to establish secure connection");
+    // eprintln!("UDP Client trying to establish secure connection");
     let mut remote_gnome_id: GnomeId = GnomeId(0);
     let session_key: SessionKey; // = SessionKey::from_key(&[0; 32]);
     let remote_addr: SocketAddr; // = "0.0.0.0:0".parse().unwrap();

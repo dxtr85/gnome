@@ -1,4 +1,5 @@
 use super::common::read_bytes_from_local_stream;
+use super::common::swarm_names_as_bytes;
 use crate::crypto::SessionKey;
 use crate::data_conversion::bytes_to_cast_message;
 use crate::data_conversion::bytes_to_message;
@@ -497,26 +498,12 @@ async fn read_bytes_from_remote(
         Err(String::new())
     }
 }
-pub async fn send_subscribed_swarm_names(
-    socket: &mut TcpStream,
-    names: &Vec<SwarmName>,
-    // remote_addr: SocketAddr,
-) {
-    // TODO: make sure total bytes count is below 1500 bytes
-    let mut buf = Vec::new();
-    for name in names {
-        for a_byte in name.as_bytes() {
-            buf.push(a_byte);
-        }
-        // TODO split with some other value
-        // buf.push(255);
-    }
-    // buf.pop();
-    // println!("After split: {:?}", &buf);
-    // let send_result = socket.send_to(&bytes, remote_addr).await;
+
+pub async fn send_subscribed_swarm_names(socket: &mut TcpStream, names: &Vec<SwarmName>) {
+    let buf = swarm_names_as_bytes(names, 1450);
     let send_result = socket.write(&buf).await;
     let _f_result = socket.flush().await;
-    if let Ok(count) = send_result {
-        eprintln!("SKT Sent {} bytes", count);
-    }
+    // if let Ok(count) = send_result {
+    //     eprintln!("TCP Sent {} bytes", count);
+    // }
 }

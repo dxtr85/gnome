@@ -42,7 +42,7 @@ pub async fn run_tcp_server(
                 sub_receiver,
             )
             .await;
-            eprintln!("TCP server swarm_names: {:?}", swarm_names);
+            // eprintln!("TCP server swarm_names: {:?}", swarm_names);
             spawn(serve_dedicated_connection(
                 stream,
                 pub_key_pem.clone(),
@@ -65,7 +65,7 @@ async fn serve_dedicated_connection(
     let loc_encr = Encrypter::create_from_data(&pub_key_pem).unwrap();
     let gnome_id = GnomeId(loc_encr.hash());
     let (mut reader, mut writer) = (stream.clone(), stream);
-    eprintln!("Got reader: {:?} and writer: {:?}", reader, writer);
+    // eprintln!("Got reader: {:?} and writer: {:?}", reader, writer);
     // TODO: below is a copy from UDP, needs a rewrite for TcpStreams
     // since we are already connected it can be compressed into one fn and spawned
     let mut remote_gnome_id: GnomeId = GnomeId(0);
@@ -124,7 +124,18 @@ async fn establish_secure_connection(
     //     break;
     // }
     // }
-    let id_pub_key_pem = std::str::from_utf8(&bytes[..count]).unwrap();
+    eprintln!(
+        "TCP Server Received {} bytes:\n{:?}",
+        count,
+        &bytes[..count]
+    );
+    let to_str_res = std::str::from_utf8(&bytes[..count]);
+    if to_str_res.is_err() {
+        eprintln!("Unable to convert bytes to string");
+        return None;
+    }
+    let id_pub_key_pem = to_str_res.unwrap();
+    eprintln!("TCP Server decoded string: \n{}", id_pub_key_pem);
     if id_pub_key_pem == pub_key_pem {
         return None;
     }

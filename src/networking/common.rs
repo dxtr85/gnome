@@ -5,6 +5,7 @@ use crate::networking::stun::{
     build_request, stun_decode, stun_send, StunChangeRequest, StunMessage,
 };
 use crate::networking::subscription::Subscription;
+use aes_gcm::aead::Buffer;
 use async_std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use async_std::task;
 use async_std::task::{sleep, yield_now};
@@ -53,28 +54,32 @@ pub async fn collect_subscribed_swarm_names(
         // yield_now().await;
         sleep(sleep_time).await;
     }
-    eprintln!("Collected swarm names: {:?}", names);
+    // eprintln!("Collected swarm names: {:?}", names);
     receiver
 }
 
-pub async fn send_subscribed_swarm_names(
-    socket: &UdpSocket,
-    names: &Vec<SwarmName>,
-    // remote_addr: SocketAddr,
-) {
-    // TODO: make sure total bytes count is below 1500 bytes
-    let mut buf = Vec::new();
+pub fn swarm_names_as_bytes(names: &Vec<SwarmName>, limit: usize) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(limit);
+    let mut buf_size = 0;
     for name in names {
-        for a_byte in name.as_bytes() {
-            buf.push(a_byte);
+        let name_bytes = name.as_bytes();
+        let new_size = buf_size + name_bytes.len();
+        if new_size < limit {
+            for a_byte in name_bytes {
+                buf.push(a_byte);
+            }
+            buf_size = new_size;
+        } else {
+            break;
         }
     }
-    // buf.pop();
-    // println!("After split: {:?}", &buf);
-    // let send_result = socket.send_to(&bytes, remote_addr).await;
+    buf
+}
+pub async fn send_subscribed_swarm_names(socket: &UdpSocket, names: &Vec<SwarmName>) {
+    let buf = swarm_names_as_bytes(names, 1450);
     let send_result = socket.send(&buf).await;
     if let Ok(count) = send_result {
-        eprintln!("SKT Sent {} bytes", count);
+        eprintln!("UDP Sent {} bytes", count);
     }
 }
 
@@ -85,11 +90,11 @@ pub fn distil_common_names(
     my_names: Vec<SwarmName>,
     remote_names: &mut Vec<SwarmName>,
 ) {
-    eprintln!("My: {},(>? {}) nb: {}, ", my_id, my_id > nb_id, nb_id);
-    eprintln!(
-        "Finding common from my:\n{:?}\n\nand his:\n{:?}",
-        my_names, remote_names
-    );
+    // eprintln!("My: {},(>? {}) nb: {}, ", my_id, my_id > nb_id, nb_id);
+    // eprintln!(
+    //     "Finding common from my:\n{:?}\n\nand his:\n{:?}",
+    //     my_names, remote_names
+    // );
     if remote_names.len() == 1 && remote_names[0].founder.is_any() {
         if my_names.len() == 1 && my_names[0].founder.is_any() {
             //TODO: most restrictive, only when initializing network

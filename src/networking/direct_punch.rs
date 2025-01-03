@@ -79,7 +79,7 @@ pub async fn direct_punching_service(
         // print!("dps");
         if let Ok((swarm_name, to_gnome_sender, net_set_recv)) = swarm_endpoints_receiver.try_recv()
         {
-            eprintln!("DPunch received channels for {}", swarm_name);
+            // eprintln!("DPunch received channels for {}", swarm_name);
             swarms.insert(swarm_name, (to_gnome_sender, net_set_recv));
         }
         if !waiting_for_my_settings {
@@ -89,7 +89,7 @@ pub async fn direct_punching_service(
                 if let Ok(other_settings) = settings_result {
                     // eprintln!("Got some other settings");
                     let _ = send_other_network_settings.send((swarm_name.clone(), other_settings));
-                    eprintln!("His: {:?}", other_settings);
+                    // eprintln!("His: {:?}", other_settings);
                     waiting_for_my_settings = true;
                     send_to_gnome = Some(to_gnome_sender.clone());
                 }
@@ -97,7 +97,7 @@ pub async fn direct_punching_service(
         } else {
             let recv_result = recv_my_network_settings.try_recv();
             if let Ok(my_settings) = recv_result {
-                eprintln!("My: {:?}", my_settings);
+                // eprintln!("My: {:?}", my_settings);
                 let request = ToGnome::NetworkSettingsUpdate(
                     true,
                     my_settings.pub_ip,
@@ -156,7 +156,7 @@ async fn socket_maintainer(
                 swarm_names.push(swarm_name.clone());
             }
             // TODO: discover with stun server
-            eprintln!("DP recvd other: {:?}", other_settings);
+            // eprintln!("DP recvd other: {:?}", other_settings);
             let _ = my_network_settings_sender.send(my_settings);
             // swarm_names.sort();
             spawn(punch_and_communicate(
@@ -216,7 +216,7 @@ async fn punch_and_communicate(
     (my_settings, other_settings): (NetworkSettings, NetworkSettings),
 ) {
     if other_settings.no_nat() {
-        eprintln!("DP Case 0 - there is no NAT for {:?}", other_settings);
+        // eprintln!("DP Case 0 - there is no NAT for {:?}", other_settings);
         run_client(
             swarm_names.clone(),
             sub_sender,

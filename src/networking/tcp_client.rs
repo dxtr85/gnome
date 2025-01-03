@@ -33,7 +33,7 @@ pub async fn run_tcp_client(
     pub_key_pem: String,
     (ip, port): (IpAddr, u16),
 ) {
-    eprintln!("TCP CLIENT {:?}-{}", ip, port);
+    eprintln!("TCP CLIENT {:?}:{}", ip, port);
     let stream = TcpStream::connect((ip, port)).await;
     if stream.is_err() {
         eprintln!("Could not establish TCP connection with {:?}", (ip, port));
@@ -48,8 +48,8 @@ pub async fn run_tcp_client(
         eprintln!("Unable te send broadcast message: {:?}", send_result);
         return;
         // return receiver;
-    } else {
-        eprintln!("Send result: {:?}", send_result);
+        // } else {
+        //     eprintln!("Send result: {:?}", send_result);
     }
 
     let timeout_sec = Duration::from_secs(5);
@@ -61,7 +61,7 @@ pub async fn run_tcp_client(
         return;
         // return receiver;
     }
-    eprintln!("TCP Client swarm_names: {:?}", swarm_names);
+    // eprintln!("TCP Client swarm_names: {:?}", swarm_names);
     establish_secure_connection(
         my_id,
         stream.clone(),
@@ -74,7 +74,7 @@ pub async fn run_tcp_client(
     )
     .await;
     // }
-    eprintln!("Client is done");
+    // eprintln!("TCP Client is done");
     // receiver
 }
 
@@ -86,7 +86,7 @@ async fn establish_secure_connection(
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,
 ) {
-    eprintln!("In establish secure TCP connection ");
+    // eprintln!("In establish secure TCP connection ");
     // let mut remote_gnome_id: GnomeId = GnomeId(0);
     let session_key: SessionKey; // = SessionKey::from_key(&[0; 32]);
                                  // let remote_addr: SocketAddr; // = "0.0.0.0:0".parse().unwrap();
@@ -112,7 +112,7 @@ async fn establish_secure_connection(
     // let recv_result = stream.recv_from(&mut recv_buf).await;
     // if recv_result.is_ok() {
     // (count, remote_addr) = recv_result.unwrap();
-    eprintln!("Got {} bytes back", count);
+    // eprintln!("Got {} bytes back", count);
     // } else {
     //     return;
     // }
@@ -190,8 +190,8 @@ pub async fn prepare_and_serve(
     if remote_names.is_empty() {
         eprintln!("Neighbor {} did not provide swarm list", remote_gnome_id);
         return;
-    } else {
-        eprintln!("TCP Client Remote names from bytes: {:?}", remote_names);
+        // } else {
+        //     eprintln!("TCP Client Remote names from bytes: {:?}", remote_names);
     }
 
     let mut common_names = vec![];
@@ -208,7 +208,7 @@ pub async fn prepare_and_serve(
         eprintln!("No common interests with {}", remote_gnome_id);
         return;
     }
-    eprintln!("TCP Common swarm names: {:?}", common_names);
+    // eprintln!("TCP Common swarm names: {:?}", common_names);
     let (shared_sender, swarm_extend_receiver) = channel();
 
     let mut ch_pairs = vec![];
