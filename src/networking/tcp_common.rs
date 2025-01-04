@@ -6,9 +6,9 @@ use crate::data_conversion::bytes_to_message;
 use crate::data_conversion::bytes_to_neighbor_request;
 use crate::data_conversion::bytes_to_neighbor_response;
 use async_std::io::ReadExt;
-use async_std::io::WriteExt;
 use async_std::task;
 use core::panic;
+use futures::AsyncWriteExt;
 use futures::{
     future::FutureExt, // for `.fuse()`
     pin_mut,
@@ -208,9 +208,11 @@ pub async fn serve_socket(
             eprintln!("SRVC Error received: {:?}", _err);
             if &_err == "No receivers" {
                 eprintln!("No receivers, terminating!");
+                stream.close().await;
                 break;
             } else if from_socket {
                 eprintln!("Connection error, terminating!");
+                stream.close().await;
                 break;
             }
             // TODO: should end serving this socket

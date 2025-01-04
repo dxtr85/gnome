@@ -10,9 +10,9 @@ use crate::networking::common::time_out;
 use crate::networking::subscription::Subscription;
 use crate::networking::tcp_common::send_subscribed_swarm_names;
 use async_std::io::ReadExt;
-use async_std::io::WriteExt;
 use async_std::net::TcpStream;
 use async_std::task::spawn;
+use futures::AsyncWriteExt;
 use futures::{
     future::FutureExt, // for `.fuse()`
     pin_mut,
@@ -45,7 +45,8 @@ pub async fn run_tcp_client(
     let send_result = stream.write(pub_key_pem.as_bytes()).await;
     let _flush_result = stream.flush().await;
     if send_result.is_err() {
-        eprintln!("Unable te send broadcast message: {:?}", send_result);
+        eprintln!("Unable te send my pub key: {:?}", send_result);
+        stream.close().await;
         return;
         // return receiver;
         // } else {
@@ -58,6 +59,7 @@ pub async fn run_tcp_client(
     // while timeout.try_recv().is_err() {
     if swarm_names.is_empty() {
         eprintln!("User is not subscribed to any Swarms");
+        stream.close().await;
         return;
         // return receiver;
     }
@@ -107,6 +109,7 @@ async fn establish_secure_connection(
         _result2 = t2 => true,
     };
     if timed_out {
+        stream.close().await;
         return;
     }
     // let recv_result = stream.recv_from(&mut recv_buf).await;
@@ -130,6 +133,7 @@ async fn establish_secure_connection(
     } else {
         eprintln!("Unable to decode key");
         // return resp_receiver;
+        stream.close().await;
         return;
     }
 
@@ -160,10 +164,12 @@ async fn establish_secure_connection(
             ));
         } else {
             eprintln!("Failed to decrypt message");
+            stream.close().await;
             // return;
         }
     } else {
         eprintln!("Failed to receive data from remote");
+        stream.close().await;
         // return;
     }
 }
@@ -189,6 +195,7 @@ pub async fn prepare_and_serve(
     receive_remote_swarm_names(&mut stream, &mut remote_names).await;
     if remote_names.is_empty() {
         eprintln!("Neighbor {} did not provide swarm list", remote_gnome_id);
+        stream.close().await;
         return;
         // } else {
         //     eprintln!("TCP Client Remote names from bytes: {:?}", remote_names);
@@ -206,6 +213,7 @@ pub async fn prepare_and_serve(
     );
     if common_names.is_empty() {
         eprintln!("No common interests with {}", remote_gnome_id);
+        stream.close().await;
         return;
     }
     // eprintln!("TCP Common swarm names: {:?}", common_names);
