@@ -2,8 +2,10 @@ use super::serve_socket;
 use super::Token;
 use crate::crypto::Encrypter;
 use crate::crypto::{generate_symmetric_key, SessionKey};
+use crate::networking::common::are_we_behind_a_nat;
 use crate::networking::common::collect_subscribed_swarm_names;
 use crate::networking::common::create_a_neighbor_for_each_swarm;
+use crate::networking::common::discover_network_settings;
 use crate::networking::common::distil_common_names;
 use crate::networking::common::receive_remote_swarm_names;
 use crate::networking::common::send_subscribed_swarm_names;
@@ -11,6 +13,7 @@ use crate::networking::subscription::Requestor;
 use crate::networking::subscription::Subscription;
 use async_std::net::UdpSocket;
 use async_std::task::spawn;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use swarm_consensus::GnomeId;
@@ -18,7 +21,7 @@ use swarm_consensus::SwarmName;
 
 pub async fn run_server(
     // host_ip: IpAddr,
-    socket: UdpSocket,
+    mut socket: UdpSocket,
     sub_sender: Sender<Subscription>,
     mut sub_receiver: Receiver<Subscription>,
     token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
@@ -31,7 +34,61 @@ pub async fn run_server(
     // println!("My Pubkey PEM:\n {:?}", pub_key_pem);
     let loc_encr = Encrypter::create_from_data(&pub_key_pem).unwrap();
     let gnome_id = GnomeId(loc_encr.hash());
+    let requestor = if socket.local_addr().unwrap().is_ipv4() {
+        Requestor::Udp
+    } else {
+        Requestor::Udpv6
+    };
     eprintln!("My GnomeId: {}", gnome_id);
+    let my_network_settings = discover_network_settings(&mut socket).await;
+    // if let Ok((_nat, our_addr)) = my_network_settings {
+    //     let nat_type = if !_nat {
+    //         swarm_consensus::Nat::None
+    //     } else {
+    //         (hhhhgd)
+    //     };
+    match my_network_settings.pub_ip {
+        // let octets =
+        IpAddr::V4(ip) => {
+            let mut all_zero = true;
+            for octet in ip.octets() {
+                if octet > 0 {
+                    all_zero = false;
+                    break;
+                }
+            }
+            if !all_zero {
+                eprintln!("My IP addr: {:?}", my_network_settings.pub_ip);
+                let _ = sub_sender.send(Subscription::Distribute(
+                    my_network_settings.pub_ip,
+                    my_network_settings.pub_port,
+                    my_network_settings.nat_type,
+                    my_network_settings.port_allocation,
+                ));
+            }
+        }
+        IpAddr::V6(ip) => {
+            let mut all_zero = true;
+            for octet in ip.octets() {
+                if octet > 0 {
+                    all_zero = false;
+                    break;
+                }
+            }
+            if !all_zero {
+                eprintln!("My IP addr: {:?}", my_network_settings.pub_ip);
+                let _ = sub_sender.send(Subscription::Distribute(
+                    my_network_settings.pub_ip,
+                    my_network_settings.pub_port,
+                    my_network_settings.nat_type,
+                    my_network_settings.port_allocation,
+                ));
+            }
+        }
+    }
+    // } else {
+    //     eprintln!("Failed to discover Public IP & Port via STUN query");
+    // }
     loop {
         let mut remote_gnome_id: GnomeId = GnomeId(0);
         let mut session_key: SessionKey = SessionKey::from_key(&[0; 32]);
@@ -53,7 +110,7 @@ pub async fn run_server(
         let mut swarm_names = Vec::new();
         sub_receiver = collect_subscribed_swarm_names(
             &mut swarm_names,
-            Requestor::Udp,
+            requestor,
             sub_sender.clone(),
             sub_receiver,
         )

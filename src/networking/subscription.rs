@@ -3,16 +3,20 @@ use async_std::task::sleep;
 use rsa::sha2::digest::HashMarker;
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::str::FromStr;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 use swarm_consensus::{
-    Nat, Neighbor, NetworkSettings, Notification, NotificationBundle, SwarmName, ToGnome,
+    Nat, Neighbor, NetworkSettings, Notification, NotificationBundle, PortAllocationRule,
+    SwarmName, ToGnome,
 };
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Requestor {
     Udp,
     Tcp,
+    Udpv6,
+    Tcpv6,
 }
 
 #[derive(Debug)]
@@ -22,7 +26,9 @@ pub enum Subscription {
     ProvideList(Requestor),
     List(Vec<SwarmName>),
     IncludeNeighbor(SwarmName, Neighbor),
-    Distribute(IpAddr, u16, Nat),
+    Distribute(IpAddr, u16, Nat, (PortAllocationRule, i8)),
+    TransportNotAvailable(Requestor),
+    TransportAvailable(Requestor),
     // Decode(Box<Vec<u8>>),
     // KeyDecoded(Box<[u8; 32]>),
     // DecodeFailure,
@@ -30,8 +36,8 @@ pub enum Subscription {
 
 pub async fn subscriber(
     // host_ip: IpAddr,
-    sub_sender: Sender<Subscription>,
-    sub_sender_bis: Sender<Subscription>,
+    sub_senders: HashMap<Requestor, Sender<Subscription>>,
+    // sub_sender_bis: Sender<Subscription>,
     // decrypter: Decrypter,
     // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     // pub_key_pem: String,
@@ -86,10 +92,14 @@ pub async fn subscriber(
                         // TODO: inform existing sockets about new subscription
                         eprintln!("Added swarm in networking: {}", notif_bundle.swarm_name);
                         // TODO: serve err results
-                        let _ =
-                            sub_sender.send(Subscription::Added(notif_bundle.swarm_name.clone()));
-                        let _ = sub_sender_bis
-                            .send(Subscription::Added(notif_bundle.swarm_name.clone()));
+                        for sender in sub_senders.values() {
+                            let _ =
+                                sender.send(Subscription::Added(notif_bundle.swarm_name.clone()));
+                        }
+                        // let _ =
+                        //     sub_sender.send(Subscription::Added(notif_bundle.swarm_name.clone()));
+                        // let _ = sub_sender_bis
+                        //     .send(Subscription::Added(notif_bundle.swarm_name.clone()));
                         if notify_holepunch {
                             let h_res = holepunch_sender.send(notif_bundle.swarm_name);
                             if h_res.is_err() {
@@ -133,15 +143,59 @@ pub async fn subscriber(
                 }
                 Subscription::ProvideList(req) => {
                     eprintln!("sub sending: {:?}", names);
-                    if matches!(req, Requestor::Udp) {
-                        let _ = sub_sender.send(Subscription::List(names.clone()));
-                    } else {
-                        let _ = sub_sender_bis.send(Subscription::List(names.clone()));
+                    if let Some(sender) = sub_senders.get(&req) {
+                        let _ = sender.send(Subscription::List(names.clone()));
+                    }
+                    // if matches!(req, Requestor::Udp) {
+                    //     let _ = sub_sender.send(Subscription::List(names.clone()));
+                    // } else {
+                    //     let _ = sub_sender_bis.send(Subscription::List(names.clone()));
+                    // }
+                }
+                Subscription::Distribute(ip, port, nat, port_rule) => {
+                    //TODO: maybe we send this to Gnome manager instead?
+                    // then sending it just once will do
+                    // if let Some(sender) = swarms.values().next().take() {
+                    for sender in swarms.values() {
+                        let request =
+                            ToGnome::NetworkSettingsUpdate(false, ip, port, nat, port_rule);
+                        let _ = sender.send(request);
                     }
                 }
-                Subscription::Distribute(ip, port, nat) => {
-                    for sender in swarms.values() {
-                        let request = ToGnome::NetworkSettingsUpdate(false, ip, port, nat);
+                Subscription::TransportNotAvailable(req) => {
+                    //TODO
+                    let ip = match req {
+                        Requestor::Udp => IpAddr::from_str("0.0.0.2").unwrap(),
+                        Requestor::Tcp => IpAddr::from_str("0.0.0.3").unwrap(),
+                        Requestor::Udpv6 => IpAddr::from_str("::2").unwrap(),
+                        Requestor::Tcpv6 => IpAddr::from_str("::3").unwrap(),
+                    };
+                    if let Some(sender) = swarms.values().next().take() {
+                        let request = ToGnome::NetworkSettingsUpdate(
+                            false,
+                            ip,
+                            0,
+                            Nat::Unknown,
+                            (PortAllocationRule::Random, 0),
+                        );
+                        let _ = sender.send(request);
+                    }
+                }
+                Subscription::TransportAvailable(req) => {
+                    let ip = match req {
+                        Requestor::Udp => IpAddr::from_str("0.0.0.2").unwrap(),
+                        Requestor::Tcp => IpAddr::from_str("0.0.0.3").unwrap(),
+                        Requestor::Udpv6 => IpAddr::from_str("::2").unwrap(),
+                        Requestor::Tcpv6 => IpAddr::from_str("::3").unwrap(),
+                    };
+                    if let Some(sender) = swarms.values().next().take() {
+                        let request = ToGnome::NetworkSettingsUpdate(
+                            false,
+                            ip,
+                            1,
+                            Nat::Unknown,
+                            (PortAllocationRule::Random, 0),
+                        );
                         let _ = sender.send(request);
                     }
                 }

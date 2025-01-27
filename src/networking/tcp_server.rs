@@ -27,6 +27,11 @@ pub async fn run_tcp_server(
     pub_key_pem: String,
     // swarm_names: Vec<SwarmName>,
 ) {
+    let requestor = if listener.local_addr().unwrap().is_ipv4() {
+        Requestor::Tcp
+    } else {
+        Requestor::Tcpv6
+    };
     let mut incoming = listener.incoming();
     eprintln!("Server listening for TCP connections…");
     while let Some(stream) = incoming.next().await {
@@ -38,7 +43,7 @@ pub async fn run_tcp_server(
             let mut swarm_names = vec![];
             sub_receiver = collect_subscribed_swarm_names(
                 &mut swarm_names,
-                Requestor::Tcp,
+                requestor,
                 sub_sender.clone(),
                 sub_receiver,
             )

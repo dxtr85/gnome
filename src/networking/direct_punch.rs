@@ -12,13 +12,13 @@ use crate::networking::{
 use async_std::net::UdpSocket;
 use async_std::task::{sleep, spawn};
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{GnomeId, NetworkSettings, SwarmName, ToGnome};
+use swarm_consensus::{GnomeId, NetworkSettings, PortAllocationRule, SwarmName, ToGnome};
 
 pub async fn direct_punching_service(
-    // host_ip: IpAddr,
+    server_port: u16,
     subscription_sender: Sender<Subscription>,
     decrypter: Decrypter,
     token_endpoints_sender: Sender<(Sender<Token>, Receiver<Token>)>,
@@ -61,7 +61,7 @@ pub async fn direct_punching_service(
     let (send_my_network_settings, recv_my_network_settings) = channel();
     // TODO: maybe only run it when it makes sense?
     spawn(socket_maintainer(
-        // host_ip,
+        // server_port,
         pub_key_pem.clone(),
         // gnome_id,
         subscription_sender.clone(),
@@ -103,6 +103,7 @@ pub async fn direct_punching_service(
                     my_settings.pub_ip,
                     my_settings.pub_port,
                     my_settings.nat_type,
+                    my_settings.port_allocation,
                 );
                 if let Some(to_gnome) = &send_to_gnome {
                     let _ = to_gnome.send(request);
@@ -115,8 +116,11 @@ pub async fn direct_punching_service(
     }
 }
 
+/// This function runs in background awaiting for any Neighbor's NetworkSettings
+/// Once it receives a NetworkSettings struct, it tries to open a communication
+/// channel with that Neighbor and spawns a new socket for any new incoming NetworkSettings
 async fn socket_maintainer(
-    // host_ip: IpAddr,
+    // server_port: u16,
     pub_key_pem: String,
     // gnome_id: GnomeId,
     subscription_sender: Sender<Subscription>,
@@ -125,6 +129,10 @@ async fn socket_maintainer(
     my_network_settings_sender: Sender<NetworkSettings>,
     other_network_settings_reciever: Receiver<(SwarmName, NetworkSettings)>,
 ) {
+    //TODO: Right now we only support communication over IPv4
+    // since bind_addr is an IPv4 address.
+    // In order to support an IPv6 address we just need to try creating
+    // a new IPv6 socket. If that succeeds we can continue
     let mut swarm_names = vec![];
     // println!("SM start");
     // let bind_port = 0;
@@ -157,21 +165,74 @@ async fn socket_maintainer(
             }
             // TODO: discover with stun server
             // eprintln!("DP recvd other: {:?}", other_settings);
-            let _ = my_network_settings_sender.send(my_settings);
-            // swarm_names.sort();
-            spawn(punch_and_communicate(
-                socket,
-                bind_addr,
-                pub_key_pem.clone(),
-                // gnome_id.clone(),
-                subscription_sender.clone(),
-                decrypter.clone(),
-                token_endpoints_sender.clone(),
-                swarm_names.clone(),
-                (my_settings, other_settings),
-            ));
-            socket = UdpSocket::bind(bind_addr).await.unwrap();
-            my_settings = update_my_pub_addr(&socket, my_settings).await;
+            if other_settings.pub_ip.is_ipv6() {
+                let bind_addr = (IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)), 0u16);
+                if let Ok(socket) = UdpSocket::bind(bind_addr).await {
+                    let ping_result = are_we_behind_a_nat(&socket).await;
+                    if let Ok((_nat, _port_control, our_addr)) = ping_result {
+                        let nat_type = if !_nat {
+                            swarm_consensus::Nat::None
+                        } else if _port_control {
+                            // TODO: maybe add UnknownWithPortControl?
+                            swarm_consensus::Nat::SymmetricWithPortControl
+                        } else {
+                            swarm_consensus::Nat::Unknown
+                        };
+                        let my_ipv6_settings = NetworkSettings {
+                            pub_ip: our_addr.ip(),
+                            pub_port: our_addr.port(),
+                            // pub_port: server_port + 1,
+                            nat_type,
+                            port_allocation: (PortAllocationRule::FullCone, 0),
+                        };
+                        eprintln!("My Ipv6 addr: {:?}", our_addr.ip());
+                        let _ = my_network_settings_sender.send(my_ipv6_settings);
+                    } else {
+                        eprintln!(
+                            "Failed to send STUN via IPv6: {:?}",
+                            ping_result.err().unwrap()
+                        );
+                    }
+                    // let my_addr = socket.local_addr().unwrap();
+                    // let my_ipv6_settings = NetworkSettings {
+                    //     pub_ip: my_addr.ip(),
+                    //     // pub_port: my_addr.port(),
+                    //     pub_port: server_port + 1,
+                    //     nat_type: swarm_consensus::Nat::None,
+                    //     port_allocation: (PortAllocationRule::FullCone, 0),
+                    // };
+                    // let _ = my_network_settings_sender.send(my_ipv6_settings);
+                    spawn(punch_and_communicate(
+                        socket,
+                        bind_addr,
+                        pub_key_pem.clone(),
+                        // gnome_id.clone(),
+                        subscription_sender.clone(),
+                        decrypter.clone(),
+                        token_endpoints_sender.clone(),
+                        swarm_names.clone(),
+                        (my_settings, other_settings),
+                    ));
+                } else {
+                    eprintln!("Unable to bind IPv6 socket");
+                }
+            } else {
+                let _ = my_network_settings_sender.send(my_settings);
+                // swarm_names.sort();
+                spawn(punch_and_communicate(
+                    socket,
+                    bind_addr,
+                    pub_key_pem.clone(),
+                    // gnome_id.clone(),
+                    subscription_sender.clone(),
+                    decrypter.clone(),
+                    token_endpoints_sender.clone(),
+                    swarm_names.clone(),
+                    (my_settings, other_settings),
+                ));
+                socket = UdpSocket::bind(bind_addr).await.unwrap();
+                my_settings = update_my_pub_addr(&socket, my_settings).await;
+            }
         }
         // yield_now().await;
     }
@@ -181,7 +242,7 @@ async fn update_my_pub_addr(
     mut my_settings: NetworkSettings,
 ) -> NetworkSettings {
     let ping_result = are_we_behind_a_nat(socket).await;
-    if let Ok((_nat, our_addr)) = ping_result {
+    if let Ok((_nat, _port_control, our_addr)) = ping_result {
         let new_ip = our_addr.ip();
         let new_port = our_addr.port();
         if new_ip != my_settings.pub_ip {
@@ -233,11 +294,11 @@ async fn punch_and_communicate(
         // restrictive. If both are equal use pub_ip to determine which.
         // No we have two paths. We either have a less restrictive NAT or not.
         // None = 1, -- covered
-        println!("DPunch {:?} and {:?}", bind_addr, other_settings);
+        eprintln!("DPunch {:?} and {:?}", bind_addr, other_settings);
         let punch_it_result = if my_settings.nat_at_most_address_sensitive()
             || other_settings.nat_at_most_address_sensitive()
         {
-            println!("DP Case 1");
+            eprintln!("DP Case 1");
             // We: FullCone,                them: AddressRestrictedCone = 4,
             // We: FullCone,                them: PortRestrictedCone = 8,
             // We: FullCone,                them: SymmetricWithPortControl = 16,
@@ -251,7 +312,7 @@ async fn punch_and_communicate(
         } else if my_settings.nat_port_restricted()
             && other_settings.nat_symmetric_with_port_control()
         {
-            println!("DP Case 2");
+            eprintln!("DP Case 2");
             // We: PortRestrictedCone,      them: SymmetricWithPortControl = 16,
             // TODO:   ^ we run punch_it on one socket
             //      them run punch_it on one socket
@@ -260,7 +321,7 @@ async fn punch_and_communicate(
         } else if my_settings.nat_port_restricted()
             && (other_settings.nat_symmetric() || other_settings.nat_unknown())
         {
-            println!("DP Case 3");
+            eprintln!("DP Case 3");
             // We: PortRestrictedCone,      them: Symmetric = 32, or Unknown = 0
             // TODO:   ^ we run punch_it on one socket
             //      them run punch_it on one socket
@@ -269,7 +330,7 @@ async fn punch_and_communicate(
         } else if my_settings.nat_symmetric_with_port_control()
             && (other_settings.nat_symmetric() || other_settings.nat_unknown())
         {
-            println!("DP Case 4");
+            eprintln!("DP Case 4");
             // We: SymmetricWithPortControl,them: Symmetric = 32, or Unknown = 0
             // TODO:   ^ we run punch_it on one socket
             //      them run punch_it on one socket
@@ -295,7 +356,7 @@ async fn punch_and_communicate(
                 .await
             }
         } else {
-            println!("DP Case 5 - no luck");
+            eprintln!("DP Case 5 - no luck");
             None
         };
         // let socket_recv_result = socket_receiver.recv();

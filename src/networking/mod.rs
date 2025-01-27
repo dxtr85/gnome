@@ -24,6 +24,7 @@ use crate::crypto::Decrypter;
 use async_std::net::TcpListener;
 use async_std::net::UdpSocket;
 use async_std::task::spawn;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver};
 use subscription::Requestor;
@@ -53,20 +54,47 @@ pub async fn run_networking_tasks(
     decrypter: Decrypter,
     pub_key_pem: String,
 ) {
+    eprintln!("In run_networking_tasks");
     let server_addr: SocketAddr = SocketAddr::new("0.0.0.0".parse().unwrap(), server_port);
+    let ipv6_server_addr: SocketAddr =
+        SocketAddr::new("0:0:0:0:0:0:0:0".parse().unwrap(), server_port + 1);
     let bind_result = UdpSocket::bind(server_addr).await;
+    let ipv6_bind_result = UdpSocket::bind(ipv6_server_addr).await;
     let tcp_bind_result = TcpListener::bind(server_addr).await;
+    let ipv6_tcp_bind_result = TcpListener::bind(ipv6_server_addr).await;
     let (sub_send_one, mut sub_recv_one) = channel();
-    let (sub_send_one_bis, mut sub_recv_one_bis) = channel();
+    let (sub_send_one_bis, sub_recv_one_bis) = channel();
+    let (sub_send_one_cis, sub_recv_one_cis) = channel();
+    let (sub_send_one_dis, sub_recv_one_dis) = channel();
     let (sub_send_two, sub_recv_two) = channel();
     let (token_dispenser_send, token_dispenser_recv) = channel();
     let (holepunch_sender, holepunch_receiver) = channel();
     let (token_pipes_sender, token_pipes_receiver) = channel();
     let (send_pair, recv_pair) = channel();
+    eprintln!("spawn token_dispenser");
+    spawn(token_dispenser(
+        buffer_size_bytes,
+        uplink_bandwith_bytes_sec,
+        // token_msg_sender,
+        token_pipes_receiver,
+        token_dispenser_recv,
+    ));
+    let mut sub_sends = HashMap::new();
+    if bind_result.is_ok() {
+        sub_sends.insert(Requestor::Udp, sub_send_one);
+    }
+    if tcp_bind_result.is_ok() {
+        sub_sends.insert(Requestor::Tcp, sub_send_one_bis);
+    }
+    if ipv6_bind_result.is_ok() {
+        sub_sends.insert(Requestor::Udpv6, sub_send_one_dis);
+    }
+    if ipv6_tcp_bind_result.is_ok() {
+        sub_sends.insert(Requestor::Tcpv6, sub_send_one_cis);
+    }
     spawn(subscriber(
         // host_ip,
-        sub_send_one,
-        sub_send_one_bis,
+        sub_sends,
         // decrypter.clone(),
         // token_pipes_sender.clone(),
         // pub_key_pem.clone(),
@@ -77,14 +105,6 @@ pub async fn run_networking_tasks(
         holepunch_sender,
         send_pair,
     ));
-    spawn(token_dispenser(
-        buffer_size_bytes,
-        uplink_bandwith_bytes_sec,
-        // token_msg_sender,
-        token_pipes_receiver,
-        token_dispenser_recv,
-    ));
-
     let mut swarm_names = vec![];
     sub_recv_one = collect_subscribed_swarm_names(
         &mut swarm_names,
@@ -93,6 +113,7 @@ pub async fn run_networking_tasks(
         sub_recv_one,
     )
     .await;
+    eprintln!("received swarm names");
     // swarm_names.sort();
     spawn(run_client(
         swarm_names,
@@ -103,6 +124,7 @@ pub async fn run_networking_tasks(
         None,
     ));
     // .await;
+    // IPv4
     if let Ok(listener) = tcp_bind_result {
         // let mut my_names = vec![];
         // sub_recv_one =
@@ -116,6 +138,17 @@ pub async fn run_networking_tasks(
             pub_key_pem.clone(),
             // my_names,
         ));
+        let _ = sub_send_two.send(subscription::Subscription::TransportAvailable(
+            Requestor::Tcp,
+        ));
+    } else {
+        eprintln!(
+            "Failed to bind socket: {:?}",
+            tcp_bind_result.err().unwrap()
+        );
+        let _ = sub_send_two.send(subscription::Subscription::TransportNotAvailable(
+            Requestor::Tcp,
+        ));
     }
     if let Ok(socket) = bind_result {
         spawn(run_server(
@@ -125,11 +158,61 @@ pub async fn run_networking_tasks(
             token_pipes_sender.clone(),
             pub_key_pem.clone(),
         ));
-        // .await;
+        let _ = sub_send_two.send(subscription::Subscription::TransportAvailable(
+            Requestor::Udp,
+        ));
     } else {
         eprintln!("Failed to bind socket: {:?}", bind_result.err().unwrap());
+        let _ = sub_send_two.send(subscription::Subscription::TransportNotAvailable(
+            Requestor::Udp,
+        ));
     };
-
+    // IPv6
+    if let Ok(listener) = ipv6_tcp_bind_result {
+        // let mut my_names = vec![];
+        // sub_recv_one =
+        //     collect_subscribed_swarm_names(&mut my_names, sub_send_two.clone(), sub_recv_one).await;
+        // eprintln!("Run TCP server with swarm names: {:?}", my_names);
+        spawn(run_tcp_server(
+            listener,
+            sub_send_two.clone(),
+            sub_recv_one_cis,
+            token_pipes_sender.clone(),
+            pub_key_pem.clone(),
+            // my_names,
+        ));
+        let _ = sub_send_two.send(subscription::Subscription::TransportAvailable(
+            Requestor::Tcpv6,
+        ));
+    } else {
+        eprintln!(
+            "Failed to bind IPv6 TCP socket: {:?}",
+            ipv6_tcp_bind_result.err().unwrap()
+        );
+        let _ = sub_send_two.send(subscription::Subscription::TransportNotAvailable(
+            Requestor::Tcpv6,
+        ));
+    }
+    if let Ok(socket) = ipv6_bind_result {
+        spawn(run_server(
+            socket,
+            sub_send_two.clone(),
+            sub_recv_one_dis,
+            token_pipes_sender.clone(),
+            pub_key_pem.clone(),
+        ));
+        let _ = sub_send_two.send(subscription::Subscription::TransportAvailable(
+            Requestor::Udpv6,
+        ));
+    } else {
+        eprintln!(
+            "Failed to bind IPv6 UDP socket: {:?}",
+            ipv6_bind_result.err().unwrap()
+        );
+        let _ = sub_send_two.send(subscription::Subscription::TransportNotAvailable(
+            Requestor::Udpv6,
+        ));
+    };
     //TODO: We need to organize how and which networking services get started.
     // 1. We always need to run basic services like token_dispenser and subscriber.
     // 2. We also always need to run_client and try to run_server.
@@ -156,7 +239,7 @@ pub async fn run_networking_tasks(
     // In case we are behind a NAT we need to run direct_punch and holepunch
     // Both of those services need a sophisticated procedure for connection establishment.
     spawn(direct_punching_service(
-        // host_ip,
+        server_port,
         sub_send_two.clone(),
         // req_sender.clone(),
         // resp_receiver,

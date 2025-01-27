@@ -11,6 +11,7 @@ use async_std::task;
 use async_std::task::{sleep, yield_now};
 use futures::SinkExt;
 use std::collections::HashMap;
+use std::net::Ipv6Addr;
 use swarm_consensus::SwarmName;
 use swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
 // use bytes::{BufMut, BytesMut};
@@ -140,7 +141,7 @@ pub fn swarm_names_from_bytes(recv_buf: &[u8]) -> Vec<SwarmName> {
     let count = recv_buf.len();
     let mut i = 0;
     // eprintln!("SNBytes#:{}", count);
-    while i < count  {
+    while i < count {
         let name_len = recv_buf[i];
         if name_len < 128 {
             let sn_res = SwarmName::from(&recv_buf[i..i + name_len as usize + 1]);
@@ -269,15 +270,22 @@ pub fn create_a_neighbor_for_each_swarm(
 // In case both IP and PORT are different from what we have set up
 // we need to run an additional procedure in order to identify
 // what type of NAT we are behind.
-pub async fn are_we_behind_a_nat(socket: &UdpSocket) -> Result<(bool, SocketAddr), String> {
+pub async fn are_we_behind_a_nat(socket: &UdpSocket) -> Result<(bool, bool, SocketAddr), String> {
     let request = build_request(None);
-    let ip = IpAddr::V4(Ipv4Addr::new(108, 177, 15, 127));
-    let port = 3478;
+    let local_port = socket.local_addr().unwrap().port();
+    let (ip, port) = if socket.local_addr().unwrap().is_ipv4() {
+        (IpAddr::V4(Ipv4Addr::new(108, 177, 15, 127)), 3478)
+    } else {
+        (
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0x4860, 0x4864, 5, 0x8000, 0, 0, 1)),
+            19302,
+        )
+    };
+    // let port = 3478;
     let _send_result = stun_send(socket, request, Some(ip), Some(port)).await;
     // let mut bytes: [u8; 128] = [0; 128];
 
-    let t1 = time_out(Duration::from_secs(3), None).fuse();
-    // TODO: serv pairs of sender-receiver
+    let t1 = time_out(Duration::from_secs(1), None).fuse();
     let t2 = wait_for_response(socket, SocketAddr::new(ip, port)).fuse();
 
     pin_mut!(t1, t2);
@@ -295,9 +303,9 @@ pub async fn are_we_behind_a_nat(socket: &UdpSocket) -> Result<(bool, SocketAddr
         let mapped_address = msg.mapped_address().unwrap();
         if UdpSocket::bind((mapped_address.ip(), 0)).await.is_ok() {
             // if mapped_address == socket.local_addr().unwrap() {
-            Ok((false, mapped_address))
+            Ok((false, local_port == mapped_address.port(), mapped_address))
         } else {
-            Ok((true, mapped_address))
+            Ok((true, local_port == mapped_address.port(), mapped_address))
         }
     } else {
         Err("Timed out while waiting for STUN response".to_string())
@@ -357,7 +365,7 @@ pub async fn wait_for_response(socket: &UdpSocket, addr: SocketAddr) -> [u8; 128
 // an IP and PORT that we have previously sent a message to, no other pair
 // of IP and PORT will get through our NAT.
 // We still need to find out how are external PORTS assigned.
-pub async fn identify_nat(socket: &UdpSocket) -> Nat {
+pub async fn identify_nat(socket: &UdpSocket, have_port_control: bool) -> Nat {
     let request = build_request(Some(StunChangeRequest::ChangeIpPort));
     let first_id = request.id();
     let _send_result = stun_send(socket, request, None, None).await;
@@ -367,7 +375,7 @@ pub async fn identify_nat(socket: &UdpSocket) -> Nat {
 
     let mut millis_remaining = 1000;
     let mut received_responses = Vec::new();
-    eprintln!("Waiting for STUN to respond...");
+    // eprintln!("Waiting for STUN to respond...");
     while millis_remaining > 0 && received_responses.len() < 2 {
         let t1 = sleep(Duration::from_millis(1)).fuse();
         let t2 = receive_response(socket).fuse();
@@ -378,14 +386,18 @@ pub async fn identify_nat(socket: &UdpSocket) -> Nat {
                  millis_remaining-=1;
              },
             result2 = t2 => {
-                eprintln!("Received a response: {:?}", result2);
+                // eprintln!("Received a response: {:?}", result2);
                 received_responses.push(result2)}
         };
         yield_now().await;
     }
     if received_responses.is_empty() {
-        eprintln!("NAT type: Symmetric ");
-        Nat::Symmetric
+        // eprintln!("NAT type: Symmetric ");
+        if have_port_control {
+            Nat::SymmetricWithPortControl
+        } else {
+            Nat::Symmetric
+        }
     } else {
         let mut first_response_received = false;
         let mut second_response_received = false;
@@ -456,87 +468,170 @@ pub async fn time_out(mut time: Duration, sender: Option<Sender<()>>) {
 // This difference should be constant for every consecutive pair
 // (maybe one exception is allowed where increment is larger than usual).
 pub async fn discover_port_allocation_rule(socket: &UdpSocket) -> (PortAllocationRule, i8) {
-    stun_send(socket, build_request(None), None, None).await;
-    let mut bytes: [u8; 128] = [0; 128];
-    let recv_result = socket.recv_from(&mut bytes).await;
-    if let Ok((_count, _from)) = recv_result {
+    // let local_port = socket.local_addr().unwrap().port();
+    // eprintln!("Local port: {}", local_port);
+    let (ip, port) = if socket.local_addr().unwrap().is_ipv4() {
+        (IpAddr::V4(Ipv4Addr::new(108, 177, 15, 127)), 3478)
+    } else {
+        (
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0x4860, 0x4864, 5, 0x8000, 0, 0, 1)),
+            19302,
+        )
+    };
+    stun_send(socket, build_request(None), Some(ip), Some(port)).await;
+    // let mut bytes: [u8; 128] = [0; 128];
+    let t1 = time_out(Duration::from_secs(1), None).fuse();
+    let t2 = wait_for_response(socket, SocketAddr::new(ip, port)).fuse();
+    // TODO
+    // let recv_result = socket.recv_from(&mut bytes).await;
+
+    pin_mut!(t1, t2);
+
+    let (received, bytes) = select! {
+        _result1 = t1 =>  (false,[0;128]),
+        result2 = t2 => (true,result2),
+    };
+
+    // eprintln!("STUN recv result: {:?}", recv_result);
+    // if let Ok((_count, _from)) = recv_result {
+    if !received {
+        return (PortAllocationRule::Random, 0);
+    }
+    let msg = stun_decode(&bytes);
+    // eprintln!("Decoded: {:?}", msg);
+    // if let Some(changed_address) = msg.changed_address() {
+    if let Some(changed_address) = msg.mapped_address() {
+        let m_addr_1 = msg.mapped_address().unwrap();
+        // println!("Mapped address 1: {:?}", m_addr_1);
+        let port_1 = m_addr_1.port();
+        // eprintln!("Public port: {}", port_1);
+        // if port_1 == local_port {
+        //     eprintln!("Seems we have control over public port assignment");
+        // }
+        stun_send(
+            socket,
+            build_request(None),
+            None,
+            Some(changed_address.port()),
+        )
+        .await;
+        // bytes = [0; 128];
+        // let _recv_result = socket.recv_from(&mut bytes).await;
+        let t1 = time_out(Duration::from_secs(1), None).fuse();
+        let t2 = wait_for_response(socket, SocketAddr::new(ip, changed_address.port())).fuse();
+        // TODO
+        // let recv_result = socket.recv_from(&mut bytes).await;
+
+        pin_mut!(t1, t2);
+
+        let (received, bytes) = select! {
+            _result1 = t1 =>  (false,[0;128]),
+            result2 = t2 => (true,result2),
+        };
+        if !received {
+            //TODO: check this,
+            // no response after sending to same address, but different port
+            return (PortAllocationRule::PortSensitive, 0);
+        }
         let msg = stun_decode(&bytes);
-        if let Some(changed_address) = msg.changed_address() {
-            let m_addr_1 = msg.mapped_address().unwrap();
-            // println!("Mapped address 1: {:?}", m_addr_1);
-            let port_1 = m_addr_1.port();
-            stun_send(
-                socket,
-                build_request(None),
-                None,
-                Some(changed_address.port()),
-            )
-            .await;
-            bytes = [0; 128];
-            let _recv_result = socket.recv_from(&mut bytes).await;
-            let msg = stun_decode(&bytes);
-            let m_addr_2 = msg.mapped_address().unwrap();
-            // println!("Mapped address 2: {:?}", m_addr_2);
-            let port_2 = m_addr_2.port();
-            stun_send(
-                socket,
-                build_request(None),
-                Some(changed_address.ip()),
-                None,
-            )
-            .await;
-            bytes = [0; 128];
-            let _recv_result = socket.recv_from(&mut bytes).await;
-            let msg = stun_decode(&bytes);
-            let m_addr_3 = msg.mapped_address().unwrap();
-            // println!("Mapped address 3: {:?}", m_addr_3);
-            let port_3 = m_addr_3.port();
-            stun_send(
-                socket,
-                build_request(None),
-                Some(changed_address.ip()),
-                Some(changed_address.port()),
-            )
-            .await;
-            bytes = [0; 128];
-            let _recv_result = socket.recv_from(&mut bytes).await;
-            let msg = stun_decode(&bytes);
-            let m_addr_4 = msg.mapped_address().unwrap();
-            // println!("Mapped address 4: {:?}", m_addr_4);
-            let port_4 = m_addr_4.port();
-            let p1_and_p2_eq = port_1 == port_2;
-            let p3_and_p4_eq = port_3 == port_4;
-            if p1_and_p2_eq && p3_and_p4_eq {
-                if port_1 == port_3 {
-                    eprintln!("Port allocation: FullCone, delta p: 0");
-                    (PortAllocationRule::FullCone, 0)
-                } else {
-                    eprintln!(
-                        "Port allocation: AddressSensitive, delta p: {}",
-                        port_3 - port_2
-                    );
-                    (
-                        PortAllocationRule::AddressSensitive,
-                        (port_3 - port_2) as i8,
-                    )
-                }
+        let m_addr_2 = msg.mapped_address().unwrap();
+        // println!("Mapped address 2: {:?}", m_addr_2);
+        let port_2 = m_addr_2.port();
+        stun_send(
+            socket,
+            build_request(None),
+            Some(changed_address.ip()),
+            None,
+        )
+        .await;
+        // bytes = [0; 128];
+        // let _recv_result = socket.recv_from(&mut bytes).await;
+        let t1 = time_out(Duration::from_secs(1), None).fuse();
+        let t2 = wait_for_response(socket, SocketAddr::new(changed_address.ip(), port)).fuse();
+        // TODO
+        // let recv_result = socket.recv_from(&mut bytes).await;
+
+        pin_mut!(t1, t2);
+
+        let (received, bytes) = select! {
+            _result1 = t1 =>  (false,[0;128]),
+            result2 = t2 => (true,result2),
+        };
+        if !received {
+            //TODO: check this,
+            // no response after sending to different ip address, but same port
+            return (PortAllocationRule::AddressSensitive, 0);
+        }
+        let msg = stun_decode(&bytes);
+        let m_addr_3 = msg.mapped_address().unwrap();
+        // println!("Mapped address 3: {:?}", m_addr_3);
+        let port_3 = m_addr_3.port();
+        stun_send(
+            socket,
+            build_request(None),
+            Some(changed_address.ip()),
+            Some(changed_address.port()),
+        )
+        .await;
+        // bytes = [0; 128];
+        // let _recv_result = socket.recv_from(&mut bytes).await;
+        let t1 = time_out(Duration::from_secs(1), None).fuse();
+        let t2 = wait_for_response(
+            socket,
+            SocketAddr::new(changed_address.ip(), changed_address.port()),
+        )
+        .fuse();
+        // TODO
+        // let recv_result = socket.recv_from(&mut bytes).await;
+
+        pin_mut!(t1, t2);
+
+        let (received, bytes) = select! {
+            _result1 = t1 =>  (false,[0;128]),
+            result2 = t2 => (true,result2),
+        };
+        if !received {
+            //TODO: check this,
+            // no response after sending to different ip address
+            return (PortAllocationRule::AddressSensitive, 0);
+        }
+        let msg = stun_decode(&bytes);
+        let m_addr_4 = msg.mapped_address().unwrap();
+        // println!("Mapped address 4: {:?}", m_addr_4);
+        let port_4 = m_addr_4.port();
+        let p1_and_p2_eq = port_1 == port_2;
+        let p3_and_p4_eq = port_3 == port_4;
+        if p1_and_p2_eq && p3_and_p4_eq {
+            if port_1 == port_3 {
+                eprintln!("Port allocation: FullCone, delta p: 0");
+                (PortAllocationRule::FullCone, 0)
             } else {
-                let d1 = port_2 - port_1;
-                let d2 = port_3 - port_2;
-                let d3 = port_4 - port_3;
                 eprintln!(
-                    "Port allocation: PortSensitive delta p: {} {} {}",
-                    d1, d2, d3
+                    "Port allocation: AddressSensitive, delta p: {}",
+                    port_3 - port_2
                 );
-                let delta_p = min(min(d1, d2), d3) as i8;
-                (PortAllocationRule::PortSensitive, delta_p)
+                (
+                    PortAllocationRule::AddressSensitive,
+                    (port_3 - port_2) as i8,
+                )
             }
         } else {
-            (PortAllocationRule::Random, 0)
+            let d1 = port_2 - port_1;
+            let d2 = port_3 - port_2;
+            let d3 = port_4 - port_3;
+            eprintln!(
+                "Port allocation: PortSensitive delta p: {} {} {}",
+                d1, d2, d3
+            );
+            let delta_p = min(min(d1, d2), d3) as i8;
+            (PortAllocationRule::PortSensitive, delta_p)
         }
     } else {
-        (PortAllocationRule::Random, 0)
+        (PortAllocationRule::Random, 1)
     }
+    // } else {
+    //     (PortAllocationRule::Random, 0)
+    // }
 }
 // Now we know all we need to establish a connection between two hosts behind
 // any type of NAT. (We might not connect if NAT always assigns ports randomly.)
@@ -545,21 +640,26 @@ pub async fn discover_port_allocation_rule(socket: &UdpSocket) -> (PortAllocatio
 // and we can send out our expected socket address for other gnome to connect to.
 
 pub async fn discover_network_settings(socket: &mut UdpSocket) -> NetworkSettings {
+    eprintln!(
+        "discover_network_settings {:?}",
+        socket.local_addr().unwrap()
+    );
     let behind_a_nat = are_we_behind_a_nat(socket).await;
     let mut my_settings = NetworkSettings::default();
-    if let Ok((is_there_nat, public_addr)) = behind_a_nat {
+    if let Ok((is_there_nat, we_have_port_control, public_addr)) = behind_a_nat {
         let ip = public_addr.ip();
         my_settings.pub_ip = ip;
         let port = public_addr.port();
         my_settings.pub_port = port;
         if is_there_nat {
-            eprintln!("NAT detected, identifying...");
-            let nat = identify_nat(socket).await;
+            let nat = identify_nat(socket, we_have_port_control).await;
+            eprintln!("NAT: {:?}", nat);
             my_settings.nat_type = nat;
             let port_allocation = discover_port_allocation_rule(socket).await;
+            // eprintln!("Port allocation rule: {:?}", port_allocation);
             my_settings.port_allocation = port_allocation;
         } else {
-            eprintln!("We have a public IP!");
+            eprintln!("We have no NAT");
             my_settings.nat_type = Nat::None;
             my_settings.port_allocation = (PortAllocationRule::FullCone, 0);
         }

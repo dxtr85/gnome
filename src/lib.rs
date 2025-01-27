@@ -49,7 +49,7 @@ pub mod prelude {
 
 pub fn init(
     work_dir: PathBuf,
-    neighbor_settings: Option<Vec<NetworkSettings>>,
+    neighbor_settings: Option<Vec<(GnomeId, NetworkSettings)>>,
     // app_sync_hash: u64,
 ) -> (Sender<ToGnomeManager>, Receiver<FromGnomeManager>, GnomeId) {
     // ) {
@@ -137,15 +137,29 @@ pub fn init(
     // let ns = NetworkSettings::new_not_natted(IpAddr::V4(Ipv4Addr::new(100, 112, 244, 78)), 1026);
     // let neighbor_settings = Some(ns);
     // let neighbor_settings = None;
-    if let Ok((swarm_id, (user_req, user_res))) =
-        // gmgr.join_a_swarm("trzat".to_string(), Some(neighbor_network_settings), None)
-        gmgr.join_a_swarm(
-            SwarmName::new(GnomeId::any(), "/".to_string()).unwrap(),
-            // app_sync_hash,
-            neighbor_settings,
-            None,
-        )
-    {
+    let mut filtered_neighbor_settings = vec![];
+    if let Some(neighbors) = neighbor_settings {
+        for (g_id, ns) in neighbors {
+            if g_id == gnome_id {
+                eprintln!("Skipping my Pub IP");
+                continue;
+            }
+            if !filtered_neighbor_settings.contains(&ns) {
+                filtered_neighbor_settings.push(ns);
+            }
+        }
+    }
+    let filtered_neighbor_settings = if filtered_neighbor_settings.is_empty() {
+        None
+    } else {
+        Some(filtered_neighbor_settings)
+    };
+    if let Ok((swarm_id, (user_req, user_res))) = gmgr.join_a_swarm(
+        SwarmName::new(GnomeId::any(), "/".to_string()).unwrap(),
+        // app_sync_hash,
+        filtered_neighbor_settings,
+        None,
+    ) {
         let _ = resp_sender.send(FromGnomeManager::MyID(gnome_id));
         let _ = resp_sender.send(FromGnomeManager::SwarmJoined(
             swarm_id,

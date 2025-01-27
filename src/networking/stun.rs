@@ -1,6 +1,7 @@
+use aes_gcm::aead::Buffer;
 use async_std::net::UdpSocket;
 use rand::random;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 // TODO:
 // - retrieve a list of stun servers (first use a fixed address or two)
 // - implement request message creation
@@ -61,6 +62,10 @@ pub fn stun_decode(bytes: &[u8]) -> StunMessage {
             idx += 1;
             len_iter -= 1;
         }
+        // eprintln!(
+        //     "STUN Decoded: {:?} (len: {}) val raw: {:?}",
+        //     typ, len, value_raw
+        // );
         let value = match typ {
             StunAttributeType::ErrorCode => {
                 let code = StunErrorCode::parse(value_raw);
@@ -160,12 +165,13 @@ impl StunAttribute {
     pub fn get_address(&self) -> Option<SocketAddr> {
         if let StunAttributeValue::Address(stun_addr) = &self.value {
             Some(SocketAddr::new(
-                IpAddr::V4(Ipv4Addr::new(
-                    stun_addr.address[0],
-                    stun_addr.address[1],
-                    stun_addr.address[2],
-                    stun_addr.address[3],
-                )),
+                // IpAddr::V4(Ipv4Addr::new(
+                //     stun_addr.address[0],
+                //     stun_addr.address[1],
+                //     stun_addr.address[2],
+                //     stun_addr.address[3],
+                // )),
+                stun_addr.address,
                 stun_addr.port,
             ))
         } else {
@@ -204,9 +210,25 @@ pub async fn stun_send(sock: &UdpSocket, msg: StunMessage, ip: Option<IpAddr>, p
     let ip = if ip.is_some() {
         ip.unwrap()
     } else {
-        IpAddr::V4(Ipv4Addr::new(108, 177, 15, 127))
+        // let (ip, port) =
+        if sock.local_addr().unwrap().is_ipv4() {
+            IpAddr::V4(Ipv4Addr::new(108, 177, 15, 127)) //, 3478)
+        } else {
+            // (
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0x4860, 0x4864, 5, 0x8000, 0, 0, 1))
+            //     19302,
+            // )
+        }
     };
-    let port = if port.is_some() { port.unwrap() } else { 3478 };
+    let port = if port.is_some() {
+        port.unwrap()
+    } else {
+        if sock.local_addr().unwrap().is_ipv4() {
+            3478
+        } else {
+            19302
+        }
+    };
     let to: SocketAddr = SocketAddr::new(ip, port);
     let buf = msg.bytes();
     let _result = sock.send_to(&buf, to).await;
@@ -346,7 +368,7 @@ impl StunAttributeType {
 #[derive(Debug)]
 pub struct StunAddress {
     port: u16,
-    address: [u8; 4],
+    address: IpAddr,
 }
 impl StunAddress {
     pub fn bytes(&self) -> Vec<u8> {
@@ -354,12 +376,25 @@ impl StunAddress {
         vector.push(0);
         vector.push(1);
         vector.extend_from_slice(&self.port.to_be_bytes());
-        vector.extend_from_slice(&self.address);
+        match self.address {
+            IpAddr::V4(ip) => vector.extend_from_slice(&ip.octets().to_vec()),
+            IpAddr::V6(ip) => vector.extend_from_slice(&ip.octets().to_vec()),
+        };
         vector
     }
     pub fn parse(bytes: &[u8]) -> Self {
         let port = u16::from_be_bytes([bytes[2], bytes[3]]);
-        let address = [bytes[4], bytes[5], bytes[6], bytes[7]];
+        // eprintln!("STUN parsed PORT from incoming bytes: {}", port);
+
+        let address = if bytes[1] == 1 {
+            IpAddr::V4(Ipv4Addr::from([bytes[4], bytes[5], bytes[6], bytes[7]]))
+        } else {
+            IpAddr::V6(Ipv6Addr::from([
+                bytes[4], bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11],
+                bytes[12], bytes[13], bytes[14], bytes[15], bytes[16], bytes[17], bytes[18],
+                bytes[19],
+            ]))
+        };
         StunAddress { port, address }
     }
 }

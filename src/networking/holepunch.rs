@@ -94,7 +94,7 @@ pub async fn holepunch(
 // Then we can communicate with holepunch proxy
 async fn holepunch_probe_ok(puncher: SocketAddr) -> bool {
     let socket = UdpSocket::bind(("0.0.0.0", 0)).await.unwrap();
-    if let Ok((_nat, pub_addr)) = are_we_behind_a_nat(&socket).await {
+    if let Ok((_nat, _port_control, pub_addr)) = are_we_behind_a_nat(&socket).await {
         if ask_proxy_for_remote_socket(&socket, puncher, pub_addr.to_string(), false)
             .await
             .is_some()
@@ -967,7 +967,16 @@ pub async fn start_communication(
         Nat::Symmetric
     };
 
-    let _ = sub_sender.send(Subscription::Distribute(my_pub_ip, my_pub_port, my_nat));
+    eprintln!(
+        "Distribute IP/PORT from holepunch: {}:{}(Nat: {:?})",
+        my_pub_ip, my_pub_port, my_nat
+    );
+    let _ = sub_sender.send(Subscription::Distribute(
+        my_pub_ip,
+        my_pub_port,
+        my_nat,
+        (PortAllocationRule::Random, 0),
+    ));
     // println!("My external addr: {}", my_ext_addr_res.unwrap());
     // }
     // let swarm_names = vec![swarm_name];
