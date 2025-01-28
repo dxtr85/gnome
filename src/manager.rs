@@ -523,8 +523,8 @@ impl Manager {
             let (band_send, band_recv) = channel();
             let (net_settings_send, net_settings_recv) = channel();
             if let Some(neighbor_settings) = neighbor_network_settings {
-                eprintln!("Sending neighbor settings: {:?}", neighbor_settings);
                 for setting in neighbor_settings {
+                    eprintln!("Sending neighbor settings: {:?}", setting);
                     let _ = net_settings_send.send(setting);
                 }
             }

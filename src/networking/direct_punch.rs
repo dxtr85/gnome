@@ -89,7 +89,7 @@ pub async fn direct_punching_service(
                 if let Ok(other_settings) = settings_result {
                     // eprintln!("Got some other settings");
                     let _ = send_other_network_settings.send((swarm_name.clone(), other_settings));
-                    // eprintln!("His: {:?}", other_settings);
+                    // eprintln!("DPunch waiting for my settings: TRUE");
                     waiting_for_my_settings = true;
                     send_to_gnome = Some(to_gnome_sender.clone());
                 }
@@ -97,17 +97,21 @@ pub async fn direct_punching_service(
         } else {
             let recv_result = recv_my_network_settings.try_recv();
             if let Ok(my_settings) = recv_result {
-                // eprintln!("My: {:?}", my_settings);
-                let request = ToGnome::NetworkSettingsUpdate(
-                    true,
-                    my_settings.pub_ip,
-                    my_settings.pub_port,
-                    my_settings.nat_type,
-                    my_settings.port_allocation,
-                );
-                if let Some(to_gnome) = &send_to_gnome {
-                    let _ = to_gnome.send(request);
+                if my_settings.pub_port == 0 {
+                    let _ = send_to_gnome.take();
+                } else {
+                    let request = ToGnome::NetworkSettingsUpdate(
+                        true,
+                        my_settings.pub_ip,
+                        my_settings.pub_port,
+                        my_settings.nat_type,
+                        my_settings.port_allocation,
+                    );
+                    if let Some(to_gnome) = send_to_gnome.take() {
+                        let _ = to_gnome.send(request);
+                    }
                 }
+                // eprintln!("DPunch waiting for my settings: FALSE");
                 waiting_for_my_settings = false;
             }
         }
@@ -192,6 +196,13 @@ async fn socket_maintainer(
                             "Failed to send STUN via IPv6: {:?}",
                             ping_result.err().unwrap()
                         );
+                        let my_ipv6_settings = NetworkSettings {
+                            pub_ip: IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)),
+                            pub_port: 0,
+                            nat_type: swarm_consensus::Nat::Unknown,
+                            port_allocation: (PortAllocationRule::FullCone, 0),
+                        };
+                        let _ = my_network_settings_sender.send(my_ipv6_settings);
                     }
                     // let my_addr = socket.local_addr().unwrap();
                     // let my_ipv6_settings = NetworkSettings {
@@ -215,6 +226,13 @@ async fn socket_maintainer(
                     ));
                 } else {
                     eprintln!("Unable to bind IPv6 socket");
+                    let my_ipv6_settings = NetworkSettings {
+                        pub_ip: IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)),
+                        pub_port: 0,
+                        nat_type: swarm_consensus::Nat::Unknown,
+                        port_allocation: (PortAllocationRule::FullCone, 0),
+                    };
+                    let _ = my_network_settings_sender.send(my_ipv6_settings);
                 }
             } else {
                 let _ = my_network_settings_sender.send(my_settings);
