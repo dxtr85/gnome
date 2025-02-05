@@ -564,7 +564,7 @@ async fn probe_socket(
     // print!("sent ");
     for i in (1..10).rev() {
         let _ = socket.send_to(&[i as u8], remote_addr).await;
-        print!("{} ", i);
+        // eprint!("{} ", i);
         sleep(sleep_time).await;
     }
     let mut socket_found = false;
@@ -742,13 +742,14 @@ pub async fn cluster_punch_it(
     let mut his_current = his_port_min;
     let (send, recv) = channel();
     for i in 0..my_count {
-        let a_socket = UdpSocket::bind((my_ip, my_port_min + i)).await.unwrap();
-        spawn(probe_socket(a_socket, (his_ip, his_current), send.clone()));
-        his_current += his_step;
-        if his_current > his_port_max {
-            his_current = his_port_min;
+        if let Ok(a_socket) = UdpSocket::bind((my_ip, my_port_min + i)).await {
+            spawn(probe_socket(a_socket, (his_ip, his_current), send.clone()));
+            his_current += his_step;
+            if his_current > his_port_max {
+                his_current = his_port_min;
+            }
+            next_remote_port.insert(my_port_min + i, his_current);
         }
-        next_remote_port.insert(my_port_min + i, his_current);
     }
 
     // TODO: we need to create multiple socket instances: 50 maybe 100
