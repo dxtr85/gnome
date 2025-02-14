@@ -140,17 +140,45 @@ impl CommunicationChannels {
         } else {
             if ipv6 {
                 if self.udpv6.0 {
-                    self.udpv6.1 = ChannelAvailability::Available(ip, port, nat, port_rule)
+                    match nat {
+                        Nat::None | Nat::FullCone => {
+                            self.udpv6.1 = ChannelAvailability::Available(ip, port, nat, port_rule)
+                        }
+                        other => {
+                            self.udpv6.1 = ChannelAvailability::Available(ip, 0, other, port_rule)
+                        }
+                    }
                 }
                 if self.tcpv6.0 {
-                    self.tcpv6.1 = ChannelAvailability::Available(ip, port, nat, port_rule)
+                    match nat {
+                        Nat::None | Nat::FullCone => {
+                            self.tcpv6.1 = ChannelAvailability::Available(ip, port, nat, port_rule)
+                        }
+                        other => {
+                            self.tcpv6.1 = ChannelAvailability::Available(ip, 0, other, port_rule)
+                        }
+                    }
                 }
             } else {
                 if self.udp.0 {
-                    self.udp.1 = ChannelAvailability::Available(ip, port, nat, port_rule)
+                    match nat {
+                        Nat::None | Nat::FullCone => {
+                            self.udp.1 = ChannelAvailability::Available(ip, port, nat, port_rule)
+                        }
+                        other => {
+                            self.udp.1 = ChannelAvailability::Available(ip, 0, other, port_rule)
+                        }
+                    }
                 }
                 if self.tcp.0 {
-                    self.tcp.1 = ChannelAvailability::Available(ip, port, nat, port_rule)
+                    match nat {
+                        Nat::None | Nat::FullCone => {
+                            self.tcp.1 = ChannelAvailability::Available(ip, port, nat, port_rule)
+                        }
+                        other => {
+                            self.tcp.1 = ChannelAvailability::Available(ip, 0, other, port_rule)
+                        }
+                    }
                 }
             }
         }
