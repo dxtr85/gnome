@@ -340,7 +340,7 @@ async fn race_tasks(
                             deciph.drain(0..1);
                             let cast_id = CastID(deciph.drain(0..1).next().unwrap());
                             let neighbor_request = bytes_to_neighbor_request(deciph);
-                            // eprintln!("NR: {:?}", neighbor_request);
+                            eprintln!("NR: {:?}", neighbor_request);
                             match neighbor_request {
                                 NeighborRequest::CreateNeighbor(remote_gnome_id, swarm_name) => {
                                     // eprintln!(

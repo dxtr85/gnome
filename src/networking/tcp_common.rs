@@ -120,12 +120,12 @@ pub async fn serve_socket(
             }
             if let Some((id, msg)) = out_of_order_recvd.remove(&new_id) {
                 if let Some((_snd, c_snd)) = senders.get(&new_id) {
-                    eprintln!("TCP Sending delayed request: {:?}", msg);
-                    let _ = c_snd.send(CastMessage {
+                    let _res = c_snd.send(CastMessage {
                         c_type: CastType::Unicast,
                         id,
                         content: CastContent::Request(msg),
                     });
+                    eprintln!("TCP Sending delayed request -> {:?}", _res);
                 }
             }
         }
