@@ -1,3 +1,7 @@
+use async_std::channel as achannel;
+use async_std::channel::Receiver as AReceiver;
+use async_std::channel::Sender as ASender;
+use async_std::task::sleep;
 use async_std::task::spawn;
 use rsa::pkcs1::RsaPublicKey;
 use rsa::pkcs8::der::Decode;
@@ -5,7 +9,9 @@ use std::fs::read_to_string;
 pub use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
+use std::time::Duration;
 use swarm_consensus::GnomeId;
+use swarm_consensus::GnomeToManager;
 use swarm_consensus::NetworkSettings;
 use swarm_consensus::Notification;
 use swarm_consensus::SwarmName;
@@ -47,16 +53,19 @@ pub mod prelude {
     pub use swarm_consensus::ToGnome;
 }
 
-pub fn init(
+pub async fn init(
     work_dir: PathBuf,
     neighbor_settings: Option<Vec<(GnomeId, NetworkSettings)>>,
     // app_sync_hash: u64,
-) -> (Sender<ToGnomeManager>, Receiver<FromGnomeManager>, GnomeId) {
+) -> (
+    ASender<ToGnomeManager>,
+    AReceiver<FromGnomeManager>,
+    GnomeId,
+) {
     // ) {
     // println!("init start");
-    let (req_sender, req_receiver) = channel();
-    let (resp_sender, resp_receiver) = channel();
-
+    let (req_sender, req_receiver) = achannel::unbounded();
+    let (resp_sender, resp_receiver) = achannel::unbounded();
     let mut gnome_id = GnomeId(0);
     // println!("num of args: ");
     // let server_ip: IpAddr = "192.168.0.106".parse().unwrap();
@@ -129,7 +138,7 @@ pub fn init(
     // println!("Pub key: {:?}", res);
     let (mut gmgr, networking_receiver) =
         // create_manager_and_receiver(gnome_id, Some(network_settings));
-        create_manager_and_receiver(gnome_id, pub_key_der, priv_key_pem, None, decrypter.clone().unwrap(), req_receiver,
+        create_manager_and_receiver(gnome_id, pub_key_der, priv_key_pem, None, decrypter.clone().unwrap(), (req_sender.clone(),req_receiver),
         resp_sender.clone());
 
     // let app_sync_hash = 0; // TODO when we read data from disk we update app_sync_hash
@@ -160,13 +169,15 @@ pub fn init(
         filtered_neighbor_settings,
         None,
     ) {
-        let _ = resp_sender.send(FromGnomeManager::MyID(gnome_id));
-        let _ = resp_sender.send(FromGnomeManager::SwarmJoined(
-            swarm_id,
-            SwarmName::new(GnomeId::any(), "/".to_string()).unwrap(),
-            user_req,
-            user_res,
-        ));
+        let _ = resp_sender.send(FromGnomeManager::MyID(gnome_id)).await;
+        let _ = resp_sender
+            .send(FromGnomeManager::SwarmJoined(
+                swarm_id,
+                SwarmName::new(GnomeId::any(), "/".to_string()).unwrap(),
+                user_req,
+                user_res,
+            ))
+            .await;
         eprintln!("Joined `any /` swarm");
     }
 
@@ -227,12 +238,14 @@ pub fn create_manager_and_receiver(
     priv_key_pem: String,
     network_settings: Option<NetworkSettings>,
     decrypter: Decrypter,
-    req_receiver: Receiver<ToGnomeManager>,
-    resp_sender: Sender<FromGnomeManager>,
+    (req_sender, req_receiver): (ASender<ToGnomeManager>, AReceiver<ToGnomeManager>),
+    resp_sender: ASender<FromGnomeManager>,
 ) -> (Manager, Receiver<Notification>) {
     let (networking_sender, networking_receiver) = channel();
     // let network_settings = None;
     // let mgr = start(gnome_id, network_settings, networking_sender);
+    let (sender, receiver) = channel();
+    spawn(serve_gnome_requests(receiver, req_sender));
     let mgr = Manager::new(
         gnome_id,
         pub_key_der,
@@ -242,10 +255,24 @@ pub fn create_manager_and_receiver(
         decrypter,
         req_receiver,
         resp_sender,
+        sender,
     );
     (mgr, networking_receiver)
 }
 
+async fn serve_gnome_requests(
+    from_gnome: Receiver<GnomeToManager>,
+    to_manager: ASender<ToGnomeManager>,
+) {
+    let recv_timeout = Duration::from_millis(8);
+    loop {
+        if let Ok(request) = from_gnome.recv_timeout(recv_timeout) {
+            to_manager.send(ToGnomeManager::FromGnome(request)).await;
+        } else {
+            sleep(recv_timeout).await
+        }
+    }
+}
 // async fn activate_gnome(
 //     // _gnome_id: GnomeId,
 //     // ip: IpAddr,
