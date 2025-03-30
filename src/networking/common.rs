@@ -156,8 +156,10 @@ pub fn swarm_names_from_bytes(recv_buf: &[u8]) -> Vec<SwarmName> {
             i += name_len as usize + 1;
             // eprintln!("i:{}", i)
         } else {
+            // eprintln!("Founder not any {}-{}", i, i + name_len as usize - 127);
             let sn_res = SwarmName::from(&recv_buf[i..i + name_len as usize - 127]);
             if let Ok(sn) = sn_res {
+                // eprintln!("SN: {}", sn);
                 recvd_names.push(sn);
             } else {
                 eprintln!("Error building SwarmName: {:?}", sn_res.err().unwrap());

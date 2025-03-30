@@ -60,13 +60,16 @@ pub async fn init(
 ) -> (
     ASender<ToGnomeManager>,
     AReceiver<FromGnomeManager>,
-    GnomeId,
+    SwarmName,
 ) {
     // ) {
     // println!("init start");
     let (req_sender, req_receiver) = achannel::unbounded();
     let (resp_sender, resp_receiver) = achannel::unbounded();
-    let mut gnome_id = GnomeId(0);
+    let mut my_name = SwarmName {
+        founder: GnomeId::any(),
+        name: format!("/"),
+    };
     // println!("num of args: ");
     // let server_ip: IpAddr = "192.168.0.106".parse().unwrap();
     // let server_ip: IpAddr = "100.116.51.23".parse().unwrap();
@@ -94,7 +97,7 @@ pub async fn init(
             if ki.is_err() {
                 println!("key err: {:?}", ki);
             }
-            gnome_id = GnomeId(encr.hash());
+            my_name.founder = GnomeId(encr.hash());
         }
         if let Some((priv_key, _pub_key)) = get_key_pair_from_files(priv_path, pub_path) {
             // println!("This is to verify signing works");
@@ -128,7 +131,7 @@ pub async fn init(
             //         panic!("Failed to verify message");
             //     }
             // }
-            gnome_id = GnomeId(encr.hash());
+            my_name.founder = GnomeId(encr.hash());
         }
         // encrypter = Some(Encrypter::create(pub_key));
     } else {
@@ -138,7 +141,7 @@ pub async fn init(
     // println!("Pub key: {:?}", res);
     let (mut gmgr, networking_receiver) =
         // create_manager_and_receiver(gnome_id, Some(network_settings));
-        create_manager_and_receiver(gnome_id, pub_key_der, priv_key_pem, None, decrypter.clone().unwrap(), (req_sender.clone(),req_receiver),
+        create_manager_and_receiver(my_name.founder, pub_key_der, priv_key_pem, None, decrypter.clone().unwrap(), (req_sender.clone(),req_receiver),
         resp_sender.clone());
 
     // let app_sync_hash = 0; // TODO when we read data from disk we update app_sync_hash
@@ -149,7 +152,7 @@ pub async fn init(
     let mut filtered_neighbor_settings = vec![];
     if let Some(neighbors) = neighbor_settings {
         for (g_id, ns) in neighbors {
-            if g_id == gnome_id {
+            if g_id == my_name.founder {
                 eprintln!("Skipping my Pub IP");
                 continue;
             }
@@ -169,7 +172,9 @@ pub async fn init(
         filtered_neighbor_settings,
         None,
     ) {
-        let _ = resp_sender.send(FromGnomeManager::MyID(gnome_id)).await;
+        let _ = resp_sender
+            .send(FromGnomeManager::MyName(my_name.clone()))
+            .await;
         let _ = resp_sender
             .send(FromGnomeManager::SwarmJoined(
                 swarm_id,
@@ -229,7 +234,7 @@ pub async fn init(
     //       If we are between min and min_off we can stay in this configuration.
     //
     spawn(gmgr.do_your_job());
-    (req_sender, resp_receiver, gnome_id)
+    (req_sender, resp_receiver, my_name)
 }
 
 pub fn create_manager_and_receiver(
@@ -267,7 +272,7 @@ async fn serve_gnome_requests(
     let recv_timeout = Duration::from_millis(8);
     loop {
         if let Ok(request) = from_gnome.recv_timeout(recv_timeout) {
-            to_manager.send(ToGnomeManager::FromGnome(request)).await;
+            let _ = to_manager.send(ToGnomeManager::FromGnome(request)).await;
         } else {
             sleep(recv_timeout).await
         }

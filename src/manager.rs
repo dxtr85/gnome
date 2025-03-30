@@ -43,8 +43,8 @@ pub enum FromGnomeManager {
     SwarmJoined(SwarmID, SwarmName, Sender<ToGnome>, Receiver<GnomeToApp>),
     // SwarmTerminated(SwarmID, SwarmName),
     NewSwarmAvailable(SwarmName, GnomeId, bool),
-    SwarmFounderDetermined(SwarmID, GnomeId),
-    MyID(GnomeId),
+    SwarmFounderDetermined(SwarmID, SwarmName),
+    MyName(SwarmName),
     MyPublicIPs(Vec<(IpAddr, u16, Nat, (PortAllocationRule, i8))>),
     Disconnected(Vec<(SwarmID, SwarmName)>),
 }
@@ -466,29 +466,32 @@ impl Manager {
         let mut disconnected_swarms = vec![];
         // while let Ok(request) = self.receiver.try_recv() {
         match request {
-            GnomeToManager::FounderDetermined(swarm_id, founder_id) => {
+            GnomeToManager::FounderDetermined(swarm_id, s_name) => {
                 let _res = self
                     .resp_sender
                     .send(FromGnomeManager::SwarmFounderDetermined(
-                        swarm_id, founder_id,
+                        swarm_id,
+                        s_name.clone(),
                     ))
                     .await;
-                eprintln!("Founder Det: {} {} {:?}", swarm_id, founder_id, _res);
+                eprintln!("Founder Det: {} {} {:?}", swarm_id, s_name, _res);
                 eprintln!("existing: {:?}", self.name_to_id.keys());
                 let mut g_name = SwarmName {
                     founder: GnomeId::any(),
                     name: "/".to_string(),
                 };
                 if let Some(e_id) = self.name_to_id.remove(&g_name) {
+                    let founder = s_name.founder;
                     if e_id == swarm_id {
                         eprintln!("Updating existing name_to_id mapping");
-                        g_name.founder = founder_id;
+                        g_name = s_name;
                     }
                     self.name_to_id.insert(g_name, e_id);
+                    let _ = self.to_networking.send(Notification::SetFounder(founder));
+                } else {
+                    eprintln!("No generic swarm name to overwrite");
+                    self.name_to_id.insert(s_name, swarm_id);
                 }
-                let _ = self
-                    .to_networking
-                    .send(Notification::SetFounder(founder_id));
             }
             GnomeToManager::PublicAddress(ip, port, nat, port_rule) => {
                 let pub_ips = self

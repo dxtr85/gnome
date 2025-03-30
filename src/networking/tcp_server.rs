@@ -278,7 +278,7 @@ async fn prepare_and_serve(
 }
 
 async fn receive_remote_swarm_names(reader: &mut TcpStream, remote_names: &mut Vec<SwarmName>) {
-    let mut recv_buf = [0u8; 1024];
+    let mut recv_buf = [0u8; 1450];
     *remote_names = if let Ok(count) = reader.read(&mut recv_buf).await {
         swarm_names_from_bytes(&recv_buf[0..count])
     } else {

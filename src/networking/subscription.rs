@@ -88,7 +88,9 @@ pub async fn subscriber(
                         //     }
                         // }
                         swarms.insert(notif_bundle.swarm_name.clone(), notif_bundle.request_sender);
-                        names.push(notif_bundle.swarm_name.clone());
+                        if !names.contains(&notif_bundle.swarm_name) {
+                            names.push(notif_bundle.swarm_name.clone());
+                        }
                         // TODO: inform existing sockets about new subscription
                         eprintln!("Added swarm in networking: {}", notif_bundle.swarm_name);
                         // TODO: serve err results

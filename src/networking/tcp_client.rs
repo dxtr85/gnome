@@ -252,13 +252,13 @@ async fn receive_remote_swarm_names(
     // recv_buf: &mut BytesMut,
     remote_names: &mut Vec<SwarmName>,
 ) {
-    let mut recv_buf = [0u8; 1024];
+    let mut recv_buf = [0u8; 1450];
     *remote_names = if let Ok(count) = reader.read(&mut recv_buf).await {
-        // eprintln!(
-        //     "Recv buf (count: {}): {:?}",
-        //     count,
-        //     &recv_buf[..count] // String::from_utf8(recv_buf[..count].try_into().unwrap()).unwrap()
-        // );
+        eprintln!(
+            "Recv buf (count: {}): {:?}",
+            count,
+            &recv_buf[..count] // String::from_utf8(recv_buf[..count].try_into().unwrap()).unwrap()
+        );
         // eprintln!("Reading SwarmNames gnome/networking/common");
         // recv_buf[..count]
         //     // TODO split by some reasonable delimiter
