@@ -79,7 +79,7 @@ pub async fn run_client(
 
     let mut success = false;
     if try_udp {
-        eprintln!("Trying to communicate over UDP…");
+        eprintln!("Trying to communicate over UDP with {:?}", send_addr);
         let timeout_sec = Duration::from_secs(1);
         let (t_send, timeout) = channel();
         spawn(time_out(timeout_sec, Some(t_send)));
@@ -194,9 +194,10 @@ async fn establish_secure_connection(
     let _ = dedicated_socket.send(&[0u8]).await;
 
     let mut recv_buf = [0u8; 1100];
+    eprintln!("Waiting for bytes on dedicated UDP socket");
     let recv_result = dedicated_socket.recv(&mut recv_buf).await;
     if let Ok(count) = recv_result {
-        eprintln!("UDP Received {} bytes", count);
+        eprintln!("UDP 2 Received {} bytes", count);
         let decr_res = session_key.decrypt(&recv_buf[..count]);
         if let Ok(remote_pubkey_pem) = decr_res {
             let remote_id_pub_key_pem =

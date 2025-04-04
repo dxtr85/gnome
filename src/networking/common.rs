@@ -34,7 +34,7 @@ pub async fn collect_subscribed_swarm_names(
     sender: Sender<Subscription>,
     receiver: Receiver<Subscription>,
 ) -> Receiver<Subscription> {
-    // println!("Collecting swarm names...");
+    // eprintln!("Collecting swarm names...");
     let _ = sender.send(Subscription::ProvideList(requestor));
     let sleep_time = Duration::from_millis(128);
     loop {

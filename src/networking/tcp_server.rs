@@ -139,20 +139,20 @@ async fn establish_secure_connection(
     let to_str_res = std::str::from_utf8(&bytes[..count]);
     if to_str_res.is_err() {
         eprintln!("Unable to convert bytes to string");
-        reader.close().await;
+        let _ = reader.close().await;
         return None;
     }
     let id_pub_key_pem = to_str_res.unwrap();
     eprintln!("TCP Server decoded string: \n{}", id_pub_key_pem);
     if id_pub_key_pem == pub_key_pem {
-        reader.close().await;
+        let _ = reader.close().await;
         return None;
     }
     eprintln!("TCP stream received {} bytes", count);
     let result = Encrypter::create_from_data(id_pub_key_pem);
     if result.is_err() {
-        eprintln!("Failed to build Encripter from received PEM: {:?}", result);
-        reader.close().await;
+        eprintln!("Failed to build Encrypter from received PEM: {:?}", result);
+        let _ = reader.close().await;
         return None;
     }
     let encr = result.unwrap();
@@ -169,7 +169,7 @@ async fn establish_secure_connection(
     let encr_res = encr.encrypt(&bytes_to_send);
     if encr_res.is_err() {
         eprintln!("Failed to encrypt symmetric key: {:?}", encr_res);
-        reader.close().await;
+        let _ = reader.close().await;
         return None;
     }
     eprintln!("Encrypted symmetric key");
@@ -181,7 +181,7 @@ async fn establish_secure_connection(
     // let res = dedicated_socket.send_to(&encrypted_data, remote_addr).await;
     if res.is_err() {
         eprintln!("Failed to send encrypted symmetric key: {:?}", res);
-        writer.close().await;
+        let _ = writer.close().await;
         return None;
     }
     eprintln!("Sent encrypted symmetric key {}", encrypted_data.len());

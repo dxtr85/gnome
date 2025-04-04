@@ -80,9 +80,11 @@ pub async fn run_networking_tasks(
         token_dispenser_recv,
     ));
     let mut sub_sends = HashMap::new();
-    if bind_result.is_ok() {
-        sub_sends.insert(Requestor::Udp, sub_send_one);
-    }
+    // If all ports are already in use, we have to add one sender
+    // in order for this entire thing to work
+    // if bind_result.is_ok() {
+    sub_sends.insert(Requestor::Udp, sub_send_one.clone());
+    // }
     if tcp_bind_result.is_ok() {
         sub_sends.insert(Requestor::Tcp, sub_send_one_bis);
     }
@@ -92,6 +94,9 @@ pub async fn run_networking_tasks(
     if ipv6_tcp_bind_result.is_ok() {
         sub_sends.insert(Requestor::Tcpv6, sub_send_one_cis);
     }
+    // if sub_sends.is_empty() {
+    //     sub_sends.insert(Requestor::Udp, sub_send_one);
+    // }
     spawn(subscriber(
         // host_ip,
         sub_sends,

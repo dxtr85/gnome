@@ -283,7 +283,10 @@ async fn race_tasks(
                                         // eprintln!("Decr req: {:?}", message);
                                         let _send_result = cast_sender.send(message);
                                         if _send_result.is_err() {
-                                            eprintln!("Unable to pass NeighborRequest to gnome");
+                                            eprintln!(
+                                                "Unable to pass NeighborRequest to gnome: {}",
+                                                _send_result.err().unwrap()
+                                            );
                                         }
                                     }
                                     254 => {

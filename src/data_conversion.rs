@@ -594,7 +594,7 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, bytes: &mut Vec<u8>) {
             }
         }
         NeighborRequest::CreateNeighbor(g_id, swarm_name) => {
-            eprintln!("CreateNeighbor to bytes");
+            eprintln!("CreateNeighbor {} for {} to bytes", g_id, swarm_name);
             bytes.push(253);
             for byte in g_id.0.to_be_bytes() {
                 bytes.push(byte);

@@ -35,18 +35,28 @@ pub async fn run_tcp_client(
 ) {
     eprintln!("TCP CLIENT {:?}:{}", ip, port);
     let stream = TcpStream::connect((ip, port)).await;
+    eprintln!("TCP connect returned");
     if stream.is_err() {
         eprintln!("Could not establish TCP connection with {:?}", (ip, port));
         return;
+    } else {
+        eprintln!("Established TCP connection with {:?}", (ip, port));
     }
     let mut stream = stream.unwrap();
 
     // let send_result = socket.send_to(pub_key_pem.as_bytes(), send_addr).await;
     let send_result = stream.write(pub_key_pem.as_bytes()).await;
     let _flush_result = stream.flush().await;
+    // It appears that there is a bug in async scheduler that
+    // sometimes ignores given task if it does not have any
+    // IO operations.
+    // For that reason following eprintln! call is necessary
+    // to establish a new TCP connection with a neighbor
+    // In other places some eprintln! calls also serve this fn
+    eprintln!("Pubkey sent: {:?}({:?})", send_result, _flush_result);
     if send_result.is_err() {
         eprintln!("Unable te send my pub key: {:?}", send_result);
-        stream.close().await;
+        let _ = stream.close().await;
         return;
         // return receiver;
         // } else {
@@ -59,7 +69,7 @@ pub async fn run_tcp_client(
     // while timeout.try_recv().is_err() {
     if swarm_names.is_empty() {
         eprintln!("User is not subscribed to any Swarms");
-        stream.close().await;
+        let _ = stream.close().await;
         return;
         // return receiver;
     }
@@ -88,7 +98,7 @@ async fn establish_secure_connection(
     pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,
 ) {
-    // eprintln!("In establish secure TCP connection ");
+    eprintln!("In establish secure TCP connection ");
     // let mut remote_gnome_id: GnomeId = GnomeId(0);
     let session_key: SessionKey; // = SessionKey::from_key(&[0; 32]);
                                  // let remote_addr: SocketAddr; // = "0.0.0.0:0".parse().unwrap();
@@ -109,8 +119,14 @@ async fn establish_secure_connection(
         _result2 = t2 => true,
     };
     if timed_out {
-        stream.close().await;
+        eprintln!("I am done, timed out");
+        let _ = stream.close().await;
         return;
+    } else if count == 0 {
+        // TODO: fix this
+        eprintln!("zero bytes received");
+        //     let _ = stream.close().await;
+        //     return;
     }
     // let recv_result = stream.recv_from(&mut recv_buf).await;
     // if recv_result.is_ok() {
@@ -124,16 +140,16 @@ async fn establish_secure_connection(
     // println!("Dec key: {:?}", decoded_key);
     // if let Ok((count, remote_adr)) = recv_result {
     //     remote_addr = remote_adr;
-    // eprintln!("Received {} bytes 1", count);
+    eprintln!("Received {} bytes 1", count);
     let decoded_key = decrypter.decrypt(&recv_buf[..count]);
 
     if let Ok(sym_key) = decoded_key {
         // eprintln!("Got session key: {:?}", sym_key);
         session_key = SessionKey::from_key(&sym_key.try_into().unwrap());
     } else {
-        eprintln!("Unable to decode key");
+        eprintln!("Unable to decode key: {}", decoded_key.err().unwrap());
         // return resp_receiver;
-        stream.close().await;
+        let _ = stream.close().await;
         return;
     }
 
