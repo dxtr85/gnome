@@ -45,6 +45,10 @@ pub async fn collect_subscribed_swarm_names(
                     // names.push(name.to_owned());
                     continue;
                 }
+                Subscription::Removed(ref _name) => {
+                    // names.push(name.to_owned());
+                    continue;
+                }
                 Subscription::List(ref nnames) => {
                     *names = nnames.to_owned();
                     break;

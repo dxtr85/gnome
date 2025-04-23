@@ -151,12 +151,14 @@ pub async fn init(
     // let neighbor_settings = None;
     let mut filtered_neighbor_settings = vec![];
     if let Some(neighbors) = neighbor_settings {
+        eprintln!("I am {}", my_name.founder);
         for (g_id, ns) in neighbors {
             if g_id == my_name.founder {
-                eprintln!("Skipping my Pub IP");
+                eprintln!("Skipping my Pub IP ({:?})", ns);
                 continue;
             }
             if !filtered_neighbor_settings.contains(&ns) {
+                eprintln!("Adding {} setting ({:?})", g_id, ns);
                 filtered_neighbor_settings.push(ns);
             }
         }

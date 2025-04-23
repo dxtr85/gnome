@@ -289,6 +289,7 @@ pub async fn serve_socket(
                 // let dgram_header = byte_iterator.next().unwrap();
                 let dgram_header = deciph.first().unwrap();
                 let swarm_id = dgram_header & 0b00111111;
+                let mut sender_to_drop = None;
                 if let Some((sender, cast_sender)) = senders.get(&swarm_id) {
                     if dgram_header & 0b11000000 == 0 {
                         // TODO: regular message
@@ -319,6 +320,7 @@ pub async fn serve_socket(
                                 // eprintln!("Decr req: {:?}", message);
                                 let _send_result = cast_sender.send(message);
                                 if _send_result.is_err() {
+                                    sender_to_drop = Some(swarm_id);
                                     eprintln!(
                                         "1 Unable to pass NeighborRequest to gnome {}",
                                         _send_result.err().unwrap()
@@ -334,6 +336,7 @@ pub async fn serve_socket(
                                 // eprintln!("Socket sending {:?} up…", message.content);
                                 let _send_result = cast_sender.send(message);
                                 if _send_result.is_err() {
+                                    sender_to_drop = Some(swarm_id);
                                     eprintln!(
                                         "Unable to pass NeighborResponseto gnome: {}",
                                         _send_result.err().unwrap()
@@ -345,6 +348,7 @@ pub async fn serve_socket(
                                     // eprintln!("Decr other: {:?}", message);
                                     let _send_result = cast_sender.send(message);
                                     if _send_result.is_err() {
+                                        sender_to_drop = Some(swarm_id);
                                         // TODO: if failed maybe we are no longer interested?
                                         // Maybe send back a bye if possible?
                                         // Remove given Sender/Receiver pair
@@ -359,6 +363,7 @@ pub async fn serve_socket(
                         // eprintln!("Decr other2: {:?}", message);
                         let _send_result = cast_sender.send(message);
                         if _send_result.is_err() {
+                            sender_to_drop = Some(swarm_id);
                             // TODO: if failed maybe we are no longer interested?
                             // Maybe send back a bye if possible?
                             // Remove given Sender/Receiver pair
@@ -433,6 +438,9 @@ pub async fn serve_socket(
                         }
                     }
                 }
+                // if let Some(drop_id) = sender_to_drop {
+                //     senders.remove(&drop_id);
+                // }
                 // } else {
                 //     eprintln!("Failed to decipher incoming stream ");
             }

@@ -22,7 +22,7 @@ pub enum Requestor {
 #[derive(Debug)]
 pub enum Subscription {
     Added(SwarmName),
-    // Removed(String),
+    Removed(SwarmName),
     ProvideList(Requestor),
     List(Vec<SwarmName>),
     IncludeNeighbor(SwarmName, Neighbor),
@@ -68,6 +68,27 @@ pub async fn subscriber(
                                 name.founder = founder;
                             }
                         }
+                    }
+                    Notification::RemoveSwarm(swarm_name) => {
+                        eprintln!("Networking about to remove {}", swarm_name);
+                        //TODO: should direct punch be notified?
+                        let res = swarms.remove(&swarm_name);
+                        eprintln!("Removed from swarms list: {}", res.is_some());
+                        let mut name_idx = None;
+                        for (idx, name) in names.iter().enumerate() {
+                            if *name == swarm_name {
+                                name_idx = Some(idx);
+                                break;
+                            }
+                        }
+                        if let Some(idx) = name_idx {
+                            eprintln!("Removing from names list");
+                            names.remove(idx);
+                        }
+                        for sender in sub_senders.values() {
+                            let _ = sender.send(Subscription::Removed(swarm_name.clone()));
+                        }
+                        //TODO: should token dispenser be informed?
                     }
                     Notification::AddSwarm(notif_bundle) => {
                         // TODO: only one punching service for all swarms!
@@ -144,8 +165,11 @@ pub async fn subscriber(
                     }
                 }
                 Subscription::ProvideList(req) => {
-                    eprintln!("sub sending: {:?}", names);
                     if let Some(sender) = sub_senders.get(&req) {
+                        eprintln!("sub sending:");
+                        for name in &names {
+                            eprintln!("{}", name);
+                        }
                         let _ = sender.send(Subscription::List(names.clone()));
                     }
                     // if matches!(req, Requestor::Udp) {
