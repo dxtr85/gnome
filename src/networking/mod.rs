@@ -118,7 +118,7 @@ pub async fn run_networking_tasks(
         sub_recv_one,
     )
     .await;
-    eprintln!("received swarm names");
+    eprintln!("received swarm names len: {}", swarm_names.len());
     // swarm_names.sort();
     spawn(run_client(
         swarm_names,

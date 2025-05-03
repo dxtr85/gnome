@@ -252,7 +252,7 @@ pub fn create_manager_and_receiver(
     // let network_settings = None;
     // let mgr = start(gnome_id, network_settings, networking_sender);
     let (sender, receiver) = channel();
-    spawn(serve_gnome_requests(receiver, req_sender));
+    spawn(serve_gnome_requests(receiver, req_sender.clone()));
     let mgr = Manager::new(
         gnome_id,
         pub_key_der,
@@ -261,6 +261,7 @@ pub fn create_manager_and_receiver(
         networking_sender,
         decrypter,
         req_receiver,
+        req_sender,
         resp_sender,
         sender,
     );

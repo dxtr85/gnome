@@ -52,7 +52,7 @@ pub async fn subscriber(
     let mut names: Vec<SwarmName> = Vec::with_capacity(10);
     eprintln!("Subscriber service started");
     let mut notify_holepunch = true;
-    let sleep_time = Duration::from_millis(256);
+    let sleep_time = Duration::from_millis(8);
     // let mut pending_neighbors = HashMap::new();
     loop {
         // print!("sub");
@@ -93,7 +93,10 @@ pub async fn subscriber(
                     Notification::AddSwarm(notif_bundle) => {
                         // TODO: only one punching service for all swarms!
                         // TODO: find a way to update swarm_name once founder is determined
-                        eprintln!("Received Bundle for {:?}", notif_bundle.swarm_name);
+                        eprintln!(
+                            "Subscription received Bundle for {}",
+                            notif_bundle.swarm_name
+                        );
                         let _ = direct_punch_sender.send((
                             notif_bundle.swarm_name.clone(),
                             notif_bundle.request_sender.clone(),

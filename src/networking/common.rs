@@ -237,7 +237,10 @@ pub fn create_a_neighbor_for_each_swarm(
     // encrypter: Encrypter,
     pub_key_pem: String,
 ) {
-    eprintln!("Neighbor member of swarms: {:?}", remote_names);
+    eprintln!("Neighbor member of swarms:");
+    for r_name in &remote_names {
+        eprintln!("{}", r_name);
+    }
     // println!("komon names: {:?}", common_names);
     for name in common_names {
         let (s1, r1) = channel();
