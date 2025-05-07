@@ -34,6 +34,7 @@ use swarm_consensus::NotificationBundle;
 // use swarm_consensus::Response;
 
 pub mod prelude {
+    pub use crate::crypto::sha_hash;
     pub use crate::init;
     pub use crate::manager::FromGnomeManager;
     pub use crate::manager::Manager as GManager;

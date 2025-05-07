@@ -75,7 +75,7 @@ use swarm_consensus::SyncData;
 
 // pub fn bytes_to_message(bytes: &[u8]) -> Result<Message, ConversionError> {
 pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
-    // println!("Bytes to message: {:?}", bytes.len());
+    // eprintln!("Bytes to message: {:?}", bytes.len());
     // println!("decoding: {:#08b} {:?}", bytes[0], bytes);
     // let bytes_len = bytes.len();
     let swarm_time: SwarmTime = SwarmTime(as_u32_be(&[bytes[1], bytes[2], bytes[3], bytes[4]]));
@@ -257,7 +257,7 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
 
     // } else if bytes[0] & 0b0_111_0000 == 64 {
     } else if bytes[0] & 0b0010_0000 == 0 {
-        // println!("Header Block, Payload KeepAlive");
+        // eprintln!("Header Block, Payload KeepAlive");
         let bandwith: u64 = as_u64_be(&[
             bytes[data_idx],
             bytes[data_idx + 1],
@@ -271,13 +271,14 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
         Payload::KeepAlive(bandwith)
     // } else if bytes[0] & 0b0010_0000 == 32 {
     } else {
-        // println!("Header Block, Payload Block");
         let bid: u64 = as_u64_be(&[
             bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12],
         ]);
+        eprintln!("Header Block, Payload Block id: {}", bid);
         let gnome_id: u64 = as_u64_be(&[
             bytes[13], bytes[14], bytes[15], bytes[16], bytes[17], bytes[18], bytes[19], bytes[20],
         ]);
+        eprintln!("GnomeId: {}", gnome_id);
         let sig_type = bytes[data_idx];
         let signature = if sig_type == 0 {
             // println!("Regular sig");
@@ -311,6 +312,9 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
         let data = SyncData::new(Vec::from(&bytes[data_idx..])).unwrap();
         Payload::Block(BlockID(bid), signature, data)
     };
+    eprintln!("DCHeader: {}", header);
+    eprintln!("DCPayload: {}", payload);
+    eprintln!("DCSwarmTime: {}", swarm_time);
     Ok(Message {
         swarm_time,
         neighborhood,
@@ -391,7 +395,7 @@ fn put_u64(vec: &mut Vec<u8>, value: u64) {
     }
 }
 pub fn message_to_bytes(msg: Message) -> Vec<u8> {
-    // println!("Message to bytes: {:?}", msg);
+    // eprintln!("Message to bytes: {:?}", msg);
     let mut bytes = Vec::with_capacity(1033);
     let nhood = msg.neighborhood.0;
     if nhood > 31 {
@@ -449,7 +453,7 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
             }
         }
         Payload::Block(block_id, signature, data) => {
-            // println!("PB: {}", signature.len());
+            // eprintln!("PB: {}", signature.len());
             if !block_id_inserted {
                 put_u64(&mut bytes, block_id.0);
                 // bytes.put_u32(block_id.0);
@@ -465,7 +469,7 @@ pub fn message_to_bytes(msg: Message) -> Vec<u8> {
             }
         }
     };
-    // println!("Message to bytes: {}", bytes.len());
+    // eprintln!("Message to bytes: {}[{:#b}]", bytes.len(), bytes[0]);
     bytes
 }
 

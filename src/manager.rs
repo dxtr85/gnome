@@ -1,6 +1,7 @@
+use crate::crypto::sha_hash;
 use crate::crypto::Decrypter;
 use async_std::task::sleep;
-use std::hash::{DefaultHasher, Hash, Hasher};
+// use std::hash::{DefaultHasher, Hash, Hasher};
 use std::net::IpAddr;
 use std::time::Duration;
 use swarm_consensus::{Nat, SwarmName};
@@ -1143,9 +1144,11 @@ impl Manager {
                 // let res = DecodeRsaPublicKey::from_pkcs1_pem(&key[..key.len() - 4]);
                 // let pub_key: RsaPublicKey;
                 if let Ok(pub_key) = res {
-                    let mut hasher = DefaultHasher::new();
-                    pub_key.hash(&mut hasher);
-                    let id: u64 = hasher.finish();
+                    // let mut hasher = DefaultHasher::new();
+                    // pub_key.hash(&mut hasher);
+                    // let id: u64 = hasher.finish();
+                    // let pkbytes = pub_key.to_pkcs1_der().unwrap();
+                    let id = sha_hash(key);
                     if id != gnome_id.0 {
                         eprintln!("Verify FAIL: GnomeId mismatch!");
                         return false;
@@ -1273,6 +1276,7 @@ impl Manager {
                 self.network_settings,
                 verify,
                 sign,
+                sha_hash,
             );
             // println!("swarm '{}' created ", name);
             // let sender = swarm.sender.clone();

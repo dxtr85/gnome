@@ -689,6 +689,7 @@ pub async fn read_bytes_from_local_stream(
         for (id, receiver) in receivers.iter_mut() {
             let next_option = receiver.try_recv();
             if let Ok(message) = next_option {
+                // eprintln!("Got message local: {:?}", message);
                 // TODO: here we need to add a Datagram header
                 // indicating type of message and id
                 let mut dgram_header = *id;

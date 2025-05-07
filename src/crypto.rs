@@ -17,7 +17,7 @@ use rsa::{
 
 use std::{
     fs::OpenOptions,
-    hash::{DefaultHasher, Hash, Hasher},
+    // hash::{DefaultHasher, Hash, Hasher},
     path::PathBuf,
 };
 
@@ -30,9 +30,13 @@ impl Encrypter {
     }
 
     pub fn hash(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        self.0.hash(&mut hasher);
-        hasher.finish()
+        // let mut hasher = DefaultHasher::new();
+        // let mut hasher = Sha256::new();
+        // self.0.hash(&mut hasher);
+        // hasher.finish()
+        let pkbytes = self.0.to_pkcs1_der().unwrap();
+        sha_hash(pkbytes.as_bytes())
+        // let hash: [u8; 32] = Sha256::digest(&pkbytes).try_into().unwrap();
     }
 
     pub fn pub_key_der(&self) -> Vec<u8> {
@@ -244,4 +248,14 @@ pub fn get_new_key_pair() -> Option<(RsaPrivateKey, RsaPublicKey)> {
         // println!("get_new_key_pair none");
         None
     }
+}
+pub fn sha_hash(data: &[u8]) -> u64 {
+    let bhash: [u8; 32] = Sha256::new_with_prefix(data).finalize().try_into().unwrap();
+    let mut xored: u64 = 0;
+    for i in 0..4 {
+        let first = i * 8;
+        let last = first + 8;
+        xored = xored ^ u64::from_be_bytes(bhash[first..last].try_into().unwrap());
+    }
+    xored
 }
