@@ -44,7 +44,7 @@ pub async fn subscriber(
     sub_receiver: Receiver<Subscription>,
     // sub_sender_two: Sender<Subscription>,
     notification_receiver: Receiver<Notification>,
-    token_dispenser_send: Sender<Sender<u64>>,
+    // token_dispenser_send: Sender<Sender<u64>>,
     holepunch_sender: Sender<SwarmName>,
     direct_punch_sender: Sender<(SwarmName, Sender<ToGnome>, Receiver<NetworkSettings>)>,
 ) {
@@ -132,7 +132,7 @@ pub async fn subscriber(
                                 notify_holepunch = false;
                             }
                         }
-                        let _ = token_dispenser_send.send(notif_bundle.token_sender);
+                        // let _ = token_dispenser_send.send(notif_bundle.token_sender);
                         // TODO: sockets should be able to respond if they want to join
                     }
                 }

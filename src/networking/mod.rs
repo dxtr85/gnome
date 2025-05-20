@@ -48,8 +48,8 @@ use swarm_consensus::{Notification, NotificationBundle};
 pub async fn run_networking_tasks(
     // host_ip: IpAddr,
     server_port: u16,
-    buffer_size_bytes: u64,
-    uplink_bandwith_bytes_sec: u64,
+    // buffer_size_bytes: u64,
+    // uplink_bandwith_bytes_sec: u64,
     notification_receiver: Receiver<Notification>,
     decrypter: Decrypter,
     pub_key_pem: String,
@@ -67,18 +67,18 @@ pub async fn run_networking_tasks(
     let (sub_send_one_cis, sub_recv_one_cis) = channel();
     let (sub_send_one_dis, sub_recv_one_dis) = channel();
     let (sub_send_two, sub_recv_two) = channel();
-    let (token_dispenser_send, token_dispenser_recv) = channel();
+    // let (token_dispenser_send, token_dispenser_recv) = channel();
     let (holepunch_sender, holepunch_receiver) = channel();
-    let (token_pipes_sender, token_pipes_receiver) = channel();
+    // let (token_pipes_sender, token_pipes_receiver) = channel();
     let (send_pair, recv_pair) = channel();
     eprintln!("spawn token_dispenser");
-    spawn(token_dispenser(
-        buffer_size_bytes,
-        uplink_bandwith_bytes_sec,
-        // token_msg_sender,
-        token_pipes_receiver,
-        token_dispenser_recv,
-    ));
+    // spawn(token_dispenser(
+    //     buffer_size_bytes,
+    //     uplink_bandwith_bytes_sec,
+    //     // token_msg_sender,
+    //     token_pipes_receiver,
+    //     token_dispenser_recv,
+    // ));
     let mut sub_sends = HashMap::new();
     // If all ports are already in use, we have to add one sender
     // in order for this entire thing to work
@@ -106,7 +106,7 @@ pub async fn run_networking_tasks(
         sub_recv_two,
         // sub_send_two.clone(),
         notification_receiver,
-        token_dispenser_send,
+        // token_dispenser_send,
         holepunch_sender,
         send_pair,
     ));
@@ -124,7 +124,7 @@ pub async fn run_networking_tasks(
         swarm_names,
         sub_send_two.clone(),
         decrypter.clone(),
-        token_pipes_sender.clone(),
+        // token_pipes_sender.clone(),
         pub_key_pem.clone(),
         None,
     ));
@@ -139,7 +139,7 @@ pub async fn run_networking_tasks(
             listener,
             sub_send_two.clone(),
             sub_recv_one_bis,
-            token_pipes_sender.clone(),
+            // token_pipes_sender.clone(),
             pub_key_pem.clone(),
             // my_names,
         ));
@@ -160,7 +160,7 @@ pub async fn run_networking_tasks(
             socket,
             sub_send_two.clone(),
             sub_recv_one,
-            token_pipes_sender.clone(),
+            // token_pipes_sender.clone(),
             pub_key_pem.clone(),
         ));
         let _ = sub_send_two.send(subscription::Subscription::TransportAvailable(
@@ -182,7 +182,7 @@ pub async fn run_networking_tasks(
             listener,
             sub_send_two.clone(),
             sub_recv_one_cis,
-            token_pipes_sender.clone(),
+            // token_pipes_sender.clone(),
             pub_key_pem.clone(),
             // my_names,
         ));
@@ -203,7 +203,7 @@ pub async fn run_networking_tasks(
             socket,
             sub_send_two.clone(),
             sub_recv_one_dis,
-            token_pipes_sender.clone(),
+            // token_pipes_sender.clone(),
             pub_key_pem.clone(),
         ));
         let _ = sub_send_two.send(subscription::Subscription::TransportAvailable(
@@ -249,7 +249,7 @@ pub async fn run_networking_tasks(
         // req_sender.clone(),
         // resp_receiver,
         decrypter.clone(),
-        token_pipes_sender.clone(),
+        // token_pipes_sender.clone(),
         recv_pair,
         // receiver,
         pub_key_pem.clone(),

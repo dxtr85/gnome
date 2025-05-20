@@ -36,8 +36,8 @@ pub async fn serve_socket(
         Sender<CastMessage>,
         Receiver<WrappedMessage>,
     )>,
-    token_sender: Sender<Token>,
-    token_reciever: Receiver<Token>,
+    // token_sender: Sender<Token>,
+    // token_reciever: Receiver<Token>,
     sub_sender: Sender<Subscription>,
     shared_sender: Sender<(
         SwarmName,
@@ -67,18 +67,18 @@ pub async fn serve_socket(
     // let mut buf2 = [0u8; 1500];
     // let count: u16 = 0;
     // let mut buf2 = [0u8; 1];
-    eprintln!("Waiting for initial tokens");
-    task::sleep(Duration::from_millis(1)).await;
-    let max_tokens = if let Ok(Token::Provision(tkns)) = token_reciever.try_recv() {
-        tkns * 1000
-    } else {
-        eprintln!("Did not receive Provision as first token message");
-        eprintln!("setting max_tokens to 10kB/s");
-        10240
-    };
-    let mut token_dispenser = TokenDispenser::new(max_tokens);
-    eprintln!("Max tokens: {}", max_tokens);
-    let mut requested_tokens: u64 = 0;
+    // eprintln!("Waiting for initial tokens");
+    // task::sleep(Duration::from_millis(1)).await;
+    // let max_tokens = if let Ok(Token::Provision(tkns)) = token_reciever.try_recv() {
+    //     tkns * 1000
+    // } else {
+    //     eprintln!("Did not receive Provision as first token message");
+    //     eprintln!("setting max_tokens to 10kB/s");
+    //     10240
+    // };
+    // let mut token_dispenser = TokenDispenser::new(max_tokens);
+    // eprintln!("Max tokens: {}", max_tokens);
+    // let mut requested_tokens: u64 = 0;
     let mut incomplete_msg: Option<(usize, Vec<u8>)> = None;
     loop {
         // print!("l");
@@ -143,30 +143,30 @@ pub async fn serve_socket(
         // If we run out of all the tokens we request more
 
         // let mut provisioned_tokens_count = 0;
-        while let Ok(token_msg) = token_reciever.try_recv() {
-            match token_msg {
-                Token::Provision(count) => {
-                    if requested_tokens > 0 {
-                        // println!("Got {} tokens (requested: {})!", count, requested_tokens);
-                        if count >= requested_tokens {
-                            requested_tokens = 0;
-                        } else {
-                            requested_tokens -= count;
-                        }
-                    }
-                    token_dispenser.add(count);
-                    // println!("Now I have: {}", token_dispenser.available_tokens);
-                }
-                other => {
-                    eprintln!("Unexpected Token message: {:?}", other);
-                }
-            }
-        }
-        let _ = token_sender.send(Token::Unused(token_dispenser.available_tokens));
-        if requested_tokens > 0 && token_dispenser.available_tokens < min_tokens_threshold {
-            task::sleep(Duration::from_millis(1)).await;
-            continue;
-        }
+        // while let Ok(token_msg) = token_reciever.try_recv() {
+        //     match token_msg {
+        //         Token::Provision(count) => {
+        //             if requested_tokens > 0 {
+        //                 // println!("Got {} tokens (requested: {})!", count, requested_tokens);
+        //                 if count >= requested_tokens {
+        //                     requested_tokens = 0;
+        //                 } else {
+        //                     requested_tokens -= count;
+        //                 }
+        //             }
+        //             token_dispenser.add(count);
+        //             // println!("Now I have: {}", token_dispenser.available_tokens);
+        //         }
+        //         other => {
+        //             eprintln!("Unexpected Token message: {:?}", other);
+        //         }
+        //     }
+        // }
+        // let _ = token_sender.send(Token::Unused(token_dispenser.available_tokens));
+        // if requested_tokens > 0 && token_dispenser.available_tokens < min_tokens_threshold {
+        //     task::sleep(Duration::from_millis(1)).await;
+        //     continue;
+        // }
         // println!(
         //     "{} unused, more tokens: {}",
         //     available_tokens, provisioned_tokens_count
@@ -175,16 +175,16 @@ pub async fn serve_socket(
         // if available_tokens > max_tokens {
         //     available_tokens = max_tokens;
         // }
-        if token_dispenser.available_tokens < min_tokens_threshold {
-            // println!(
-            //     "Requesting more tokens (have: {}, required: {})",
-            //     token_dispenser.available_tokens, min_tokens_threshold
-            // );
-            requested_tokens = (2 * min_tokens_threshold) - token_dispenser.available_tokens;
-            let _ = token_sender.send(Token::Request(requested_tokens));
-            task::sleep(Duration::from_millis(1)).await;
-            continue;
-        }
+        // if token_dispenser.available_tokens < min_tokens_threshold {
+        //     // println!(
+        //     //     "Requesting more tokens (have: {}, required: {})",
+        //     //     token_dispenser.available_tokens, min_tokens_threshold
+        //     // );
+        //     requested_tokens = (2 * min_tokens_threshold) - token_dispenser.available_tokens;
+        //     let _ = token_sender.send(Token::Request(requested_tokens));
+        //     task::sleep(Duration::from_millis(1)).await;
+        //     continue;
+        // }
         let mut s_clone = stream.clone();
         // let mut s_clone_2 = stream.clone();
         let t1 = read_bytes_from_remote(&mut s_clone).fuse();
@@ -464,34 +464,34 @@ pub async fn serve_socket(
             total_bytes.push(size_bytes[1]);
             total_bytes.append(&mut ciphered);
             let all_header_bytes = 45; //TODO: TCP has more than UDP
-            let len = all_header_bytes + actual_len as u64;
-            let taken = token_dispenser.take(len);
-            if taken == len {
-                let _send_result = stream.write(&total_bytes).await;
-                let _flush_result = stream.flush().await;
-                // available_tokens = if len > available_tokens {
-                //     0
-                // } else {
-                //     available_tokens - len
-                // };
-                available_tokens = available_tokens.saturating_sub(len);
-            } else {
-                eprintln!("Waiting for tokens...");
-                let _ = token_sender.send(Token::Request(2 * len));
-                task::sleep(Duration::from_millis(1)).await;
-                let res = token_reciever.recv();
-                match res {
-                    Ok(Token::Provision(amount)) => {
-                        token_dispenser.add(amount);
-                        token_dispenser.take(len);
-                        let _send_result = stream.write(&ciphered).await;
-                    }
-                    Ok(other) => eprintln!("Received unexpected Token: {:?}", other),
-                    Err(e) => {
-                        panic!("Error while waiting for Tokens: {:?}", e);
-                    }
-                }
-            }
+                                       // let len = all_header_bytes + actual_len as u64;
+                                       // let taken = token_dispenser.take(len);
+                                       // if taken == len {
+            let _send_result = stream.write(&total_bytes).await;
+            let _flush_result = stream.flush().await;
+            // available_tokens = if len > available_tokens {
+            //     0
+            // } else {
+            //     available_tokens - len
+            // };
+            //     available_tokens = available_tokens.saturating_sub(len);
+            // } else {
+            //     eprintln!("Waiting for tokens...");
+            //     let _ = token_sender.send(Token::Request(2 * len));
+            //     task::sleep(Duration::from_millis(1)).await;
+            //     let res = token_reciever.recv();
+            //     match res {
+            //         Ok(Token::Provision(amount)) => {
+            //             token_dispenser.add(amount);
+            //             token_dispenser.take(len);
+            //             let _send_result = stream.write(&ciphered).await;
+            //         }
+            //         Ok(other) => eprintln!("Received unexpected Token: {:?}", other),
+            //         Err(e) => {
+            //             panic!("Error while waiting for Tokens: {:?}", e);
+            //         }
+            //     }
+            // }
         }
     }
 }

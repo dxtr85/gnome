@@ -194,7 +194,7 @@ async fn holepunch_task(
             pub_key_pem.clone(),
             // gnome_id,
             decrypter.clone(),
-            pipes_sender.clone(),
+            // pipes_sender.clone(),
             sub_sender.clone(),
         ));
         return;
@@ -278,7 +278,7 @@ async fn holepunch_task(
             vec![swarm_name.clone()],
             pub_key_pem.clone(),
             decrypter.clone(),
-            pipes_sender.clone(),
+            // pipes_sender.clone(),
             sub_sender.clone(),
         ));
         return;
@@ -304,7 +304,7 @@ async fn holepunch_task(
             vec![swarm_name.clone()],
             pub_key_pem.clone(),
             decrypter.clone(),
-            pipes_sender.clone(),
+            // pipes_sender.clone(),
             sub_sender.clone(),
         ));
         // return;
@@ -798,7 +798,7 @@ pub async fn start_communication(
     swarm_names: Vec<SwarmName>,
     pub_key_pem: String,
     decrypter: Decrypter,
-    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     sub_sender: Sender<Subscription>,
 ) {
     // TODO: above is just one of possible procedures used for holepunching
@@ -988,7 +988,7 @@ pub async fn start_communication(
         session_key,
         swarm_names,
         sub_sender.clone(),
-        pipes_sender.clone(),
+        // pipes_sender.clone(),
         // encr,
         id_pub_key_pem,
     ));

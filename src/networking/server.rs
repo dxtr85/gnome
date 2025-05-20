@@ -24,7 +24,7 @@ pub async fn run_server(
     mut socket: UdpSocket,
     sub_sender: Sender<Subscription>,
     mut sub_receiver: Receiver<Subscription>,
-    token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    // token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     pub_key_pem: String,
 ) {
     eprintln!("--------------------------------------");
@@ -124,7 +124,7 @@ pub async fn run_server(
             session_key,
             sub_sender.clone(),
             swarm_names,
-            token_pipes_sender.clone(),
+            // token_pipes_sender.clone(),
             // encrypter,
             remote_pub_key_pem,
         ));
@@ -286,7 +286,7 @@ async fn prepare_and_serve(
     session_key: SessionKey,
     sub_sender: Sender<Subscription>,
     swarm_names: Vec<SwarmName>,
-    token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    // token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     // encrypter: Encrypter,
     pub_key_pem: String,
 ) {
@@ -318,15 +318,15 @@ async fn prepare_and_serve(
         pub_key_pem,
     );
 
-    let (token_send, token_recv) = channel();
-    let (token_send_two, token_recv_two) = channel();
-    let _ = token_pipes_sender.send((token_send, token_recv_two));
+    // let (token_send, token_recv) = channel();
+    // let (token_send_two, token_recv_two) = channel();
+    // let _ = token_pipes_sender.send((token_send, token_recv_two));
     serve_socket(
         session_key,
         dedicated_socket,
         ch_pairs,
-        token_send_two,
-        token_recv,
+        // token_send_two,
+        // token_recv,
         sub_sender,
         shared_sender,
         swarm_extend_receiver,

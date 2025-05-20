@@ -29,7 +29,7 @@ pub async fn run_tcp_client(
     swarm_names: Vec<SwarmName>,
     sender: Sender<Subscription>,
     decrypter: Decrypter,
-    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     pub_key_pem: String,
     (ip, port): (IpAddr, u16),
 ) {
@@ -81,7 +81,7 @@ pub async fn run_tcp_client(
         // req_sender.clone(),
         // resp_receiver,
         decrypter.clone(),
-        pipes_sender.clone(),
+        // pipes_sender.clone(),
         swarm_names.clone(),
     )
     .await;
@@ -95,7 +95,7 @@ async fn establish_secure_connection(
     mut stream: TcpStream,
     sender: Sender<Subscription>,
     decrypter: Decrypter,
-    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,
 ) {
     eprintln!("In establish secure TCP connection ");
@@ -174,7 +174,7 @@ async fn establish_secure_connection(
                 session_key,
                 swarm_names,
                 sender.clone(),
-                pipes_sender.clone(),
+                // pipes_sender.clone(),
                 // encr,
                 remote_id_pub_key_pem,
             ));
@@ -197,7 +197,7 @@ pub async fn prepare_and_serve(
     session_key: SessionKey,
     swarm_names: Vec<SwarmName>,
     sender: Sender<Subscription>,
-    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     // encrypter: Encrypter,
     pub_key_pem: String,
 ) {
@@ -247,15 +247,15 @@ pub async fn prepare_and_serve(
     );
 
     // spawn a task to serve socket
-    let (token_send, token_recv) = channel();
-    let (token_send_two, token_recv_two) = channel();
-    let _ = pipes_sender.send((token_send, token_recv_two));
+    // let (token_send, token_recv) = channel();
+    // let (token_send_two, token_recv_two) = channel();
+    // let _ = pipes_sender.send((token_send, token_recv_two));
     serve_socket(
         session_key,
         stream,
         ch_pairs,
-        token_send_two,
-        token_recv,
+        // token_send_two,
+        // token_recv,
         sender,
         shared_sender,
         swarm_extend_receiver,

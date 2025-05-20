@@ -57,7 +57,7 @@ pub mod prelude {
 pub async fn init(
     work_dir: PathBuf,
     neighbor_settings: Option<Vec<(GnomeId, NetworkSettings)>>,
-    // app_sync_hash: u64,
+    default_bandwidth_per_swarm: u64,
 ) -> (
     ASender<ToGnomeManager>,
     AReceiver<FromGnomeManager>,
@@ -76,8 +76,8 @@ pub async fn init(
     // let server_ip: IpAddr = "100.116.51.23".parse().unwrap();
     // let broadcast_ip: IpAddr = "192.168.0.255".parse().unwrap();
     let server_port: u16 = 1026;
-    let nic_buffer_size: u64 = 500000;
-    let upload_bytes_per_sec: u64 = 102400;
+    // let nic_buffer_size: u64 = 500000;
+    // let upload_bytes_per_sec: u64 = 102400;
     let mut decrypter: Option<Decrypter> = None;
     // let mut encrypter: Option<Encrypter> = None;
     let priv_path = PathBuf::from(work_dir.clone()).join("id_rsa");
@@ -171,7 +171,7 @@ pub async fn init(
     };
     if let Ok((swarm_id, (user_req, user_res))) = gmgr.join_a_swarm(
         SwarmName::new(GnomeId::any(), "/".to_string()).unwrap(),
-        // app_sync_hash,
+        default_bandwidth_per_swarm,
         filtered_neighbor_settings,
         None,
     ) {
@@ -195,8 +195,8 @@ pub async fn init(
         // server_ip,
         // broadcast_ip,
         server_port,
-        nic_buffer_size,
-        upload_bytes_per_sec,
+        // nic_buffer_size,
+        // upload_bytes_per_sec,
         networking_receiver,
         decrypter.unwrap(),
         pub_key_pem,
@@ -236,7 +236,7 @@ pub async fn init(
     //       of total bandwith available.
     //       If we are between min and min_off we can stay in this configuration.
     //
-    spawn(gmgr.do_your_job());
+    spawn(gmgr.do_your_job(default_bandwidth_per_swarm));
     (req_sender, resp_receiver, my_name)
 }
 

@@ -34,6 +34,7 @@ use swarm_consensus::{Swarm, SwarmID};
 
 pub enum ToGnomeManager {
     JoinRandom(Option<SwarmName>), // We ask GMgr to join a swarm of his own selection
+    //TODO: maybe JoinSwarm could contain optional Bandwidth value?
     JoinSwarm(SwarmName, Option<GnomeId>), //GID represents source of information about this new swarm
     ExtendSwarm(SwarmName, SwarmID, GnomeId), // SwarmID has GnomeId who belongs to SwarmName
     // LeaveSwarm(SwarmName),
@@ -354,6 +355,7 @@ impl Manager {
     //
     pub async fn do_your_job(
         mut self,
+        bandwidth_per_swarm: u64,
         // req_receiver: Receiver<ToGnomeManager>,
         // resp_sender: Sender<FromGnomeManager>,
         // app_sync_hash: u64,
@@ -445,7 +447,7 @@ impl Manager {
                             eprintln!("Joining {}… ", swarm_name,);
                         }
                         if let Ok((swarm_id, (user_req, user_res))) =
-                            self.join_a_swarm(swarm_name.clone(), None, None)
+                            self.join_a_swarm(swarm_name.clone(), bandwidth_per_swarm, None, None)
                         {
                             if !swarm_name.founder.is_any() {
                                 self.notify_other_swarms(swarm_id, swarm_name.clone(), aware_gnome);
@@ -1113,12 +1115,12 @@ impl Manager {
     pub fn join_a_swarm(
         &mut self,
         name: SwarmName,
-        // app_sync_hash: u64,
+        assigned_bandwidth: u64,
         neighbor_network_settings: Option<Vec<NetworkSettings>>,
         neighbors: Option<Vec<Neighbor>>,
     ) -> Result<(SwarmID, (Sender<ToGnome>, Receiver<GnomeToApp>)), String> {
         if let Some(swarm_id) = self.next_avail_swarm_id() {
-            let (band_send, band_recv) = channel();
+            // let (band_send, band_recv) = channel();
             let (net_settings_send, net_settings_recv) = channel();
             if let Some(neighbor_settings) = neighbor_network_settings {
                 for setting in neighbor_settings {
@@ -1271,9 +1273,10 @@ impl Manager {
                 neighbors,
                 mgr_sender,
                 recv,
-                band_recv,
+                // band_recv,
                 net_settings_send,
                 self.network_settings,
+                assigned_bandwidth,
                 verify,
                 sign,
                 sha_hash,
@@ -1282,7 +1285,12 @@ impl Manager {
             // let sender = swarm.sender.clone();
             // let receiver = swarm.receiver.take();
             // eprintln!("{} Joined `{}`", swarm_id, name);
-            self.notify_networking(name.clone(), sender.clone(), band_send, net_settings_recv);
+            self.notify_networking(
+                name.clone(),
+                sender.clone(),
+                // band_send,
+                net_settings_recv,
+            );
             eprintln!("inserting swarm");
             self.swarms.insert(swarm_id, (send, name.clone()));
             self.name_to_id.insert(name, swarm_id);
@@ -1296,7 +1304,7 @@ impl Manager {
         &mut self,
         swarm_name: SwarmName,
         sender: Sender<ToGnome>,
-        avail_bandwith_sender: Sender<u64>,
+        // avail_bandwith_sender: Sender<u64>,
         network_settings_receiver: Receiver<NetworkSettings>,
     ) {
         eprintln!("Notifying network about {}", swarm_name);
@@ -1305,7 +1313,7 @@ impl Manager {
             .send(Notification::AddSwarm(NotificationBundle {
                 swarm_name,
                 request_sender: sender,
-                token_sender: avail_bandwith_sender,
+                // token_sender: avail_bandwith_sender,
                 network_settings_receiver,
             }));
         // eprintln!("Network notified: {:?}", r);

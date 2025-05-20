@@ -21,7 +21,7 @@ pub async fn direct_punching_service(
     server_port: u16,
     subscription_sender: Sender<Subscription>,
     decrypter: Decrypter,
-    token_endpoints_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    // token_endpoints_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_endpoints_receiver: Receiver<(SwarmName, Sender<ToGnome>, Receiver<NetworkSettings>)>,
     pub_key_pem: String,
 ) {
@@ -66,7 +66,7 @@ pub async fn direct_punching_service(
         // gnome_id,
         subscription_sender.clone(),
         decrypter.clone(),
-        token_endpoints_sender.clone(),
+        // token_endpoints_sender.clone(),
         send_my_network_settings,
         recv_other_network_settings,
     ));
@@ -129,7 +129,7 @@ async fn socket_maintainer(
     // gnome_id: GnomeId,
     subscription_sender: Sender<Subscription>,
     decrypter: Decrypter,
-    token_endpoints_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    // token_endpoints_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     my_network_settings_sender: Sender<NetworkSettings>,
     other_network_settings_reciever: Receiver<(SwarmName, NetworkSettings)>,
 ) {
@@ -220,7 +220,7 @@ async fn socket_maintainer(
                         // gnome_id.clone(),
                         subscription_sender.clone(),
                         decrypter.clone(),
-                        token_endpoints_sender.clone(),
+                        // token_endpoints_sender.clone(),
                         swarm_names.clone(),
                         (my_settings, other_settings),
                     ));
@@ -244,7 +244,7 @@ async fn socket_maintainer(
                     // gnome_id.clone(),
                     subscription_sender.clone(),
                     decrypter.clone(),
-                    token_endpoints_sender.clone(),
+                    // token_endpoints_sender.clone(),
                     swarm_names.clone(),
                     (my_settings, other_settings),
                 ));
@@ -290,7 +290,7 @@ async fn punch_and_communicate(
     // gnome_id: GnomeId,
     sub_sender: Sender<Subscription>,
     decrypter: Decrypter,
-    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,
     (my_settings, other_settings): (NetworkSettings, NetworkSettings),
 ) {
@@ -300,7 +300,7 @@ async fn punch_and_communicate(
             swarm_names.clone(),
             sub_sender,
             decrypter,
-            pipes_sender,
+            // pipes_sender,
             pub_key_pem,
             Some((socket, other_settings)),
         )
@@ -385,7 +385,7 @@ async fn punch_and_communicate(
                 pub_key_pem.clone(),
                 // gnome_id,
                 decrypter.clone(),
-                pipes_sender.clone(),
+                // pipes_sender.clone(),
                 sub_sender.clone(),
             ));
             // return;

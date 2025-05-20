@@ -28,7 +28,7 @@ pub async fn run_client(
     swarm_names: Vec<SwarmName>,
     sender: Sender<Subscription>,
     decrypter: Decrypter,
-    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     pub_key_pem: String,
     target_host: Option<(UdpSocket, NetworkSettings)>,
 ) {
@@ -96,7 +96,7 @@ pub async fn run_client(
                 // req_sender.clone(),
                 // resp_receiver,
                 decrypter.clone(),
-                pipes_sender.clone(),
+                // pipes_sender.clone(),
                 swarm_names.clone(),
             )
             .await;
@@ -116,7 +116,7 @@ pub async fn run_client(
             swarm_names,
             sender,
             decrypter,
-            pipes_sender,
+            // pipes_sender,
             pub_key_pem,
             addr,
         )
@@ -143,7 +143,7 @@ async fn establish_secure_connection(
     socket: &UdpSocket,
     sender: Sender<Subscription>,
     decrypter: Decrypter,
-    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,
 ) -> bool {
     // eprintln!("UDP Client trying to establish secure connection");
@@ -209,7 +209,7 @@ async fn establish_secure_connection(
                 session_key,
                 swarm_names,
                 sender.clone(),
-                pipes_sender.clone(),
+                // pipes_sender.clone(),
                 // encr,
                 remote_id_pub_key_pem,
             ));
@@ -285,7 +285,7 @@ pub async fn prepare_and_serve(
     session_key: SessionKey,
     swarm_names: Vec<SwarmName>,
     sender: Sender<Subscription>,
-    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     // encrypter: Encrypter,
     pub_key_pem: String,
 ) {
@@ -332,15 +332,15 @@ pub async fn prepare_and_serve(
     );
 
     // spawn a task to serve socket
-    let (token_send, token_recv) = channel();
-    let (token_send_two, token_recv_two) = channel();
-    let _ = pipes_sender.send((token_send, token_recv_two));
+    // let (token_send, token_recv) = channel();
+    // let (token_send_two, token_recv_two) = channel();
+    // let _ = pipes_sender.send((token_send, token_recv_two));
     serve_socket(
         session_key,
         dedicated_socket,
         ch_pairs,
-        token_send_two,
-        token_recv,
+        // token_send_two,
+        // token_recv,
         sender,
         shared_sender,
         swarm_extend_receiver,
