@@ -1,6 +1,8 @@
 use crate::crypto::sha_hash;
 use crate::crypto::Decrypter;
 use async_std::task::sleep;
+use async_std::task::spawn;
+use std::collections::VecDeque;
 // use std::hash::{DefaultHasher, Hash, Hasher};
 use std::net::IpAddr;
 use std::time::Duration;
@@ -41,6 +43,7 @@ pub enum ToGnomeManager {
     LeaveSwarm(SwarmID),
     FromGnome(GnomeToManager),
     ProvideNeighboringSwarms(SwarmID),
+    DisconnectSwarmIfNoNeighbors(SwarmID),
     Quit,
 }
 
@@ -230,6 +233,8 @@ pub struct Manager {
     req_receiver: AReceiver<ToGnomeManager>,
     req_sender: ASender<ToGnomeManager>,
     resp_sender: ASender<FromGnomeManager>,
+    waiting_for_neighbors: Option<SwarmID>,
+    join_queue: VecDeque<(SwarmName, Option<GnomeId>)>,
 }
 
 //TODO: Manager should hold Gnome's pub_key_pem in order to provide it
@@ -315,6 +320,8 @@ impl Manager {
             req_receiver,
             req_sender,
             resp_sender,
+            waiting_for_neighbors: None,
+            join_queue: VecDeque::with_capacity(8),
         }
     }
 
@@ -400,6 +407,11 @@ impl Manager {
                         }
                     }
                     ToGnomeManager::JoinSwarm(swarm_name, aware_gnome) => {
+                        if self.waiting_for_neighbors.is_some() {
+                            eprintln!("Delaying Join {}", swarm_name);
+                            self.join_queue.push_back((swarm_name, aware_gnome));
+                            continue;
+                        }
                         eprintln!("Manager Received JoinSwarm({})", swarm_name);
                         if self.name_to_id.get(&swarm_name).is_some() {
                             eprintln!("Not joining {}, we are already there", swarm_name);
@@ -449,6 +461,18 @@ impl Manager {
                         if let Ok((swarm_id, (user_req, user_res))) =
                             self.join_a_swarm(swarm_name.clone(), bandwidth_per_swarm, None, None)
                         {
+                            // Start a timer for a few seconds.
+                            // When it ends Mgr checks if it received
+                            // ActiveNeighbors message from this new swarm.
+                            // If not send Disconnect request,
+                            // and maybe try again.
+                            self.waiting_for_neighbors = Some(swarm_id);
+                            let message = ToGnomeManager::DisconnectSwarmIfNoNeighbors(swarm_id);
+                            spawn(start_a_timer(
+                                self.req_sender.clone(),
+                                message,
+                                Duration::from_secs(3),
+                            ));
                             if !swarm_name.founder.is_any() {
                                 self.notify_other_swarms(swarm_id, swarm_name.clone(), aware_gnome);
                             }
@@ -642,6 +666,27 @@ impl Manager {
                         // }
                         quit = true;
                     }
+                    ToGnomeManager::DisconnectSwarmIfNoNeighbors(s_id) => {
+                        // eprintln!("Timeout for neighbors gathering for {}", s_id);
+                        if let Some(waiting_for_neighbors) = self.waiting_for_neighbors.take() {
+                            // eprintln!("Disconnecting.");
+                            if s_id == waiting_for_neighbors {
+                                if let Some((mgr_to_gnome, _name)) = self.swarms.get(&s_id) {
+                                    let _ = mgr_to_gnome.send(ManagerToGnome::Disconnect);
+                                }
+                            } else {
+                                self.waiting_for_neighbors = Some(waiting_for_neighbors);
+                            }
+                        } else {
+                            if let Some((s_name, aware_gnome)) = self.join_queue.pop_front() {
+                                eprintln!("Requesting join {}", s_name);
+                                let _ = self
+                                    .req_sender
+                                    .send(ToGnomeManager::JoinSwarm(s_name, aware_gnome))
+                                    .await;
+                            }
+                        }
+                    }
                 }
             }
             // sleep(sleep_time).await;
@@ -824,6 +869,11 @@ impl Manager {
                     .await;
             }
             GnomeToManager::ActiveNeighbors(s_id, s_name, new_ids) => {
+                if let Some(waiting_for_n) = self.waiting_for_neighbors.take() {
+                    if s_id != waiting_for_n {
+                        self.waiting_for_neighbors = Some(waiting_for_n);
+                    }
+                }
                 for g_id in &new_ids {
                     if let Some(n_swarms) = self.neighboring_gnomes.get_mut(&g_id) {
                         n_swarms.insert(s_name.clone());
@@ -971,40 +1021,42 @@ impl Manager {
             //     already_notified.push(aware_gnome);
             // }
         }
-        eprintln!("Already notified: {}", already_notified.len());
-        for n_id in &already_notified {
-            eprintln!("noti {}", n_id);
-        }
+        // eprintln!("Already notified: {}", already_notified.len());
+        // for n_id in &already_notified {
+        //     eprintln!("noti {}", n_id);
+        // }
         let mut not_yet_notified = HashSet::new();
         for n_id in self.neighboring_gnomes.keys() {
             if !already_notified.contains(n_id) {
+                // eprint!("yes");
                 not_yet_notified.insert(*n_id);
             }
+            // eprintln!("");
         }
-        eprintln!("not yet notified: ");
-        for nyn in &not_yet_notified {
-            eprintln!("{}", nyn);
-        }
-        eprintln!("Swarms:");
-        for swarm in &self.swarms {
-            eprintln!("{}", swarm.0);
-        }
-        eprintln!("NSwarms:");
-        for (swarm_name, n_ids) in self.neighboring_swarms.iter() {
-            eprint!("{}: ", swarm_name);
-            for n_id in n_ids {
-                eprint!("{} ", n_id);
-            }
-            eprintln!("");
-        }
-        eprintln!("NGnomes:");
-        for (g_id, names) in self.neighboring_gnomes.iter() {
-            eprint!("{}: ", g_id);
-            for name in names {
-                eprint!("{} ", name);
-            }
-            eprintln!("");
-        }
+        // eprintln!("not yet notified: ");
+        // for nyn in &not_yet_notified {
+        //     eprintln!("{}", nyn);
+        // }
+        // eprintln!("Swarms:");
+        // for swarm in &self.swarms {
+        //     eprintln!("{}", swarm.0);
+        // }
+        // eprintln!("NSwarms:");
+        // for (swarm_name, n_ids) in self.neighboring_swarms.iter() {
+        //     eprint!("{}: ", swarm_name);
+        //     for n_id in n_ids {
+        //         eprint!("{} ", n_id);
+        //     }
+        //     eprintln!("");
+        // }
+        // eprintln!("NGnomes:");
+        // for (g_id, names) in self.neighboring_gnomes.iter() {
+        //     eprint!("{}: ", g_id);
+        //     for name in names {
+        //         eprint!("{} ", name);
+        //     }
+        //     eprintln!("");
+        // }
         if not_yet_notified.is_empty() {
             eprintln!("Not sending anything out - everyone is already notified");
             return;
@@ -1334,4 +1386,14 @@ impl Manager {
         }
         // drop(self)
     }
+}
+pub async fn start_a_timer(
+    sender: ASender<ToGnomeManager>,
+    message: ToGnomeManager,
+    timeout: Duration,
+) {
+    // let timeout = Duration::from_secs(5);
+    sleep(timeout).await;
+    // eprintln!("Timeout for {} is over", message);
+    let _ = sender.send(message).await;
 }
