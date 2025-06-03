@@ -290,7 +290,10 @@ async fn prepare_and_serve(
     // encrypter: Encrypter,
     pub_key_pem: String,
 ) {
-    eprintln!("Waiting for data from remote...");
+    eprintln!(
+        "Waiting for data from remote...(my names: {:?})",
+        swarm_names
+    );
     let mut remote_names = vec![];
     receive_remote_swarm_names(&dedicated_socket, &mut remote_names).await;
 

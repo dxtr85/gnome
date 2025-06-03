@@ -92,9 +92,15 @@ pub fn distil_common_names(
     my_id: GnomeId,
     nb_id: GnomeId,
     common_names: &mut Vec<SwarmName>,
-    my_names: Vec<SwarmName>,
+    mut my_names: Vec<SwarmName>,
     remote_names: &mut Vec<SwarmName>,
 ) {
+    if my_names.is_empty() {
+        my_names.push(SwarmName {
+            founder: GnomeId::any(),
+            name: "/".to_string(),
+        });
+    }
     // eprintln!("My: {},(>? {}) nb: {}, ", my_id, my_id > nb_id, nb_id);
     // eprintln!(
     //     "Finding common from my:\n{:?}\n\nand his:\n{:?}",
@@ -117,7 +123,7 @@ pub fn distil_common_names(
                 remote_names[0].founder = nb_id;
             }
         } else {
-            //TODO: common, a neighber is joining existing network
+            //TODO: common, a neighbor is joining existing network
             common_names.push(SwarmName {
                 founder: my_id,
                 name: my_names[0].name.clone(),

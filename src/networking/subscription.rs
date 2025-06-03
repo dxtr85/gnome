@@ -69,26 +69,28 @@ pub async fn subscriber(
                             }
                         }
                     }
-                    Notification::RemoveSwarm(swarm_name) => {
-                        eprintln!("Networking about to remove {}", swarm_name);
-                        //TODO: should direct punch be notified?
-                        let res = swarms.remove(&swarm_name);
-                        eprintln!("Removed from swarms list: {}", res.is_some());
-                        let mut name_idx = None;
-                        for (idx, name) in names.iter().enumerate() {
-                            if *name == swarm_name {
-                                name_idx = Some(idx);
-                                break;
+                    Notification::RemoveSwarm(swarm_names) => {
+                        for swarm_name in swarm_names {
+                            eprintln!("Networking about to remove {}", swarm_name);
+                            //TODO: should direct punch be notified?
+                            let res = swarms.remove(&swarm_name);
+                            eprintln!("Removed from swarms list: {}", res.is_some());
+                            let mut name_idx = None;
+                            for (idx, name) in names.iter().enumerate() {
+                                if *name == swarm_name {
+                                    name_idx = Some(idx);
+                                    break;
+                                }
                             }
+                            if let Some(idx) = name_idx {
+                                eprintln!("Removing from names list");
+                                names.remove(idx);
+                            }
+                            for sender in sub_senders.values() {
+                                let _ = sender.send(Subscription::Removed(swarm_name.clone()));
+                            }
+                            //TODO: should token dispenser be informed?
                         }
-                        if let Some(idx) = name_idx {
-                            eprintln!("Removing from names list");
-                            names.remove(idx);
-                        }
-                        for sender in sub_senders.values() {
-                            let _ = sender.send(Subscription::Removed(swarm_name.clone()));
-                        }
-                        //TODO: should token dispenser be informed?
                     }
                     Notification::AddSwarm(notif_bundle) => {
                         // TODO: only one punching service for all swarms!

@@ -38,6 +38,7 @@ pub enum ToGnomeManager {
     JoinRandom(Option<SwarmName>), // We ask GMgr to join a swarm of his own selection
     //TODO: maybe JoinSwarm could contain optional Bandwidth value?
     JoinSwarm(SwarmName, Option<GnomeId>), //GID represents source of information about this new swarm
+    StartListeningSwarm,                   //Use this when we loose all existing neighbors.
     ExtendSwarm(SwarmName, SwarmID, GnomeId), // SwarmID has GnomeId who belongs to SwarmName
     // LeaveSwarm(SwarmName),
     LeaveSwarm(SwarmID),
@@ -59,6 +60,7 @@ pub enum FromGnomeManager {
     SwarmFounderDetermined(SwarmID, SwarmName),
     MyName(SwarmName),
     MyPublicIPs(Vec<(IpAddr, u16, Nat, (PortAllocationRule, i8))>),
+    AllNeighborsGone,
     Disconnected(Vec<(SwarmID, SwarmName)>),
 }
 enum ChannelAvailability {
@@ -371,7 +373,7 @@ impl Manager {
         // let max_sleep_nanos: u64 = 1 << 27;
         let sleep_nanos: u64 = 1 << 25;
         let mut quit = false;
-        let mut prev_join_swarm = SwarmName::new(GnomeId(1), String::new()).unwrap();
+        let mut prev_join_swarm = SwarmName::new(GnomeId(0), "/".to_string()).unwrap();
         loop {
             if let Ok(request) = self.req_receiver.recv().await {
                 match request {
@@ -380,6 +382,9 @@ impl Manager {
                             "JoinRandom request (exclude: {})",
                             exclude_swarm_opt.is_some()
                         );
+                        if self.swarms.is_empty() {
+                            eprintln!("JoinRandom when not in touch with any swarm!");
+                        }
                         let to_exclude = if exclude_swarm_opt.is_some() {
                             exclude_swarm_opt
                         } else {
@@ -407,14 +412,29 @@ impl Manager {
                         }
                     }
                     ToGnomeManager::JoinSwarm(swarm_name, aware_gnome) => {
+                        eprintln!("Waiting 4 neighbors: {:?}", self.waiting_for_neighbors);
                         if self.waiting_for_neighbors.is_some() {
-                            eprintln!("Delaying Join {}", swarm_name);
+                            eprintln!(
+                                "Delaying Join {}(qlen: {})",
+                                swarm_name,
+                                self.join_queue.len()
+                            );
                             self.join_queue.push_back((swarm_name, aware_gnome));
                             continue;
                         }
                         eprintln!("Manager Received JoinSwarm({})", swarm_name);
-                        if self.name_to_id.get(&swarm_name).is_some() {
+                        if let Some(es_id) = self.name_to_id.get(&swarm_name) {
                             eprintln!("Not joining {}, we are already there", swarm_name);
+                            //     if let Some((sender, es_name)) = self.swarms.get(es_id){
+                            //         if swarm_name ==*es_name{
+                            //     let _ = self
+                            //         .resp_sender
+                            //         .send(FromGnomeManager::SwarmJoined(es_id, swarm_name, Sender<ToGnome>, Receiver<GnomeToApp>))
+                            //         .await;
+
+                            //         }
+
+                            // }
                             continue;
                         }
                         if let Some(n_ids) = self.neighboring_swarms.get(&swarm_name) {
@@ -466,6 +486,7 @@ impl Manager {
                             // ActiveNeighbors message from this new swarm.
                             // If not send Disconnect request,
                             // and maybe try again.
+                            eprintln!("Seting waiting_for_neighbors to {}", swarm_id);
                             self.waiting_for_neighbors = Some(swarm_id);
                             let message = ToGnomeManager::DisconnectSwarmIfNoNeighbors(swarm_id);
                             spawn(start_a_timer(
@@ -484,6 +505,21 @@ impl Manager {
                                 .await;
                         } else {
                             eprintln!("Unable to join a swarm.");
+                        }
+                    }
+                    ToGnomeManager::StartListeningSwarm => {
+                        let swarm_name = SwarmName::new(GnomeId::any(), "/".to_string()).unwrap();
+                        if let Ok((swarm_id, (user_req, user_res))) =
+                            self.join_a_swarm(swarm_name.clone(), bandwidth_per_swarm, None, None)
+                        {
+                            let _ = self
+                                .resp_sender
+                                .send(FromGnomeManager::SwarmJoined(
+                                    swarm_id, swarm_name, user_req, user_res,
+                                ))
+                                .await;
+                        } else {
+                            eprintln!("Unable to join default swarm.");
                         }
                     }
                     ToGnomeManager::ExtendSwarm(swarm_name, swarm_id, gnome_id) => {
@@ -629,7 +665,7 @@ impl Manager {
                             eprintln!("Requesting networking to remove {}", s_name);
                             let _ = self
                                 .to_networking
-                                .send(Notification::RemoveSwarm(s_name.clone()));
+                                .send(Notification::RemoveSwarm(vec![s_name.clone()]));
                             let _ = to_gnome.send(ManagerToGnome::Disconnect);
                         } else {
                             eprintln!("Can not leave {} - not found in Swarms set", s_id);
@@ -642,6 +678,11 @@ impl Manager {
                         // eprintln!("GMgr Got {:?}", request);
                         let disconnected_opt = self.serve_gnome_requests(request).await;
                         if let Some(disconnected_swarms) = disconnected_opt {
+                            let mut removed_names = Vec::with_capacity(disconnected_swarms.len());
+                            for (_s_id, s_name) in &disconnected_swarms {
+                                removed_names.push(s_name.clone());
+                            }
+
                             let _ = self
                                 .resp_sender
                                 .send(FromGnomeManager::Disconnected(disconnected_swarms))
@@ -652,6 +693,9 @@ impl Manager {
                                 sleep(sleep_time).await;
                                 break;
                             }
+                            let _ = self
+                                .to_networking
+                                .send(Notification::RemoveSwarm(removed_names));
                         }
                     }
                     ToGnomeManager::Quit => {
@@ -667,14 +711,22 @@ impl Manager {
                         quit = true;
                     }
                     ToGnomeManager::DisconnectSwarmIfNoNeighbors(s_id) => {
-                        // eprintln!("Timeout for neighbors gathering for {}", s_id);
+                        eprintln!("Timeout for neighbors gathering for {}", s_id);
                         if let Some(waiting_for_neighbors) = self.waiting_for_neighbors.take() {
                             // eprintln!("Disconnecting.");
                             if s_id == waiting_for_neighbors {
-                                if let Some((mgr_to_gnome, _name)) = self.swarms.get(&s_id) {
+                                if let Some((mgr_to_gnome, s_name)) = self.swarms.get(&s_id) {
                                     let _ = mgr_to_gnome.send(ManagerToGnome::Disconnect);
+                                    let _ = self
+                                        .resp_sender
+                                        .send(FromGnomeManager::Disconnected(vec![(
+                                            s_id,
+                                            s_name.clone(),
+                                        )]))
+                                        .await;
                                 }
                             } else {
+                                eprintln!("Seting back waiting_for_neighbors ");
                                 self.waiting_for_neighbors = Some(waiting_for_neighbors);
                             }
                         } else {
@@ -711,13 +763,23 @@ impl Manager {
                         s_name.clone(),
                     ))
                     .await;
+                if s_name.founder != self.gnome_id {
+                    eprintln!("Starting my own Catalog Swarm (after timeout)");
+                    let my_sname = SwarmName::new(self.gnome_id, "/".to_string()).unwrap();
+                    let message = ToGnomeManager::JoinSwarm(my_sname, None);
+                    spawn(start_a_timer(
+                        self.req_sender.clone(),
+                        message,
+                        Duration::from_secs(3),
+                    ));
+                }
                 eprintln!("Founder Det: {} {} {:?}", swarm_id, s_name, _res);
                 eprintln!("existing: {:?}", self.name_to_id.keys());
                 let mut g_name = SwarmName {
                     founder: GnomeId::any(),
                     name: "/".to_string(),
                 };
-                if let Some((sender, old_name)) = self.swarms.remove(&swarm_id) {
+                if let Some((sender, _old_name)) = self.swarms.remove(&swarm_id) {
                     self.swarms.insert(swarm_id, (sender, s_name.clone()));
                 }
                 if let Some(e_id) = self.name_to_id.remove(&g_name) {
@@ -864,13 +926,15 @@ impl Manager {
                 if let Some(n_gnomes) = self.neighboring_swarms.get_mut(&s_name) {
                     n_gnomes.remove(&g_id);
                 }
-                self.resp_sender
+                let _ = self
+                    .resp_sender
                     .send(FromGnomeManager::SwarmNeighborLeft(s_id, g_id))
                     .await;
             }
             GnomeToManager::ActiveNeighbors(s_id, s_name, new_ids) => {
                 if let Some(waiting_for_n) = self.waiting_for_neighbors.take() {
                     if s_id != waiting_for_n {
+                        eprintln!("Seting back 2 waiting_for_neighbors ");
                         self.waiting_for_neighbors = Some(waiting_for_n);
                     }
                 }
@@ -901,53 +965,40 @@ impl Manager {
                     .await;
             }
             GnomeToManager::Disconnected(s_id, s_name) => {
-                // for (name, id) in self.name_to_id.iter() {
-                //     if id.0 == s_id.0 {
-                // eprintln!("Requesting networking to remove {}", s_name);
-                // let _ = self
-                //     .to_networking
-                //     .send(Notification::RemoveSwarm(s_name.clone()));
-                //     }
-                // }
-                // for ns_list in self.neighboring_swarms.values_mut() {
-                //     if ns_list.is_empty() {
-                //         continue;
-                //     }
-                //     for i in ns_list.len() - 1..=0 {
-                //         if ns_list[i].0 == s_id {
-                //             eprintln!("remove ns: {:?}", ns_list[i]);
-                //             ns_list.remove(i);
-                //         }
-                //     }
-                // }
-                // let mut remove_swarm = false;
-                // if new_ids.is_empty() {
-                // remove_swarm = true;
-                // let _ = sender.send(ManagerToGnome::Disconnect);
+                if let Some(n_set) = self.neighboring_swarms.remove(&s_name) {
+                    for n_id in n_set {
+                        if let Some(ns_set) = self.neighboring_gnomes.get_mut(&n_id) {
+                            ns_set.remove(&s_name);
+                        }
+                    }
+                }
                 let mut disconnected_pair = None;
-                // let mut name_to_remove = None;
                 for (name, id) in &self.name_to_id {
                     if *id == s_id {
-                        // name_to_remove = Some(name.clone());
                         disconnected_pair = Some((s_id, name.clone()));
                         break;
                     }
                 }
-                // }
                 if let Some((s_id, name)) = disconnected_pair {
                     self.name_to_id.remove(&name);
                     disconnected_swarms.push((s_id, name));
                 } else {
                     eprintln!("Unable to find name for {}", s_id);
                 }
-                // }
-                // }
-                // if remove_swarm {
                 self.swarms.remove(&s_id);
-                // }
+                if self.swarms.is_empty() {
+                    eprintln!("We should start a template swarm!");
+                    let _ = self
+                        .req_sender
+                        .send(ToGnomeManager::StartListeningSwarm)
+                        .await;
+                    let _ = self
+                        .resp_sender
+                        .send(FromGnomeManager::AllNeighborsGone)
+                        .await;
+                }
             }
         }
-        // }
         if disconnected_swarms.is_empty() {
             None
         } else {
@@ -1016,6 +1067,7 @@ impl Manager {
             HashSet::new()
         };
         if let Some(aware_gnome) = aware_gnome {
+            eprintln!("He knows: {}", aware_gnome);
             already_notified.insert(aware_gnome);
             // if !already_notified.contains(&aware_gnome) {
             //     already_notified.push(aware_gnome);
@@ -1127,25 +1179,40 @@ impl Manager {
         &self,
         exclude_swarm: Option<SwarmName>,
     ) -> Option<(SwarmName, Option<GnomeId>)> {
-        eprintln!("next_avail_neighboring_swarm\n name_to_id:");
+        eprintln!(
+            "next_avail_neighboring_swarm (exclude: {:?})\n name_to_id:",
+            exclude_swarm
+        );
+        if self.swarms.is_empty() {
+            eprintln!("Not connected to any swarm, returning template swarm");
+            return Some((
+                SwarmName::new(GnomeId::any(), "/".to_string()).unwrap(),
+                None,
+            ));
+        }
         for key in self.name_to_id.keys() {
             eprintln!("{}", key);
         }
         // TODO: some better way to get a random name
         let mut randomizer = HashSet::new();
+        let mut exclude_neighbor = None;
         eprintln!("neighboring_swarms:");
-        if let Some(exclude_name) = exclude_swarm {
+        if let Some(exclude_name) = exclude_swarm.clone() {
             for (neighboring_swarm, neighbors) in &self.neighboring_swarms {
                 eprintln!("{}", neighboring_swarm);
                 if !self.name_to_id.contains_key(&neighboring_swarm)
-                    && neighboring_swarm != &exclude_name
+                // &&
                 {
-                    let to_add = if let Some(neighbor) = neighbors.iter().next() {
-                        (neighboring_swarm.clone(), Some(*neighbor))
-                    } else {
-                        (neighboring_swarm.clone(), None)
-                    };
-                    randomizer.insert(to_add);
+                    if neighboring_swarm != &exclude_name {
+                        let to_add = if let Some(neighbor) = neighbors.iter().next() {
+                            (neighboring_swarm.clone(), Some(*neighbor))
+                        } else {
+                            (neighboring_swarm.clone(), None)
+                        };
+                        randomizer.insert(to_add);
+                    } else if let Some(n) = neighbors.iter().next() {
+                        exclude_neighbor = Some(*n);
+                    }
                 }
             }
         } else {
@@ -1161,7 +1228,23 @@ impl Manager {
                 }
             }
         }
+        // let selection =
         randomizer.into_iter().next()
+        // ;
+        // if selection.is_none() {
+        //     if let Some(e_swarm) = exclude_swarm {
+        //         if !e_swarm.founder.is_any() {
+        //             eprintln!("returning exclude");
+        //             Some((e_swarm, exclude_neighbor))
+        //         } else {
+        //             None
+        //         }
+        //     } else {
+        //         None
+        //     }
+        // } else {
+        //     selection
+        // }
     }
 
     pub fn join_a_swarm(
