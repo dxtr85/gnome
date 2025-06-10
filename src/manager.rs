@@ -38,7 +38,7 @@ pub enum ToGnomeManager {
     JoinRandom(Option<SwarmName>), // We ask GMgr to join a swarm of his own selection
     //TODO: maybe JoinSwarm could contain optional Bandwidth value?
     JoinSwarm(SwarmName, Option<GnomeId>), //GID represents source of information about this new swarm
-    StartListeningSwarm,                   //Use this when we loose all existing neighbors.
+    StartListeningSwarm(Vec<(GnomeId, NetworkSettings)>), //Use this when we loose all existing neighbors.
     ExtendSwarm(SwarmName, SwarmID, GnomeId), // SwarmID has GnomeId who belongs to SwarmName
     // LeaveSwarm(SwarmName),
     LeaveSwarm(SwarmID),
@@ -507,11 +507,32 @@ impl Manager {
                             eprintln!("Unable to join a swarm.");
                         }
                     }
-                    ToGnomeManager::StartListeningSwarm => {
+                    ToGnomeManager::StartListeningSwarm(ns) => {
                         let swarm_name = SwarmName::new(GnomeId::any(), "/".to_string()).unwrap();
-                        if let Ok((swarm_id, (user_req, user_res))) =
-                            self.join_a_swarm(swarm_name.clone(), bandwidth_per_swarm, None, None)
-                        {
+                        //TODO: filter neighbor settings
+                        let neighbor_settings = if ns.is_empty() {
+                            None
+                        } else {
+                            let mut neighbors = Vec::with_capacity(ns.len());
+                            for (g_id, setting) in ns {
+                                if g_id == self.gnome_id {
+                                    continue;
+                                }
+                                neighbors.push(setting);
+                            }
+                            Some(neighbors)
+                        };
+                        if neighbor_settings.is_some() {
+                            eprintln!("Starting a listening swarm with Neighbor endpoints");
+                        } else {
+                            eprintln!("Starting a listening swarm");
+                        }
+                        if let Ok((swarm_id, (user_req, user_res))) = self.join_a_swarm(
+                            swarm_name.clone(),
+                            bandwidth_per_swarm,
+                            neighbor_settings,
+                            None,
+                        ) {
                             let _ = self
                                 .resp_sender
                                 .send(FromGnomeManager::SwarmJoined(
@@ -987,11 +1008,11 @@ impl Manager {
                 }
                 self.swarms.remove(&s_id);
                 if self.swarms.is_empty() {
-                    eprintln!("We should start a template swarm!");
-                    let _ = self
-                        .req_sender
-                        .send(ToGnomeManager::StartListeningSwarm)
-                        .await;
+                    // eprintln!("We should start a template swarm!");
+                    // let _ = self
+                    //     .req_sender
+                    //     .send(ToGnomeManager::StartListeningSwarm)
+                    //     .await;
                     let _ = self
                         .resp_sender
                         .send(FromGnomeManager::AllNeighborsGone)
