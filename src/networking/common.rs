@@ -124,18 +124,20 @@ pub fn distil_common_names(
             }
         } else {
             //TODO: common, a neighbor is joining existing network
-            common_names.push(SwarmName {
-                founder: my_id,
-                name: my_names[0].name.clone(),
-            });
-            remote_names[0].founder = my_id;
+            // common_names.push(SwarmName {
+            //     founder: my_id,
+            //     name: my_names[0].name.clone(),
+            // });
+            // remote_names[0].founder = my_id;
+            *common_names = my_names.clone();
         }
     } else if my_names.len() == 1 && my_names[0].founder.is_any() {
         //TODO: common, when I am joining existing network
-        common_names.push(SwarmName {
-            founder: nb_id,
-            name: my_names[0].name.clone(),
-        });
+        // common_names.push(SwarmName {
+        //     founder: nb_id,
+        //     name: my_names[0].name.clone(),
+        // });
+        *common_names = remote_names.clone();
     } else {
         //TODO: common, when joining an old neighbor while already in network
         for name in remote_names {
