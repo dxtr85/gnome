@@ -75,7 +75,7 @@ pub async fn init(
     // let server_ip: IpAddr = "192.168.0.106".parse().unwrap();
     // let server_ip: IpAddr = "100.116.51.23".parse().unwrap();
     // let broadcast_ip: IpAddr = "192.168.0.255".parse().unwrap();
-    let server_port: u16 = 1026;
+    // let server_port: u16 = 1026;
     // let nic_buffer_size: u64 = 500000;
     // let upload_bytes_per_sec: u64 = 102400;
     let mut decrypter: Option<Decrypter> = None;
@@ -189,7 +189,14 @@ pub async fn init(
         eprintln!("Joined `any /` swarm");
     }
 
-    // let _join = spawn(activate_gnome(
+    let server_port: u16 = {
+        let modulo = (my_name.founder.0 % (u16::MAX as u64)) as u16;
+        if modulo >= 1024 {
+            modulo
+        } else {
+            modulo * 64
+        }
+    };
     let _join = spawn(run_networking_tasks(
         // gnome_id,
         // server_ip,

@@ -215,6 +215,22 @@ async fn establish_secure_connection(
         return None;
     }
     eprintln!("Sent encrypted public key");
+    // TODO: send remote socket address
+    let mut remote_addr_bytes = vec![];
+    remote_addr_bytes.extend_from_slice(&remote_addr.port().to_be_bytes());
+    match remote_addr.ip() {
+        IpAddr::V4(ip_4) => {
+            remote_addr_bytes.extend_from_slice(&ip_4.octets());
+        }
+        IpAddr::V6(ip_6) => remote_addr_bytes.extend_from_slice(&ip_6.octets()),
+    };
+    let remote_add_encr = session_key.encrypt(&remote_addr_bytes);
+    let res3 = dedicated_socket.send(&remote_add_encr).await;
+    if res3.is_err() {
+        eprintln!("Error sending encrypted remote addr response: {:?}", res3);
+        return None;
+    }
+    eprintln!("Sent encrypted remote address");
 
     *remote_gnome_id = GnomeId(encr.hash());
     eprintln!("UDP Remote GnomeId: {}", remote_gnome_id);

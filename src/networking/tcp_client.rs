@@ -19,9 +19,13 @@ use futures::{
     select,
 };
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
 use swarm_consensus::GnomeId;
+use swarm_consensus::NetworkSettings;
+use swarm_consensus::PortAllocationRule;
 use swarm_consensus::SwarmName;
 
 pub async fn run_tcp_client(
@@ -162,9 +166,84 @@ async fn establish_secure_connection(
     let mut recv_buf = [0u8; 1100];
     let recv_result = stream.read(&mut recv_buf).await;
     if let Ok(count) = recv_result {
-        // eprintln!("Received {} bytes 2", count);
+        eprintln!("Received {} bytes 2", count);
         let decr_res = session_key.decrypt(&recv_buf[..count]);
         if let Ok(remote_pubkey_pem) = decr_res {
+            let mut r_buf = [0u8; 64];
+            let recv_result2 = stream.read(&mut r_buf).await;
+            if let Ok(count) = recv_result2 {
+                eprintln!("TCP 2 Received {} bytes", count);
+                let mut my_public_address = None;
+                let port = u16::from_be_bytes([r_buf[0], r_buf[1]]);
+                match count {
+                    6 => {
+                        //TODO: ip_v4
+                        my_public_address = Some((
+                            IpAddr::V4(Ipv4Addr::new(r_buf[2], r_buf[4], r_buf[4], r_buf[5])),
+                            port,
+                        ));
+                    }
+                    18 => {
+                        let a: u16 = u16::from_be_bytes([r_buf[2], r_buf[3]]);
+                        let b: u16 = u16::from_be_bytes([r_buf[4], r_buf[5]]);
+                        let c: u16 = u16::from_be_bytes([r_buf[6], r_buf[7]]);
+                        let d: u16 = u16::from_be_bytes([r_buf[8], r_buf[9]]);
+                        let e: u16 = u16::from_be_bytes([r_buf[10], r_buf[11]]);
+                        let f: u16 = u16::from_be_bytes([r_buf[12], r_buf[13]]);
+                        let g: u16 = u16::from_be_bytes([r_buf[14], r_buf[15]]);
+                        let h: u16 = u16::from_be_bytes([r_buf[16], r_buf[17]]);
+                        my_public_address =
+                            Some((IpAddr::V6(Ipv6Addr::new(a, b, c, d, e, f, g, h)), port));
+                    }
+                    other => {
+                        eprintln!("Received {} bytes as my public IP", other);
+                        // IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
+                    }
+                };
+                if let Some(pub_ip) = my_public_address {
+                    let mut own_nsettings = None;
+                    // compare against local socket & build NetworkSettings
+                    if let Ok(local_addr) = stream.local_addr() {
+                        if local_addr.port() == pub_ip.1 {
+                            //TODO: same port
+                            if local_addr.ip() == pub_ip.0 {
+                                //TODO: no NAT?
+                                own_nsettings =
+                                    Some(NetworkSettings::new_not_natted(pub_ip.0, pub_ip.1));
+                            } else {
+                                //TODO: 1-1 port mapping
+                                let mset = NetworkSettings {
+                                    pub_ip: pub_ip.0,
+                                    pub_port: pub_ip.1,
+                                    nat_type: swarm_consensus::Nat::Unknown,
+                                    port_allocation: (PortAllocationRule::FullCone, 127),
+                                };
+                                own_nsettings = Some(mset);
+                            }
+                        } else {
+                            //TODO: different ports, can not determine
+                            let mset = NetworkSettings {
+                                pub_ip: pub_ip.0,
+                                pub_port: pub_ip.1,
+                                nat_type: swarm_consensus::Nat::Unknown,
+                                port_allocation: (PortAllocationRule::Random, 127),
+                            };
+                            own_nsettings = Some(mset);
+                        }
+                    }
+                    if let Some(settings) = own_nsettings {
+                        let _ = sender.send(Subscription::Distribute(
+                            settings.pub_ip,
+                            settings.pub_port,
+                            settings.nat_type,
+                            settings.port_allocation,
+                        ));
+                    }
+                }
+            } else {
+                eprintln!("UDP Failed to receive additional data from remote");
+                return;
+            }
             let remote_id_pub_key_pem =
                 std::str::from_utf8(&remote_pubkey_pem).unwrap().to_string();
             spawn(prepare_and_serve(

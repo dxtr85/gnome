@@ -291,7 +291,9 @@ pub async fn are_we_behind_a_nat(socket: &UdpSocket) -> Result<(bool, bool, Sock
     let request = build_request(None);
     let local_port = socket.local_addr().unwrap().port();
     let (ip, port) = if socket.local_addr().unwrap().is_ipv4() {
-        (IpAddr::V4(Ipv4Addr::new(108, 177, 15, 127)), 3478)
+        // (IpAddr::V4(Ipv4Addr::new(108, 177, 15, 127)), 3478)
+        // stun.flashdance.cx:
+        (IpAddr::V4(Ipv4Addr::new(193, 182, 111, 151)), 3478)
     } else {
         (
             IpAddr::V6(Ipv6Addr::new(0x2001, 0x4860, 0x4864, 5, 0x8000, 0, 0, 1)),

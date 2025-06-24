@@ -14,8 +14,11 @@ use async_std::net::{TcpListener, TcpStream};
 use async_std::stream::StreamExt;
 use async_std::task::spawn;
 use futures::AsyncWriteExt;
+use std::net::IpAddr;
 // use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread::sleep;
+use std::time::Duration;
 use swarm_consensus::GnomeId;
 use swarm_consensus::SwarmName;
 
@@ -123,7 +126,7 @@ async fn establish_secure_connection(
     let result = reader.read(&mut bytes).await;
     if result.is_err() {
         eprintln!("Failed to receive data on TCP stream: {:?}", result);
-        reader.close().await;
+        let _ = reader.close().await;
         return None;
     }
     let count = result.unwrap();
@@ -208,10 +211,34 @@ async fn establish_secure_connection(
     let _f_res2 = writer.flush().await;
     if res2.is_err() {
         eprintln!("Error sending encrypted pubkey response: {:?}", res2);
-        writer.close().await;
+        let _ = writer.close().await;
         return None;
     }
-    eprintln!("Sent encrypted public key");
+    eprintln!("Sent encrypted public key {}", my_encrypted_pubkey.len());
+    // We have to wait a bit, since flush does not always work…
+    sleep(Duration::from_millis(500));
+    //Now we send remote pub ip
+    let mut remote_addr_bytes = vec![];
+    let remote_addr = writer.peer_addr().unwrap();
+    remote_addr_bytes.extend_from_slice(&remote_addr.port().to_be_bytes());
+    match remote_addr.ip() {
+        IpAddr::V4(ip_4) => {
+            remote_addr_bytes.extend_from_slice(&ip_4.octets());
+        }
+        IpAddr::V6(ip_6) => remote_addr_bytes.extend_from_slice(&ip_6.octets()),
+    };
+    let remote_add_encr = session_key.encrypt(&remote_addr_bytes);
+    let res3 = writer.write(&remote_add_encr).await;
+    let _f_res3 = writer.flush().await;
+    if res3.is_err() {
+        eprintln!("Error sending remote public addr: {:?}", res3);
+        let _ = writer.close().await;
+        return None;
+    }
+    eprintln!(
+        "Sent encrypted remote public addr {}",
+        remote_add_encr.len()
+    );
 
     *remote_gnome_id = GnomeId(encr.hash());
     eprintln!("TCP Remote GnomeId: {}", remote_gnome_id);

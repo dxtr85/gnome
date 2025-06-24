@@ -17,11 +17,15 @@ use futures::{
     pin_mut,
     select,
 };
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
 use swarm_consensus::GnomeId;
 use swarm_consensus::NetworkSettings;
+use swarm_consensus::PortAllocationRule;
 use swarm_consensus::SwarmName;
 
 pub async fn run_client(
@@ -41,6 +45,14 @@ pub async fn run_client(
     //     so that in operates on dedicated socket it receives as argument
     let encr = Encrypter::create_from_data(&pub_key_pem).unwrap();
     let my_id = GnomeId(encr.hash());
+    // let my_port: u16 = {
+    //     let modulo = (my_id.0 % (u16::MAX as u64)) as u16;
+    //     if modulo >= 1024 {
+    //         modulo
+    //     } else {
+    //         modulo * 64
+    //     }
+    // };
     // eprintln!("SKT CLIENT {:?}", target_host);
     let mut tcp_addr = None;
     let (socket, send_addr) = if let Some((sock, net_set)) = target_host {
@@ -78,6 +90,7 @@ pub async fn run_client(
     };
 
     let mut success = false;
+    let mut my_pub_addr = None;
     if try_udp {
         eprintln!("Trying to communicate over UDP with {:?}", send_addr);
         let timeout_sec = Duration::from_secs(1);
@@ -89,7 +102,7 @@ pub async fn run_client(
                 return;
                 // return receiver;
             }
-            success = establish_secure_connection(
+            (success, my_pub_addr) = establish_secure_connection(
                 my_id,
                 &socket,
                 sender.clone(),
@@ -106,6 +119,45 @@ pub async fn run_client(
 
     if success {
         tcp_addr = None;
+        let mut own_nsettings = None;
+        if let Some(pub_ip) = my_pub_addr {
+            // compare against local socket & build NetworkSettings
+            if let Ok(local_addr) = socket.local_addr() {
+                if local_addr.port() == pub_ip.1 {
+                    //TODO: same port
+                    if local_addr.ip() == pub_ip.0 {
+                        //TODO: no NAT?
+                        own_nsettings = Some(NetworkSettings::new_not_natted(pub_ip.0, pub_ip.1));
+                    } else {
+                        //TODO: 1-1 port mapping
+                        let mset = NetworkSettings {
+                            pub_ip: pub_ip.0,
+                            pub_port: pub_ip.1,
+                            nat_type: swarm_consensus::Nat::Unknown,
+                            port_allocation: (PortAllocationRule::FullCone, 127),
+                        };
+                        own_nsettings = Some(mset);
+                    }
+                } else {
+                    //TODO: different ports, can not determine
+                    let mset = NetworkSettings {
+                        pub_ip: pub_ip.0,
+                        pub_port: pub_ip.1,
+                        nat_type: swarm_consensus::Nat::Unknown,
+                        port_allocation: (PortAllocationRule::Random, 127),
+                    };
+                    own_nsettings = Some(mset);
+                }
+            }
+        }
+        if let Some(settings) = own_nsettings {
+            let _ = sender.send(Subscription::Distribute(
+                settings.pub_ip,
+                settings.pub_port,
+                settings.nat_type,
+                settings.port_allocation,
+            ));
+        }
     } else {
         eprintln!(" TCP ADDR: {:?} {:?}", tcp_addr, swarm_names);
     }
@@ -145,12 +197,13 @@ async fn establish_secure_connection(
     decrypter: Decrypter,
     // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,
-) -> bool {
+) -> (bool, Option<(IpAddr, u16)>) {
     // eprintln!("UDP Client trying to establish secure connection");
     let mut remote_gnome_id: GnomeId = GnomeId(0);
     let session_key: SessionKey; // = SessionKey::from_key(&[0; 32]);
     let remote_addr: SocketAddr; // = "0.0.0.0:0".parse().unwrap();
     let count;
+    let mut my_public_address = None;
     let mut recv_buf = [0u8; 1100];
 
     // let mut socket_found = false;
@@ -165,7 +218,7 @@ async fn establish_secure_connection(
         _result2 = t2 => true,
     };
     if timed_out {
-        return false;
+        return (false, my_public_address);
     }
     let recv_result = socket.recv_from(&mut recv_buf).await;
     if recv_result.is_ok() {
@@ -173,7 +226,7 @@ async fn establish_secure_connection(
         // eprintln!("UDP Got {} bytes back from: {:?}", count, remote_addr);
     } else {
         eprintln!("UDP Failed to retrieve bytes from remote");
-        return false;
+        return (false, my_public_address);
     }
 
     eprintln!("UDP Received {} bytes", count);
@@ -184,7 +237,7 @@ async fn establish_secure_connection(
     } else {
         eprintln!("UDP Unable to decode key");
         // return resp_receiver;
-        return false;
+        return (false, my_public_address);
     }
 
     let dedicated_socket = UdpSocket::bind(SocketAddr::new(socket.local_addr().unwrap().ip(), 0))
@@ -200,6 +253,40 @@ async fn establish_secure_connection(
         eprintln!("UDP 2 Received {} bytes", count);
         let decr_res = session_key.decrypt(&recv_buf[..count]);
         if let Ok(remote_pubkey_pem) = decr_res {
+            let mut r_buf = [0u8; 64];
+            let recv_result2 = dedicated_socket.recv(&mut r_buf).await;
+            if let Ok(count) = recv_result2 {
+                eprintln!("UDP 2 Received {} bytes", count);
+                let port = u16::from_be_bytes([r_buf[0], r_buf[1]]);
+                match count {
+                    6 => {
+                        //TODO: ip_v4
+                        my_public_address = Some((
+                            IpAddr::V4(Ipv4Addr::new(r_buf[2], r_buf[4], r_buf[4], r_buf[5])),
+                            port,
+                        ));
+                    }
+                    18 => {
+                        let a: u16 = u16::from_be_bytes([r_buf[2], r_buf[3]]);
+                        let b: u16 = u16::from_be_bytes([r_buf[4], r_buf[5]]);
+                        let c: u16 = u16::from_be_bytes([r_buf[6], r_buf[7]]);
+                        let d: u16 = u16::from_be_bytes([r_buf[8], r_buf[9]]);
+                        let e: u16 = u16::from_be_bytes([r_buf[10], r_buf[11]]);
+                        let f: u16 = u16::from_be_bytes([r_buf[12], r_buf[13]]);
+                        let g: u16 = u16::from_be_bytes([r_buf[14], r_buf[15]]);
+                        let h: u16 = u16::from_be_bytes([r_buf[16], r_buf[17]]);
+                        my_public_address =
+                            Some((IpAddr::V6(Ipv6Addr::new(a, b, c, d, e, f, g, h)), port));
+                    }
+                    other => {
+                        eprintln!("Received {} bytes as my public IP", other);
+                        // IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
+                    }
+                };
+            } else {
+                eprintln!("UDP Failed to receive additional data from remote");
+                return (false, my_public_address);
+            }
             let remote_id_pub_key_pem =
                 std::str::from_utf8(&remote_pubkey_pem).unwrap().to_string();
             spawn(prepare_and_serve(
@@ -213,14 +300,14 @@ async fn establish_secure_connection(
                 // encr,
                 remote_id_pub_key_pem,
             ));
-            return true;
+            return (true, my_public_address);
         } else {
             eprintln!("UDP Failed to decrypt message");
-            return false;
+            return (false, my_public_address);
         }
     } else {
         eprintln!("UDP Failed to receive data from remote");
-        return false;
+        return (false, my_public_address);
     }
 
     // return;
