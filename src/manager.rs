@@ -1,5 +1,7 @@
 use crate::crypto::sha_hash;
 use crate::crypto::Decrypter;
+use crate::networking::status::NetworkSummary;
+use crate::networking::status::Transport;
 use async_std::task::sleep;
 use async_std::task::spawn;
 use std::collections::VecDeque;
@@ -45,6 +47,7 @@ pub enum ToGnomeManager {
     FromGnome(GnomeToManager),
     ProvideNeighboringSwarms(SwarmID),
     DisconnectSwarmIfNoNeighbors(SwarmID),
+    PublicAddress(IpAddr, u16, Nat, (PortAllocationRule, i8), Transport),
     Quit,
 }
 
@@ -63,161 +66,6 @@ pub enum FromGnomeManager {
     AllNeighborsGone,
     Disconnected(Vec<(SwarmID, SwarmName)>),
 }
-enum ChannelAvailability {
-    Unknown,
-    Supported,
-    Available(IpAddr, u16, Nat, (PortAllocationRule, i8)),
-    NotAvailable,
-}
-// bool in each transport says if gnome's networking service has tried to bind it
-struct CommunicationChannels {
-    udp: (bool, ChannelAvailability),
-    tcp: (bool, ChannelAvailability),
-    udpv6: (bool, ChannelAvailability),
-    tcpv6: (bool, ChannelAvailability),
-}
-impl CommunicationChannels {
-    fn get_public_comm_channels(
-        &mut self,
-        ip: IpAddr,
-        port: u16,
-        nat: Nat,
-        port_rule: (PortAllocationRule, i8),
-    ) -> Vec<(IpAddr, u16, Nat, (PortAllocationRule, i8))> {
-        // eprintln!("get public comm channels: {}:{} {:?}", ip, port, nat);
-        //TODO: we need to hold a structure for all 4 possible IP/Transport
-        // combinations.
-        // First we should receive info whether or not given pair is supported
-        // by this host
-        // Later, for those supported we are expected to receive our public IP&Port
-        // Once we have all those public facing data we can send it to a swarm
-        // that we are founder of in order for it to update Manifest
-        // We currently only use STUN via UDP to query about public IP, so in some
-        // cases this might fail to provide us with required data.
-        //
-        // if port == 0 then if ip = 0.0.0.2 then network failed to bind udp socket
-        // if port == 1 then if ip = 0.0.0.2 then network bind udp socket is ok
-        // if port == 0 then if ip = ::2 then network failed to bind udpv6 socket
-        // if port == 0 then if ip = ::2 then network bind udpv6 socket is ok
-        // if port == 0 then if ip = 0.0.0.3 then network failed to bind tcp socket
-        // if port == 1 then if ip = 0.0.0.3 then network bind tcp socket is ok
-        // if port == 0 then if ip = ::3 then network failed to bind tcpv6 socket
-        // if port == 0 then if ip = ::3 then network bind tcpv6 socket is ok
-        // other port value means that we have a public ip and port
-        // we assign those values to both udp & tcp (or udpv6 & tcpv6),
-        // since over tcp we do not currently have any pub ip discovery logic
-        // match port {
-        //     0 => {
-        let (ipv6, oct) = match ip {
-            IpAddr::V4(ip) => (false, *ip.octets().last().take().unwrap()),
-            IpAddr::V6(ip) => (true, *ip.octets().last().take().unwrap()),
-        };
-        if port < 2 {
-            match oct {
-                2 => {
-                    if port == 0 {
-                        if ipv6 {
-                            //TODO: udpv6 disabled
-                            self.udpv6 = (true, ChannelAvailability::NotAvailable);
-                        } else {
-                            //TODO: udp disabled
-                            self.udp = (true, ChannelAvailability::NotAvailable);
-                        }
-                    } else if port == 1 {
-                        if ipv6 {
-                            //TODO: udpv6 enabled
-                            self.udpv6 = (true, ChannelAvailability::Supported);
-                        } else {
-                            //TODO: udp enabled
-                            self.udp = (true, ChannelAvailability::Supported);
-                        }
-                    } else {
-                        eprintln!("Unexpected port value: {}", port);
-                    }
-                }
-                3 => {
-                    if port == 0 {
-                        if ipv6 {
-                            //TODO: tcpv6 disabled
-                            self.tcpv6 = (true, ChannelAvailability::NotAvailable);
-                        } else {
-                            //TODO: tcp disabled
-                            self.tcp = (true, ChannelAvailability::NotAvailable);
-                        }
-                    } else if port == 1 {
-                        if ipv6 {
-                            //TODO: tcpv6 enabled
-                            self.tcpv6 = (true, ChannelAvailability::Supported);
-                        } else {
-                            //TODO: tcp enabled
-                            self.tcp = (true, ChannelAvailability::Supported);
-                        }
-                    } else {
-                        eprintln!("Unexpected port value: {}", port);
-                    }
-                }
-                other => {
-                    eprintln!("Unexpected last ip octet value: {}", other);
-                }
-            }
-        } else if ipv6 {
-            if self.udpv6.0 {
-                match nat {
-                    Nat::None | Nat::FullCone => {
-                        self.udpv6.1 = ChannelAvailability::Available(ip, port, nat, port_rule)
-                    }
-                    other => self.udpv6.1 = ChannelAvailability::Available(ip, 0, other, port_rule),
-                }
-            }
-            if self.tcpv6.0 {
-                match nat {
-                    Nat::None | Nat::FullCone => {
-                        self.tcpv6.1 = ChannelAvailability::Available(ip, port, nat, port_rule)
-                    }
-                    other => self.tcpv6.1 = ChannelAvailability::Available(ip, 0, other, port_rule),
-                }
-            } else {
-                if self.udp.0 {
-                    match nat {
-                        Nat::None | Nat::FullCone => {
-                            self.udp.1 = ChannelAvailability::Available(ip, port, nat, port_rule)
-                        }
-                        other => {
-                            self.udp.1 = ChannelAvailability::Available(ip, 0, other, port_rule)
-                        }
-                    }
-                }
-                if self.tcp.0 {
-                    match nat {
-                        Nat::None | Nat::FullCone => {
-                            self.tcp.1 = ChannelAvailability::Available(ip, port, nat, port_rule)
-                        }
-                        other => {
-                            self.tcp.1 = ChannelAvailability::Available(ip, 0, other, port_rule)
-                        }
-                    }
-                }
-            }
-        }
-        //TODO: add logic to check if all 4 conn_channels sent any response
-        // if so, we check if there are any public ip assigned
-        // if so, we send this info to our swarm
-        // This might result in Manifest changing multiple times,
-        // but for now it should be fine
-        let mut comm_channels = vec![];
-        // Only when we hear back from all possible networking channel services
-        if self.udp.0 && self.tcp.0 && self.udpv6.0 && self.tcpv6.0 {
-            if let ChannelAvailability::Available(ip, port, nat, port_rule) = self.udp.1 {
-                comm_channels.push((ip, port, nat, port_rule));
-            }
-            if let ChannelAvailability::Available(ip, port, nat, port_rule) = self.udpv6.1 {
-                comm_channels.push((ip, port, nat, port_rule));
-            }
-        }
-        comm_channels
-    }
-}
-
 pub struct Manager {
     gnome_id: GnomeId,
     pub_key_der: Vec<u8>,
@@ -228,15 +76,17 @@ pub struct Manager {
     neighboring_swarms: HashMap<SwarmName, HashSet<GnomeId>>,
     neighboring_gnomes: HashMap<GnomeId, HashSet<SwarmName>>,
     name_to_id: HashMap<SwarmName, SwarmID>,
-    comm_channels: CommunicationChannels,
-    network_settings: NetworkSettings,
+    // comm_channels: CommunicationChannels,
+    // network_settings: NetworkSettings,
     to_networking: Sender<Notification>,
     decrypter: Decrypter,
     req_receiver: AReceiver<ToGnomeManager>,
     req_sender: ASender<ToGnomeManager>,
     resp_sender: ASender<FromGnomeManager>,
     waiting_for_neighbors: Option<SwarmID>,
+    waiting_for_settings: VecDeque<(SwarmID, u8, GnomeId)>,
     join_queue: VecDeque<(SwarmName, Option<GnomeId>)>,
+    network_summary: NetworkSummary,
 }
 
 //TODO: Manager should hold Gnome's pub_key_pem in order to provide it
@@ -290,7 +140,7 @@ impl Manager {
         gnome_id: GnomeId,
         pub_key_der: Vec<u8>,
         priv_key_pem: String,
-        network_settings: Option<NetworkSettings>,
+        network_settings: Option<NetworkSettings>, //TODO: use this info
         to_networking: Sender<Notification>,
         decrypter: Decrypter,
         req_receiver: AReceiver<ToGnomeManager>,
@@ -298,13 +148,13 @@ impl Manager {
         resp_sender: ASender<FromGnomeManager>,
         sender: Sender<GnomeToManager>,
     ) -> Manager {
-        let network_settings = network_settings.unwrap_or_default();
-        let comm_channels = CommunicationChannels {
-            udp: (false, ChannelAvailability::Unknown),
-            tcp: (false, ChannelAvailability::Unknown),
-            udpv6: (false, ChannelAvailability::Unknown),
-            tcpv6: (false, ChannelAvailability::Unknown),
-        };
+        // let network_settings = network_settings.unwrap_or_default();
+        // let comm_channels = CommunicationChannels {
+        //     udp: (false, ChannelAvailability::Unknown),
+        //     tcp: (false, ChannelAvailability::Unknown),
+        //     udpv6: (false, ChannelAvailability::Unknown),
+        //     tcpv6: (false, ChannelAvailability::Unknown),
+        // };
         Manager {
             gnome_id,
             pub_key_der,
@@ -315,15 +165,17 @@ impl Manager {
             neighboring_swarms: HashMap::new(),
             neighboring_gnomes: HashMap::new(),
             name_to_id: HashMap::new(),
-            comm_channels,
-            network_settings,
+            // comm_channels,
+            // network_settings,
             to_networking, // Send a message to networking about new swarm subscription, and where to send Neighbors
             decrypter,
             req_receiver,
             req_sender,
             resp_sender,
             waiting_for_neighbors: None,
+            waiting_for_settings: VecDeque::new(),
             join_queue: VecDeque::with_capacity(8),
+            network_summary: NetworkSummary::empty(),
         }
     }
 
@@ -695,6 +547,30 @@ impl Manager {
                         //     eprintln!("Unable to find SwarmID for {} ", s_name);
                         // }
                     }
+                    ToGnomeManager::PublicAddress(ip, port, nat, port_rule, tr) => {
+                        eprintln!("Queue for PubIP: {}", self.waiting_for_settings.len());
+                        if let Some(pub_ips) =
+                            self.network_summary.process(ip, port, nat, port_rule, tr)
+                        {
+                            let _ = self
+                                .resp_sender
+                                .send(FromGnomeManager::MyPublicIPs(pub_ips))
+                                .await;
+                        }
+                        while let Some((s_id, conn_id, g_id)) =
+                            self.waiting_for_settings.pop_front()
+                        {
+                            let nsl = self.network_summary.get_network_settings();
+                            if let Some((sender, _sname)) = self.swarms.get(&s_id) {
+                                for ns in nsl {
+                                    eprintln!("Sending NS to Gnome");
+                                    let _ = sender.send(ManagerToGnome::ReplyNetworkSettings(
+                                        ns, conn_id, g_id,
+                                    ));
+                                }
+                            }
+                        }
+                    }
                     ToGnomeManager::FromGnome(request) => {
                         // eprintln!("GMgr Got {:?}", request);
                         let disconnected_opt = self.serve_gnome_requests(request).await;
@@ -816,17 +692,25 @@ impl Manager {
                     self.name_to_id.insert(s_name, swarm_id);
                 }
             }
-            GnomeToManager::PublicAddress(ip, port, nat, port_rule) => {
-                let pub_ips = self
-                    .comm_channels
-                    .get_public_comm_channels(ip, port, nat, port_rule);
-                if !pub_ips.is_empty() {
-                    let _ = self
-                        .resp_sender
-                        .send(FromGnomeManager::MyPublicIPs(pub_ips))
-                        .await;
+            GnomeToManager::ProvidePublicAddress(s_id, conn_id, g_id) => {
+                //we want to wait for updated network settings
+                // from networking
+                eprintln!("Received Pub Addr Request from Gnome");
+                if let Some((sender, s_name)) = self.swarms.get(&s_id) {
+                    if s_name.founder == g_id {
+                        for ns in self.network_summary.get_network_settings() {
+                            eprintln!("Sending immediately {:?}", ns);
+                            let _ = sender
+                                .send(ManagerToGnome::ReplyNetworkSettings(ns, conn_id, g_id));
+                        }
+                    } else {
+                        self.waiting_for_settings.push_back((s_id, conn_id, g_id));
+                    }
+                } else {
+                    self.waiting_for_settings.push_back((s_id, conn_id, g_id));
                 }
             }
+
             GnomeToManager::NeighboringSwarms(swarm_id, swarm_names) => {
                 eprintln!("GMgr got info from {} about:", swarm_id,);
                 let mut filtered_names = HashSet::new();
@@ -1431,7 +1315,7 @@ impl Manager {
                 recv,
                 // band_recv,
                 net_settings_send,
-                self.network_settings,
+                // self.network_settings,
                 assigned_bandwidth,
                 verify,
                 sign,
@@ -1479,6 +1363,10 @@ impl Manager {
         if let Some((mgr_send, _ns)) = self.swarms.get(id) {
             let _ = mgr_send.send(ManagerToGnome::Status);
         }
+    }
+
+    pub fn get_sender(&self) -> ASender<ToGnomeManager> {
+        self.req_sender.clone()
     }
 
     pub fn finish(self) {

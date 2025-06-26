@@ -9,6 +9,7 @@ use crate::networking::common::discover_network_settings;
 use crate::networking::common::distil_common_names;
 use crate::networking::common::receive_remote_swarm_names;
 use crate::networking::common::send_subscribed_swarm_names;
+use crate::networking::status::Transport;
 use crate::networking::subscription::Requestor;
 use crate::networking::subscription::Subscription;
 use async_std::net::UdpSocket;
@@ -41,51 +42,52 @@ pub async fn run_server(
     };
     eprintln!("My GnomeId: {}", gnome_id);
     let my_network_settings = discover_network_settings(&mut socket).await;
-    // if let Ok((_nat, our_addr)) = my_network_settings {
-    //     let nat_type = if !_nat {
-    //         swarm_consensus::Nat::None
-    //     } else {
-    //         (hhhhgd)
-    //     };
-    match my_network_settings.pub_ip {
-        // let octets =
-        IpAddr::V4(ip) => {
-            let mut all_zero = true;
-            for octet in ip.octets() {
-                if octet > 0 {
-                    all_zero = false;
-                    break;
-                }
-            }
-            if !all_zero {
-                eprintln!("My IP addr: {:?}", my_network_settings.pub_ip);
-                let _ = sub_sender.send(Subscription::Distribute(
-                    my_network_settings.pub_ip,
-                    my_network_settings.pub_port,
-                    my_network_settings.nat_type,
-                    my_network_settings.port_allocation,
-                ));
-            }
-        }
-        IpAddr::V6(ip) => {
-            let mut all_zero = true;
-            for octet in ip.octets() {
-                if octet > 0 {
-                    all_zero = false;
-                    break;
-                }
-            }
-            if !all_zero {
-                eprintln!("My IP addr: {:?}", my_network_settings.pub_ip);
-                let _ = sub_sender.send(Subscription::Distribute(
-                    my_network_settings.pub_ip,
-                    my_network_settings.pub_port,
-                    my_network_settings.nat_type,
-                    my_network_settings.port_allocation,
-                ));
-            }
-        }
-    }
+    eprintln!("Distribute from server");
+    let _ = sub_sender.send(Subscription::Distribute(
+        my_network_settings.pub_ip,
+        my_network_settings.pub_port,
+        my_network_settings.nat_type,
+        my_network_settings.port_allocation,
+        Transport::Udp,
+    ));
+    // match my_network_settings.pub_ip {
+    //     // let octets =
+    //     IpAddr::V4(ip) => {
+    //         let mut how_many_zero = 0;
+    //         for octet in ip.octets() {
+    //             if octet ==0 {
+    //                 how_many_zero+=1;
+    //             }
+    //         }
+    //         if how_many_zero<3{
+    //             eprintln!("My IP addr: {:?}", my_network_settings.pub_ip);
+    //             let _ = sub_sender.send(Subscription::Distribute(
+    //                 my_network_settings.pub_ip,
+    //                 my_network_settings.pub_port,
+    //                 my_network_settings.nat_type,
+    //                 my_network_settings.port_allocation,
+    //             ));
+    //         }
+    //     }
+    //     IpAddr::V6(ip) => {
+    //         let mut all_zero = true;
+    //         for octet in ip.octets() {
+    //             if octet > 0 {
+    //                 all_zero = false;
+    //                 break;
+    //             }
+    //         }
+    //         if !all_zero {
+    //             eprintln!("My IP addr: {:?}", my_network_settings.pub_ip);
+    //             let _ = sub_sender.send(Subscription::Distribute(
+    //                 my_network_settings.pub_ip,
+    //                 my_network_settings.pub_port,
+    //                 my_network_settings.nat_type,
+    //                 my_network_settings.port_allocation,
+    //             ));
+    //         }
+    //     }
+    // }
     // } else {
     //     eprintln!("Failed to discover Public IP & Port via STUN query");
     // }

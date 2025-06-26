@@ -1,3 +1,4 @@
+use crate::manager::ToGnomeManager;
 use crate::networking::common::collect_subscribed_swarm_names;
 use crate::networking::direct_punch::direct_punching_service;
 mod client;
@@ -6,6 +7,7 @@ mod direct_punch;
 mod holepunch;
 mod server;
 mod sock;
+pub mod status;
 mod stun;
 mod subscription;
 mod tcp_client;
@@ -17,18 +19,20 @@ use self::common::are_we_behind_a_nat;
 use self::holepunch::holepunch;
 use self::server::run_server;
 use self::sock::serve_socket;
+// pub use self::status::NetworkSummary;
 use self::subscription::subscriber;
 use self::tcp_server::run_tcp_server;
 use self::token::{token_dispenser, Token};
 use crate::crypto::Decrypter;
+use async_std::channel::Sender;
 use async_std::net::TcpListener;
 use async_std::net::UdpSocket;
 use async_std::task::spawn;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{channel, Receiver, Sender as SSender};
 use subscription::Requestor;
-use swarm_consensus::{Notification, NotificationBundle};
+use swarm_consensus::{GnomeToManager, Notification, NotificationBundle};
 
 // #[derive(Debug)]
 // enum ConnError {
@@ -46,7 +50,7 @@ use swarm_consensus::{Notification, NotificationBundle};
 // impl Error for ConnError {}
 
 pub async fn run_networking_tasks(
-    // host_ip: IpAddr,
+    to_gmgr: Sender<ToGnomeManager>,
     server_port: u16,
     // buffer_size_bytes: u64,
     // uplink_bandwith_bytes_sec: u64,
@@ -98,7 +102,7 @@ pub async fn run_networking_tasks(
     //     sub_sends.insert(Requestor::Udp, sub_send_one);
     // }
     spawn(subscriber(
-        // host_ip,
+        to_gmgr.clone(),
         sub_sends,
         // decrypter.clone(),
         // token_pipes_sender.clone(),
@@ -244,6 +248,7 @@ pub async fn run_networking_tasks(
     // In case we are behind a NAT we need to run direct_punch and holepunch
     // Both of those services need a sophisticated procedure for connection establishment.
     spawn(direct_punching_service(
+        to_gmgr.clone(),
         server_port,
         sub_send_two.clone(),
         // req_sender.clone(),

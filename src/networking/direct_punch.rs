@@ -2,12 +2,15 @@
 use super::common::{are_we_behind_a_nat, discover_network_settings};
 use super::token::Token;
 use crate::crypto::{Decrypter, Encrypter};
+use crate::manager::ToGnomeManager;
 use crate::networking::holepunch::cluster_punch_it;
+use crate::networking::status::Transport;
 use crate::networking::{
     client::run_client,
     holepunch::{punch_it, start_communication},
     subscription::Subscription,
 };
+use async_std::channel::Sender as ASender;
 // use crate::GnomeId;
 use async_std::net::UdpSocket;
 use async_std::task::{sleep, spawn};
@@ -15,9 +18,12 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{GnomeId, NetworkSettings, PortAllocationRule, SwarmName, ToGnome};
+use swarm_consensus::{
+    GnomeId, GnomeToManager, NetworkSettings, PortAllocationRule, SwarmName, ToGnome,
+};
 
 pub async fn direct_punching_service(
+    to_gmgr: ASender<ToGnomeManager>,
     server_port: u16,
     subscription_sender: Sender<Subscription>,
     decrypter: Decrypter,
@@ -61,7 +67,7 @@ pub async fn direct_punching_service(
     let (send_my_network_settings, recv_my_network_settings) = channel();
     // TODO: maybe only run it when it makes sense?
     spawn(socket_maintainer(
-        // server_port,
+        to_gmgr.clone(),
         pub_key_pem.clone(),
         // gnome_id,
         subscription_sender.clone(),
@@ -100,15 +106,24 @@ pub async fn direct_punching_service(
                 if my_settings.pub_port == 0 {
                     let _ = send_to_gnome.take();
                 } else {
-                    let request = ToGnome::NetworkSettingsUpdate(
-                        true,
-                        my_settings.pub_ip,
-                        my_settings.pub_port,
-                        my_settings.nat_type,
-                        my_settings.port_allocation,
-                    );
-                    if let Some(to_gnome) = send_to_gnome.take() {
-                        let _ = to_gnome.send(request);
+                    // let request = ToGnome::NetworkSettingsUpdate(
+                    //     true,
+                    //     my_settings.pub_ip,
+                    //     my_settings.pub_port,
+                    //     my_settings.nat_type,
+                    //     my_settings.port_allocation,
+                    // );
+                    if let Some(_gnome) = send_to_gnome.take() {
+                        // let _ = to_gnome.send(request);
+                        to_gmgr
+                            .send(ToGnomeManager::PublicAddress(
+                                my_settings.pub_ip,
+                                my_settings.pub_port,
+                                my_settings.nat_type,
+                                my_settings.port_allocation,
+                                Transport::Udp,
+                            ))
+                            .await;
                     }
                 }
                 // eprintln!("DPunch waiting for my settings: FALSE");
@@ -124,7 +139,7 @@ pub async fn direct_punching_service(
 /// Once it receives a NetworkSettings struct, it tries to open a communication
 /// channel with that Neighbor and spawns a new socket for any new incoming NetworkSettings
 async fn socket_maintainer(
-    // server_port: u16,
+    to_gmgr: ASender<ToGnomeManager>,
     pub_key_pem: String,
     // gnome_id: GnomeId,
     subscription_sender: Sender<Subscription>,
@@ -189,16 +204,16 @@ async fn socket_maintainer(
                             nat_type,
                             port_allocation: (PortAllocationRule::FullCone, 0),
                         };
-                        eprintln!("My Ipv6 addr: {:?}", our_addr.ip());
+                        eprintln!("My IPv6 addr: {:?}", our_addr.ip());
                         let _ = my_network_settings_sender.send(my_ipv6_settings);
                     } else {
                         eprintln!(
-                            "Failed to send STUN via IPv6: {:?}",
+                            "Failed to receive back STUN response via IPv6: {:?}",
                             ping_result.err().unwrap()
                         );
                         let my_ipv6_settings = NetworkSettings {
-                            pub_ip: IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)),
-                            pub_port: 0,
+                            pub_ip: IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 3)),
+                            pub_port: 2,
                             nat_type: swarm_consensus::Nat::Unknown,
                             port_allocation: (PortAllocationRule::FullCone, 0),
                         };

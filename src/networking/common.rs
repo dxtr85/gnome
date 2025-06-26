@@ -683,6 +683,9 @@ pub async fn discover_network_settings(socket: &mut UdpSocket) -> NetworkSetting
             my_settings.port_allocation = (PortAllocationRule::FullCone, 0);
         }
     } else {
+        // update my_settings to indicate no response was received
+        my_settings.pub_ip = IpAddr::from([0, 0, 0, 2]);
+        my_settings.pub_port = 2;
         eprintln!("Unable to tell if there is NAT: {:?}", behind_a_nat);
     }
     my_settings

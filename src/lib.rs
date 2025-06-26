@@ -189,16 +189,17 @@ pub async fn init(
         eprintln!("Joined `any /` swarm");
     }
 
-    let server_port: u16 = {
-        let modulo = (my_name.founder.0 % (u16::MAX as u64)) as u16;
-        if modulo >= 1024 {
-            modulo
-        } else {
-            modulo * 64
-        }
-    };
+    let server_port: u16 = my_name.founder.get_port();
+    //     {
+    //     let modulo = (my_name.founder.0 % (u16::MAX as u64)) as u16;
+    //     if modulo >= 1024 {
+    //         modulo
+    //     } else {
+    //         modulo * 64
+    //     }
+    // };
     let _join = spawn(run_networking_tasks(
-        // gnome_id,
+        gmgr.get_sender(),
         // server_ip,
         // broadcast_ip,
         server_port,

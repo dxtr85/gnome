@@ -1,4 +1,5 @@
 use super::serve_socket;
+use super::status::Transport;
 use super::Token;
 use crate::crypto::Decrypter;
 use crate::crypto::Encrypter;
@@ -102,6 +103,17 @@ pub async fn run_client(
                 return;
                 // return receiver;
             }
+            //TODO: if not success, port numrers meaning is:
+            // 0,1 - used by STUN
+            // 2 - no data received - remote host offline
+            // 3 - decode failure - something went wrong, but communication
+            //     is possible
+            // 4 - missing data - also something went wrong, but communication
+            //     is possible
+            // 5 - no data on dedicated socket - remote has symmetric NAT
+            //
+            // Only when STUN timeout we should assume UDP is blocked
+            // and only use TCP
             (success, my_pub_addr) = establish_secure_connection(
                 my_id,
                 &socket,
@@ -134,7 +146,7 @@ pub async fn run_client(
                             pub_ip: pub_ip.0,
                             pub_port: pub_ip.1,
                             nat_type: swarm_consensus::Nat::Unknown,
-                            port_allocation: (PortAllocationRule::FullCone, 127),
+                            port_allocation: (PortAllocationRule::Random, 127),
                         };
                         own_nsettings = Some(mset);
                     }
@@ -144,22 +156,25 @@ pub async fn run_client(
                         pub_ip: pub_ip.0,
                         pub_port: pub_ip.1,
                         nat_type: swarm_consensus::Nat::Unknown,
-                        port_allocation: (PortAllocationRule::Random, 127),
+                        port_allocation: (PortAllocationRule::Random, 126),
                     };
                     own_nsettings = Some(mset);
                 }
             }
         }
         if let Some(settings) = own_nsettings {
+            eprintln!("Distribute from client");
             let _ = sender.send(Subscription::Distribute(
                 settings.pub_ip,
                 settings.pub_port,
                 settings.nat_type,
                 settings.port_allocation,
+                Transport::Udp,
             ));
         }
     } else {
         eprintln!(" TCP ADDR: {:?} {:?}", tcp_addr, swarm_names);
+        //TODO: Distribute UDP failure
     }
     if let Some(addr) = tcp_addr {
         eprintln!("Trying to communicate over TCP…");
@@ -218,6 +233,7 @@ async fn establish_secure_connection(
         _result2 = t2 => true,
     };
     if timed_out {
+        //TODO: prepare specific pub address to inform about timeout
         return (false, my_public_address);
     }
     let recv_result = socket.recv_from(&mut recv_buf).await;
@@ -226,6 +242,7 @@ async fn establish_secure_connection(
         // eprintln!("UDP Got {} bytes back from: {:?}", count, remote_addr);
     } else {
         eprintln!("UDP Failed to retrieve bytes from remote");
+        //TODO: prepare specific pub address to inform about timeout 2
         return (false, my_public_address);
     }
 
@@ -236,7 +253,7 @@ async fn establish_secure_connection(
         session_key = SessionKey::from_key(&sym_key.try_into().unwrap());
     } else {
         eprintln!("UDP Unable to decode key");
-        // return resp_receiver;
+        // TODO: inform about decode failure
         return (false, my_public_address);
     }
 
@@ -257,34 +274,42 @@ async fn establish_secure_connection(
             let recv_result2 = dedicated_socket.recv(&mut r_buf).await;
             if let Ok(count) = recv_result2 {
                 eprintln!("UDP 2 Received {} bytes", count);
-                let port = u16::from_be_bytes([r_buf[0], r_buf[1]]);
-                match count {
-                    6 => {
-                        //TODO: ip_v4
-                        my_public_address = Some((
-                            IpAddr::V4(Ipv4Addr::new(r_buf[2], r_buf[4], r_buf[4], r_buf[5])),
-                            port,
-                        ));
-                    }
-                    18 => {
-                        let a: u16 = u16::from_be_bytes([r_buf[2], r_buf[3]]);
-                        let b: u16 = u16::from_be_bytes([r_buf[4], r_buf[5]]);
-                        let c: u16 = u16::from_be_bytes([r_buf[6], r_buf[7]]);
-                        let d: u16 = u16::from_be_bytes([r_buf[8], r_buf[9]]);
-                        let e: u16 = u16::from_be_bytes([r_buf[10], r_buf[11]]);
-                        let f: u16 = u16::from_be_bytes([r_buf[12], r_buf[13]]);
-                        let g: u16 = u16::from_be_bytes([r_buf[14], r_buf[15]]);
-                        let h: u16 = u16::from_be_bytes([r_buf[16], r_buf[17]]);
-                        my_public_address =
-                            Some((IpAddr::V6(Ipv6Addr::new(a, b, c, d, e, f, g, h)), port));
-                    }
-                    other => {
-                        eprintln!("Received {} bytes as my public IP", other);
-                        // IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
-                    }
-                };
+                let decr_res = session_key.decrypt(&r_buf[..count]);
+                if let Ok(pib) = decr_res {
+                    let port = u16::from_be_bytes([pib[0], pib[1]]);
+                    match pib.len() {
+                        6 => {
+                            //TODO: ip_v4
+                            my_public_address = Some((
+                                IpAddr::V4(Ipv4Addr::new(pib[2], pib[4], pib[4], pib[5])),
+                                port,
+                            ));
+                        }
+                        18 => {
+                            let a: u16 = u16::from_be_bytes([pib[2], pib[3]]);
+                            let b: u16 = u16::from_be_bytes([pib[4], pib[5]]);
+                            let c: u16 = u16::from_be_bytes([pib[6], pib[7]]);
+                            let d: u16 = u16::from_be_bytes([pib[8], pib[9]]);
+                            let e: u16 = u16::from_be_bytes([pib[10], pib[11]]);
+                            let f: u16 = u16::from_be_bytes([pib[12], pib[13]]);
+                            let g: u16 = u16::from_be_bytes([pib[14], pib[15]]);
+                            let h: u16 = u16::from_be_bytes([pib[16], pib[17]]);
+                            my_public_address =
+                                Some((IpAddr::V6(Ipv6Addr::new(a, b, c, d, e, f, g, h)), port));
+                        }
+                        other => {
+                            eprintln!("Received {} bytes as my public IP", other);
+                            // IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
+                        }
+                    };
+                } else {
+                    eprintln!("Failed to decrypt pub ip bytes");
+                    //TODO: inform that we failed to decode pub address
+                    return (false, my_public_address);
+                }
             } else {
                 eprintln!("UDP Failed to receive additional data from remote");
+                //TODO: inform that we did not receive back our pub address
                 return (false, my_public_address);
             }
             let remote_id_pub_key_pem =
@@ -307,12 +332,9 @@ async fn establish_secure_connection(
         }
     } else {
         eprintln!("UDP Failed to receive data from remote");
+        //TODO: inform about failure receiving data on dedicated socket
         return (false, my_public_address);
     }
-
-    // return;
-    // }
-    // resp_receiver
 }
 
 // async fn socket_connect(

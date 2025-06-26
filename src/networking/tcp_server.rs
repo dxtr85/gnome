@@ -216,7 +216,7 @@ async fn establish_secure_connection(
     }
     eprintln!("Sent encrypted public key {}", my_encrypted_pubkey.len());
     // We have to wait a bit, since flush does not always work…
-    sleep(Duration::from_millis(500));
+    sleep(Duration::from_millis(1000));
     //Now we send remote pub ip
     let mut remote_addr_bytes = vec![];
     let remote_addr = writer.peer_addr().unwrap();

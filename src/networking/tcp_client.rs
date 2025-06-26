@@ -7,6 +7,7 @@ use crate::crypto::SessionKey;
 use crate::networking::common::create_a_neighbor_for_each_swarm;
 use crate::networking::common::distil_common_names;
 use crate::networking::common::time_out;
+use crate::networking::status::Transport;
 use crate::networking::subscription::Subscription;
 use crate::networking::tcp_common::send_subscribed_swarm_names;
 use async_std::io::ReadExt;
@@ -173,33 +174,39 @@ async fn establish_secure_connection(
             let recv_result2 = stream.read(&mut r_buf).await;
             if let Ok(count) = recv_result2 {
                 eprintln!("TCP 2 Received {} bytes", count);
+                let decr_res = session_key.decrypt(&r_buf[..count]);
                 let mut my_public_address = None;
-                let port = u16::from_be_bytes([r_buf[0], r_buf[1]]);
-                match count {
-                    6 => {
-                        //TODO: ip_v4
-                        my_public_address = Some((
-                            IpAddr::V4(Ipv4Addr::new(r_buf[2], r_buf[4], r_buf[4], r_buf[5])),
-                            port,
-                        ));
-                    }
-                    18 => {
-                        let a: u16 = u16::from_be_bytes([r_buf[2], r_buf[3]]);
-                        let b: u16 = u16::from_be_bytes([r_buf[4], r_buf[5]]);
-                        let c: u16 = u16::from_be_bytes([r_buf[6], r_buf[7]]);
-                        let d: u16 = u16::from_be_bytes([r_buf[8], r_buf[9]]);
-                        let e: u16 = u16::from_be_bytes([r_buf[10], r_buf[11]]);
-                        let f: u16 = u16::from_be_bytes([r_buf[12], r_buf[13]]);
-                        let g: u16 = u16::from_be_bytes([r_buf[14], r_buf[15]]);
-                        let h: u16 = u16::from_be_bytes([r_buf[16], r_buf[17]]);
-                        my_public_address =
-                            Some((IpAddr::V6(Ipv6Addr::new(a, b, c, d, e, f, g, h)), port));
-                    }
-                    other => {
-                        eprintln!("Received {} bytes as my public IP", other);
-                        // IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
-                    }
-                };
+                if let Ok(pib) = decr_res {
+                    let port = u16::from_be_bytes([pib[0], pib[1]]);
+                    match pib.len() {
+                        6 => {
+                            //TODO: ip_v4
+                            my_public_address = Some((
+                                IpAddr::V4(Ipv4Addr::new(pib[2], pib[4], pib[4], pib[5])),
+                                port,
+                            ));
+                        }
+                        18 => {
+                            let a: u16 = u16::from_be_bytes([pib[2], pib[3]]);
+                            let b: u16 = u16::from_be_bytes([pib[4], pib[5]]);
+                            let c: u16 = u16::from_be_bytes([pib[6], pib[7]]);
+                            let d: u16 = u16::from_be_bytes([pib[8], pib[9]]);
+                            let e: u16 = u16::from_be_bytes([pib[10], pib[11]]);
+                            let f: u16 = u16::from_be_bytes([pib[12], pib[13]]);
+                            let g: u16 = u16::from_be_bytes([pib[14], pib[15]]);
+                            let h: u16 = u16::from_be_bytes([pib[16], pib[17]]);
+                            my_public_address =
+                                Some((IpAddr::V6(Ipv6Addr::new(a, b, c, d, e, f, g, h)), port));
+                        }
+                        other => {
+                            eprintln!("Received {} bytes as my public IP", other);
+                            // IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
+                        }
+                    };
+                } else {
+                    eprintln!("Failed to decrypt my public address");
+                }
+
                 if let Some(pub_ip) = my_public_address {
                     let mut own_nsettings = None;
                     // compare against local socket & build NetworkSettings
@@ -232,11 +239,13 @@ async fn establish_secure_connection(
                         }
                     }
                     if let Some(settings) = own_nsettings {
+                        eprintln!("Distribute from tcp_client");
                         let _ = sender.send(Subscription::Distribute(
                             settings.pub_ip,
                             settings.pub_port,
                             settings.nat_type,
                             settings.port_allocation,
+                            Transport::Tcp,
                         ));
                     }
                 }

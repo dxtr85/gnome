@@ -1,4 +1,5 @@
 // use crate::crypto::Decrypter;
+use async_std::channel::Sender as ASender;
 use async_std::task::sleep;
 use rsa::sha2::digest::HashMarker;
 use std::collections::HashMap;
@@ -7,9 +8,12 @@ use std::str::FromStr;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 use swarm_consensus::{
-    Nat, Neighbor, NetworkSettings, Notification, NotificationBundle, PortAllocationRule,
-    SwarmName, ToGnome,
+    GnomeToManager, Nat, Neighbor, NetworkSettings, Notification, NotificationBundle,
+    PortAllocationRule, SwarmName, ToGnome,
 };
+
+use crate::manager::ToGnomeManager;
+use crate::networking::status::Transport;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Requestor {
@@ -26,7 +30,7 @@ pub enum Subscription {
     ProvideList(Requestor),
     List(Vec<SwarmName>),
     IncludeNeighbor(SwarmName, Neighbor),
-    Distribute(IpAddr, u16, Nat, (PortAllocationRule, i8)),
+    Distribute(IpAddr, u16, Nat, (PortAllocationRule, i8), Transport),
     TransportNotAvailable(Requestor),
     TransportAvailable(Requestor),
     // Decode(Box<Vec<u8>>),
@@ -35,7 +39,7 @@ pub enum Subscription {
 }
 
 pub async fn subscriber(
-    // host_ip: IpAddr,
+    to_gmgr: ASender<ToGnomeManager>,
     sub_senders: HashMap<Requestor, Sender<Subscription>>,
     // sub_sender_bis: Sender<Subscription>,
     // decrypter: Decrypter,
@@ -183,52 +187,74 @@ pub async fn subscriber(
                     //     let _ = sub_sender_bis.send(Subscription::List(names.clone()));
                     // }
                 }
-                Subscription::Distribute(ip, port, nat, port_rule) => {
-                    //TODO: maybe we send this to Gnome manager instead?
+                Subscription::Distribute(ip, port, nat, port_rule, tr) => {
+                    // we send this to Gnome manager instead,
                     // then sending it just once will do
+                    eprintln!("Received Distribute, sending PubAddr");
+                    let _ = to_gmgr
+                        .send(ToGnomeManager::PublicAddress(ip, port, nat, port_rule, tr))
+                        .await;
                     // if let Some(sender) = swarms.values().next().take() {
-                    for sender in swarms.values() {
-                        let request =
-                            ToGnome::NetworkSettingsUpdate(false, ip, port, nat, port_rule);
-                        let _ = sender.send(request);
-                    }
+                    // for sender in swarms.values() {
+                    //     let request =
+                    //         ToGnome::NetworkSettingsUpdate(false, ip, port, nat, port_rule);
+                    //     let _ = sender.send(request);
+                    // }
                 }
                 Subscription::TransportNotAvailable(req) => {
                     //TODO
-                    let ip = match req {
-                        Requestor::Udp => IpAddr::from_str("0.0.0.2").unwrap(),
-                        Requestor::Tcp => IpAddr::from_str("0.0.0.3").unwrap(),
-                        Requestor::Udpv6 => IpAddr::from_str("::2").unwrap(),
-                        Requestor::Tcpv6 => IpAddr::from_str("::3").unwrap(),
+                    let (ip, tr) = match req {
+                        Requestor::Udp => (IpAddr::from_str("0.0.0.2").unwrap(), Transport::Udp),
+                        Requestor::Tcp => (IpAddr::from_str("0.0.0.3").unwrap(), Transport::Tcp),
+                        Requestor::Udpv6 => (IpAddr::from_str("::2").unwrap(), Transport::Udp),
+                        Requestor::Tcpv6 => (IpAddr::from_str("::3").unwrap(), Transport::Tcp),
                     };
-                    if let Some(sender) = swarms.values().next().take() {
-                        let request = ToGnome::NetworkSettingsUpdate(
-                            false,
+                    to_gmgr
+                        .send(ToGnomeManager::PublicAddress(
                             ip,
                             0,
                             Nat::Unknown,
                             (PortAllocationRule::Random, 0),
-                        );
-                        let _ = sender.send(request);
-                    }
+                            tr,
+                        ))
+                        .await;
+                    // if let Some(sender) = swarms.values().next().take() {
+                    //     let request = ToGnome::NetworkSettingsUpdate(
+                    //         false,
+                    //         ip,
+                    //         0,
+                    //         Nat::Unknown,
+                    //         (PortAllocationRule::Random, 0),
+                    //     );
+                    //     let _ = sender.send(request);
+                    // }
                 }
                 Subscription::TransportAvailable(req) => {
-                    let ip = match req {
-                        Requestor::Udp => IpAddr::from_str("0.0.0.2").unwrap(),
-                        Requestor::Tcp => IpAddr::from_str("0.0.0.3").unwrap(),
-                        Requestor::Udpv6 => IpAddr::from_str("::2").unwrap(),
-                        Requestor::Tcpv6 => IpAddr::from_str("::3").unwrap(),
+                    let (ip, tr) = match req {
+                        Requestor::Udp => (IpAddr::from_str("0.0.0.2").unwrap(), Transport::Udp),
+                        Requestor::Tcp => (IpAddr::from_str("0.0.0.3").unwrap(), Transport::Tcp),
+                        Requestor::Udpv6 => (IpAddr::from_str("::2").unwrap(), Transport::Udp),
+                        Requestor::Tcpv6 => (IpAddr::from_str("::3").unwrap(), Transport::Tcp),
                     };
-                    if let Some(sender) = swarms.values().next().take() {
-                        let request = ToGnome::NetworkSettingsUpdate(
-                            false,
+                    to_gmgr
+                        .send(ToGnomeManager::PublicAddress(
                             ip,
                             1,
                             Nat::Unknown,
                             (PortAllocationRule::Random, 0),
-                        );
-                        let _ = sender.send(request);
-                    }
+                            tr,
+                        ))
+                        .await;
+                    // if let Some(sender) = swarms.values().next().take() {
+                    //     let request = ToGnome::NetworkSettingsUpdate(
+                    //         false,
+                    //         ip,
+                    //         1,
+                    //         Nat::Unknown,
+                    //         (PortAllocationRule::Random, 0),
+                    //     );
+                    //     let _ = sender.send(request);
+                    // }
                 }
                 // Subscription::Decode(msg) => {
                 // println!("decoding: {:?}", msg);

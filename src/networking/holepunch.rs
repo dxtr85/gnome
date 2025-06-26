@@ -6,6 +6,7 @@ use crate::networking::client::prepare_and_serve;
 use crate::networking::common::{
     discover_network_settings, time_out, wait_for_bytes, wait_for_response,
 };
+use crate::networking::status::Transport;
 use crate::networking::subscription::Subscription;
 use async_std::net::UdpSocket;
 use async_std::task::{sleep, spawn, yield_now};
@@ -972,11 +973,13 @@ pub async fn start_communication(
         "Distribute IP/PORT from holepunch: {}:{}(Nat: {:?})",
         my_pub_ip, my_pub_port, my_nat
     );
+    eprintln!("Distribute from holepunch");
     let _ = sub_sender.send(Subscription::Distribute(
         my_pub_ip,
         my_pub_port,
         my_nat,
         (PortAllocationRule::Random, 0),
+        Transport::Udp,
     ));
     // println!("My external addr: {}", my_ext_addr_res.unwrap());
     // }
