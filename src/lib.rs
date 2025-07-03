@@ -13,7 +13,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 use swarm_consensus::GnomeId;
 use swarm_consensus::GnomeToManager;
-use swarm_consensus::NetworkSettings;
+// use swarm_consensus::NetworkSettings;
+
 // use swarm_consensus::Notification;
 use swarm_consensus::SwarmName;
 mod crypto;
@@ -27,6 +28,7 @@ use crate::manager::FromGnomeManager;
 use crate::manager::ToGnomeManager;
 use manager::Manager;
 use networking::run_networking_tasks;
+use networking::NetworkSettings;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::Receiver;
 // use swarm_consensus::NotificationBundle;
@@ -39,20 +41,20 @@ pub mod prelude {
     pub use crate::manager::FromGnomeManager;
     pub use crate::manager::Manager as GManager;
     pub use crate::manager::ToGnomeManager;
+    pub use crate::networking::Nat;
+    pub use crate::networking::NetworkSettings;
+    pub use crate::networking::PortAllocationRule;
+    pub use crate::networking::Transport;
     pub use swarm_consensus::CastData;
     pub use swarm_consensus::CastID;
     pub use swarm_consensus::GnomeId;
     pub use swarm_consensus::GnomeToApp;
-    pub use swarm_consensus::Nat;
     pub use swarm_consensus::NeighborRequest;
     pub use swarm_consensus::NeighborResponse;
-    pub use swarm_consensus::NetworkSettings;
-    pub use swarm_consensus::PortAllocationRule;
     pub use swarm_consensus::SwarmID;
     pub use swarm_consensus::SwarmName;
     pub use swarm_consensus::SyncData;
     pub use swarm_consensus::ToGnome;
-    pub use swarm_consensus::Transport;
 }
 
 pub async fn init(

@@ -3,6 +3,10 @@ use core::panic;
 use std::fmt;
 use std::ops::Deref;
 
+use crate::networking::Nat;
+use crate::networking::NetworkSettings;
+use crate::networking::PortAllocationRule;
+use crate::networking::Transport;
 use std::error::Error;
 use std::net::IpAddr;
 use swarm_consensus::BlockID;
@@ -14,14 +18,11 @@ use swarm_consensus::Configuration;
 use swarm_consensus::GnomeId;
 use swarm_consensus::Header;
 use swarm_consensus::Message;
-use swarm_consensus::Nat;
 use swarm_consensus::NeighborRequest;
 use swarm_consensus::NeighborResponse;
 use swarm_consensus::Neighborhood;
-use swarm_consensus::NetworkSettings;
 use swarm_consensus::Payload;
 use swarm_consensus::Policy;
-use swarm_consensus::PortAllocationRule;
 use swarm_consensus::Requirement;
 use swarm_consensus::Signature;
 use swarm_consensus::SwarmID;
@@ -31,7 +32,6 @@ use swarm_consensus::SwarmSyncResponse;
 use swarm_consensus::SwarmTime;
 use swarm_consensus::SwarmType;
 use swarm_consensus::SyncData;
-use swarm_consensus::Transport;
 
 // Every received Dgram starts with message identification header
 // (and optional second byte for casting messages).
@@ -499,9 +499,10 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, bytes: &mut Vec<u8>)
             bytes.push(swarm_id.0);
             bytes.push(cast_id.0);
         }
-        NeighborResponse::ForwardConnectResponse(network_settings) => {
+        NeighborResponse::ForwardConnectResponse(mut network_settings) => {
             bytes.push(252);
-            insert_network_settings(bytes, network_settings);
+            bytes.append(&mut network_settings);
+            // insert_network_settings(bytes, network_settings);
         }
         NeighborResponse::ForwardConnectFailed => {
             bytes.push(251);
@@ -510,10 +511,11 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, bytes: &mut Vec<u8>)
             bytes.push(250);
             bytes.push(id);
         }
-        NeighborResponse::ConnectResponse(id, network_settings) => {
+        NeighborResponse::ConnectResponse(id, mut network_settings) => {
             bytes.push(249);
             bytes.push(id);
-            insert_network_settings(bytes, network_settings);
+            bytes.append(&mut network_settings);
+            // insert_network_settings(bytes, network_settings);
         }
         NeighborResponse::SwarmSync(sync_response) => {
             bytes.push(248);
@@ -608,15 +610,17 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, bytes: &mut Vec<u8>) {
                 bytes.push(byte);
             }
         }
-        NeighborRequest::ForwardConnectRequest(network_settings) => {
+        NeighborRequest::ForwardConnectRequest(mut network_settings) => {
             bytes.push(252);
-            insert_network_settings(bytes, network_settings);
+            bytes.append(&mut network_settings);
+            // insert_network_settings(bytes, network_settings);
         }
-        NeighborRequest::ConnectRequest(id, gnome_id, network_settings) => {
+        NeighborRequest::ConnectRequest(id, gnome_id, mut network_settings) => {
             bytes.push(251);
             bytes.push(id);
             put_u64(bytes, gnome_id.0);
-            insert_network_settings(bytes, network_settings);
+            bytes.append(&mut network_settings);
+            // insert_network_settings(bytes, network_settings);
         }
         NeighborRequest::SwarmSyncRequest(sync_req_params) => {
             bytes.push(250);
@@ -699,7 +703,8 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
             NeighborRequest::CreateNeighbor(gnome_id, swarm_name)
         }
         252 => {
-            let net_set = parse_network_settings(&bytes[data_idx + 1..bytes_len]);
+            // let net_set = parse_network_settings(&bytes[data_idx + 1..bytes_len]);
+            let net_set = bytes[data_idx + 1..bytes_len].to_vec();
             NeighborRequest::ForwardConnectRequest(net_set)
         }
         251 => {
@@ -712,7 +717,8 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
             g_id += ((bytes[data_idx + 7]) as u64) << 16;
             g_id += ((bytes[data_idx + 8]) as u64) << 8;
             g_id += (bytes[data_idx + 9]) as u64;
-            let net_set = parse_network_settings(&bytes[data_idx + 10..bytes_len]);
+            // let net_set = parse_network_settings(&bytes[data_idx + 10..bytes_len]);
+            let net_set = bytes[data_idx + 10..bytes_len].to_vec();
             NeighborRequest::ConnectRequest(id, GnomeId(g_id), net_set)
         }
         250 => {
@@ -820,7 +826,8 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
         }
         253 => NeighborResponse::Unicast(SwarmID(bytes[data_idx + 1]), CastID(bytes[data_idx + 2])),
         252 => {
-            let net_set = parse_network_settings(&bytes[data_idx + 1..bytes_len]);
+            // let net_set = parse_network_settings(&bytes[data_idx + 1..bytes_len]);
+            let net_set = bytes[data_idx + 1..bytes_len].to_vec();
             NeighborResponse::ForwardConnectResponse(net_set)
         }
         251 => NeighborResponse::ForwardConnectFailed,
@@ -830,7 +837,8 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
         }
         249 => {
             let id = bytes[data_idx + 1];
-            let net_set = parse_network_settings(&bytes[data_idx + 2..bytes_len]);
+            // let net_set = parse_network_settings(&bytes[data_idx + 2..bytes_len]);
+            let net_set = bytes[data_idx + 2..bytes_len].to_vec();
             NeighborResponse::ConnectResponse(id, net_set)
         }
         248 => {
@@ -1003,100 +1011,102 @@ fn insert_network_settings(bytes: &mut Vec<u8>, network_settings_vec: Vec<Networ
     //TODO: support sending multiple NSs.
     // TODO: add transport byte
     for network_settings in network_settings_vec {
-        bytes.push(network_settings.nat_type as u8);
-        put_u16(bytes, network_settings.pub_port);
-        // bytes.put_u16(network_settings.pub_port);
-        bytes.push(network_settings.port_allocation.0 as u8);
-        // TODO: fix this!
-        // bytes.put_i8(network_settings.port_allocation.1);
-        bytes.push(network_settings.port_allocation.1 as u8);
-        bytes.push(network_settings.transport.byte());
-        let pub_ip = network_settings.pub_ip;
-        match pub_ip {
-            std::net::IpAddr::V4(ip4) => {
-                for b in ip4.octets() {
-                    bytes.push(b);
-                }
-            }
-            std::net::IpAddr::V6(ip4) => {
-                for b in ip4.octets() {
-                    bytes.push(b);
-                }
-            }
-        }
+        bytes.append(&mut network_settings.bytes());
+        // bytes.push(network_settings.nat_type as u8);
+        // put_u16(bytes, network_settings.pub_port);
+        // // bytes.put_u16(network_settings.pub_port);
+        // bytes.push(network_settings.port_allocation.0 as u8);
+        // // TODO: fix this!
+        // // bytes.put_i8(network_settings.port_allocation.1);
+        // bytes.push(network_settings.port_allocation.1 as u8);
+        // bytes.push(network_settings.transport.byte());
+        // let pub_ip = network_settings.pub_ip;
+        // match pub_ip {
+        //     std::net::IpAddr::V4(ip4) => {
+        //         for b in ip4.octets() {
+        //             bytes.push(b);
+        //         }
+        //     }
+        //     std::net::IpAddr::V6(ip4) => {
+        //         for b in ip4.octets() {
+        //             bytes.push(b);
+        //         }
+        //     }
+        // }
     }
 }
 fn parse_network_settings(bytes: &[u8]) -> Vec<NetworkSettings> {
-    let mut bytes_iter = bytes.iter();
-    let mut ns_vec = vec![];
-    //TODO: support multiple NSs
-    while let Some(raw_nat_type) = bytes_iter.next() {
-        let nat_type = match raw_nat_type {
-            0 => Nat::Unknown,
-            1 => Nat::None,
-            2 => Nat::FullCone,
-            4 => Nat::AddressRestrictedCone,
-            8 => Nat::PortRestrictedCone,
-            16 => Nat::SymmetricWithPortControl,
-            32 => Nat::Symmetric,
-            _ => {
-                eprintln!("Unrecognized NatType while parsing: {}", raw_nat_type);
-                Nat::Unknown
-            }
-        };
+    NetworkSettings::from(bytes)
+    // let mut bytes_iter = bytes.iter();
+    // let mut ns_vec = vec![];
+    // //TODO: support multiple NSs
+    // while let Some(raw_nat_type) = bytes_iter.next() {
+    //     let nat_type = match raw_nat_type {
+    //         0 => Nat::Unknown,
+    //         1 => Nat::None,
+    //         2 => Nat::FullCone,
+    //         4 => Nat::AddressRestrictedCone,
+    //         8 => Nat::PortRestrictedCone,
+    //         16 => Nat::SymmetricWithPortControl,
+    //         32 => Nat::Symmetric,
+    //         _ => {
+    //             eprintln!("Unrecognized NatType while parsing: {}", raw_nat_type);
+    //             Nat::Unknown
+    //         }
+    //     };
 
-        let mut port_bytes: [u8; 2] = [0, 0];
-        port_bytes[0] = *bytes_iter.next().unwrap();
-        port_bytes[1] = *bytes_iter.next().unwrap();
-        let pub_port: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
+    //     let mut port_bytes: [u8; 2] = [0, 0];
+    //     port_bytes[0] = *bytes_iter.next().unwrap();
+    //     port_bytes[1] = *bytes_iter.next().unwrap();
+    //     let pub_port: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
 
-        let port_allocation_rule = match bytes_iter.next().unwrap() {
-            0 => PortAllocationRule::Random,
-            1 => PortAllocationRule::FullCone,
-            2 => PortAllocationRule::AddressSensitive,
-            4 => PortAllocationRule::PortSensitive,
-            _ => PortAllocationRule::Random,
-        };
-        let delta_port = *bytes_iter.next().unwrap() as i8;
-        let transport = Transport::from(*bytes_iter.next().unwrap()).unwrap();
-        let mut ip_bytes: Vec<u8> = vec![];
-        let pub_ip = match transport {
-            Transport::UDPoverIP4 | Transport::TCPoverIP4 => {
-                for _i in 0..4 {
-                    ip_bytes.push(*bytes_iter.next().unwrap());
-                }
-                let array: [u8; 4] = ip_bytes.try_into().unwrap();
-                IpAddr::from(array)
-            }
-            Transport::TCPoverIP6 | Transport::UDPoverIP6 => {
-                for _i in 0..16 {
-                    ip_bytes.push(*bytes_iter.next().unwrap());
-                }
-                let array: [u8; 16] = ip_bytes.try_into().unwrap();
-                IpAddr::from(array)
-            }
-        };
-        // for a_byte in bytes_iter {
-        //     ip_bytes.push(*a_byte);
-        // }
-        // let bytes_len = ip_bytes.len();
-        // let pub_ip = if bytes_len == 4 {
-        //     let array: [u8; 4] = ip_bytes.try_into().unwrap();
-        //     IpAddr::from(array)
-        // } else if bytes_len == 16 {
-        //     let array: [u8; 16] = ip_bytes.try_into().unwrap();
-        //     IpAddr::from(array)
-        // } else {
-        //     eprintln!("Unable to parse IP addr from: {:?}", ip_bytes);
-        //     IpAddr::from([0, 0, 0, 0])
-        // };
-        ns_vec.push(NetworkSettings {
-            pub_ip,
-            pub_port,
-            nat_type,
-            port_allocation: (port_allocation_rule, delta_port),
-            transport,
-        })
-    }
-    ns_vec
+    //     let port_allocation_rule = match bytes_iter.next().unwrap() {
+    //         0 => PortAllocationRule::Random,
+    //         1 => PortAllocationRule::FullCone,
+    //         2 => PortAllocationRule::AddressSensitive,
+    //         4 => PortAllocationRule::PortSensitive,
+    //         _ => PortAllocationRule::Random,
+    //     };
+    //     let delta_port = *bytes_iter.next().unwrap() as i8;
+    //     let transport = Transport::from(*bytes_iter.next().unwrap()).unwrap();
+    //     let mut ip_bytes: Vec<u8> = vec![];
+    //     let pub_ip = match transport {
+    //         Transport::UDPoverIP4 | Transport::TCPoverIP4 => {
+    //             for _i in 0..4 {
+    //                 ip_bytes.push(*bytes_iter.next().unwrap());
+    //             }
+    //             let array: [u8; 4] = ip_bytes.try_into().unwrap();
+    //             IpAddr::from(array)
+    //         }
+    //         Transport::TCPoverIP6 | Transport::UDPoverIP6 => {
+    //             for _i in 0..16 {
+    //                 ip_bytes.push(*bytes_iter.next().unwrap());
+    //             }
+    //             let array: [u8; 16] = ip_bytes.try_into().unwrap();
+    //             IpAddr::from(array)
+    //         }
+    //     };
+    //     // for a_byte in bytes_iter {
+    //     //     ip_bytes.push(*a_byte);
+    //     // }
+    //     // let bytes_len = ip_bytes.len();
+    //     // let pub_ip = if bytes_len == 4 {
+    //     //     let array: [u8; 4] = ip_bytes.try_into().unwrap();
+    //     //     IpAddr::from(array)
+    //     // } else if bytes_len == 16 {
+    //     //     let array: [u8; 16] = ip_bytes.try_into().unwrap();
+    //     //     IpAddr::from(array)
+    //     // } else {
+    //     //     eprintln!("Unable to parse IP addr from: {:?}", ip_bytes);
+    //     //     IpAddr::from([0, 0, 0, 0])
+    //     // };
+    //     ns_vec.push(NetworkSettings {
+    //         pub_ip,
+    //         pub_port,
+    //         nat_type,
+    //         port_allocation: (port_allocation_rule, delta_port),
+    //         transport,
+    //     })
+    // }
+    // ns_vec
 }

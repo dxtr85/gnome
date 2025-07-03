@@ -1,13 +1,14 @@
 // use crate::crypto::Decrypter;
 use async_std::channel::Sender as ASender;
 use async_std::task::sleep;
-use rsa::sha2::digest::HashMarker;
+// use rsa::sha2::digest::HashMarker;
+use crate::networking::{Nat, NetworkSettings, PortAllocationRule};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{Nat, Neighbor, NetworkSettings, PortAllocationRule, SwarmName, ToGnome};
+use swarm_consensus::{Neighbor, SwarmName, ToGnome};
 
 use crate::manager::ToGnomeManager;
 use crate::networking::status::Transport;
@@ -49,7 +50,8 @@ pub async fn subscriber(
     notification_receiver: Receiver<Notification>,
     // token_dispenser_send: Sender<Sender<u64>>,
     holepunch_sender: Sender<SwarmName>,
-    direct_punch_sender: Sender<(SwarmName, Sender<ToGnome>, Receiver<NetworkSettings>)>,
+    // direct_punch_sender: Sender<(SwarmName, Sender<ToGnome>, Receiver<NetworkSettings>)>,
+    direct_punch_sender: Sender<(SwarmName, Sender<ToGnome>, Receiver<Vec<u8>>)>,
 ) {
     let mut swarms: HashMap<SwarmName, Sender<ToGnome>> = HashMap::with_capacity(10);
     let mut names: Vec<SwarmName> = Vec::with_capacity(10);

@@ -11,6 +11,9 @@ use crate::networking::common::send_subscribed_swarm_names;
 use crate::networking::common::time_out;
 use crate::networking::subscription::Subscription;
 use crate::networking::tcp_client::run_tcp_client;
+use crate::networking::NetworkSettings;
+use crate::networking::PortAllocationRule;
+use crate::networking::Transport as GTransport;
 use async_std::net::UdpSocket;
 use async_std::task::spawn;
 use futures::{
@@ -22,13 +25,10 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Sender};
 use std::time::Duration;
 use swarm_consensus::GnomeId;
-use swarm_consensus::NetworkSettings;
-use swarm_consensus::PortAllocationRule;
 use swarm_consensus::SwarmName;
-use swarm_consensus::Transport as GTransport;
 
 pub async fn run_client(
     swarm_names: Vec<SwarmName>,
@@ -153,7 +153,7 @@ pub async fn run_client(
                         let mset = NetworkSettings {
                             pub_ip: pub_ip.0,
                             pub_port: pub_ip.1,
-                            nat_type: swarm_consensus::Nat::Unknown,
+                            nat_type: super::Nat::Unknown,
                             port_allocation: (PortAllocationRule::Random, 127),
                             transport,
                         };
@@ -164,7 +164,7 @@ pub async fn run_client(
                     let mset = NetworkSettings {
                         pub_ip: pub_ip.0,
                         pub_port: pub_ip.1,
-                        nat_type: swarm_consensus::Nat::Unknown,
+                        nat_type: super::Nat::Unknown,
                         port_allocation: (PortAllocationRule::Random, 126),
                         transport,
                     };

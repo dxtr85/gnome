@@ -29,10 +29,10 @@ use async_std::net::TcpListener;
 use async_std::net::UdpSocket;
 use async_std::task::spawn;
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, Receiver, Sender as SSender};
 use subscription::Requestor;
-use swarm_consensus::{GnomeId, NetworkSettings, SwarmName, ToGnome};
+use swarm_consensus::{GnomeId, SwarmName, ToGnome};
 // use swarm_consensus::{GnomeToManager, Notification, NotificationBundle};
 
 pub enum Notification {
@@ -44,7 +44,8 @@ pub struct NotificationBundle {
     pub swarm_name: SwarmName,
     pub request_sender: SSender<ToGnome>,
     // pub token_sender: Sender<u64>,
-    pub network_settings_receiver: Receiver<NetworkSettings>,
+    // pub network_settings_receiver: Receiver<NetworkSettings>,
+    pub network_settings_receiver: Receiver<Vec<u8>>,
 }
 // #[derive(Debug)]
 // enum ConnError {
@@ -385,3 +386,393 @@ pub async fn run_networking_tasks(
 //         // .await;
 //     }
 // }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Nat {
+    Unknown = 0,
+    None = 1,
+    FullCone = 2,
+    AddressRestrictedCone = 4,
+    PortRestrictedCone = 8,
+    SymmetricWithPortControl = 16,
+    Symmetric = 32,
+}
+impl Nat {
+    pub fn from(byte: u8) -> Self {
+        match byte {
+            1 => Self::None,
+            2 => Self::FullCone,
+            4 => Self::AddressRestrictedCone,
+            8 => Self::PortRestrictedCone,
+            16 => Self::SymmetricWithPortControl,
+            32 => Self::Symmetric,
+            _o => Self::Unknown,
+        }
+    }
+    pub fn update(&mut self, new_value: Nat) {
+        // we always keep more restrictive option
+        match new_value {
+            Self::None => {
+                let myself = std::mem::replace(self, Self::None);
+                match myself {
+                    Self::None | Self::Unknown => {
+                        //do nothing, already updated
+                    }
+                    other => {
+                        *self = other;
+                    }
+                }
+            }
+            Self::FullCone => {
+                let myself = std::mem::replace(self, Self::FullCone);
+                match myself {
+                    Self::None => {
+                        *self = Self::None;
+                    }
+                    _other => {
+                        //do nothing
+                    }
+                }
+            }
+            Self::AddressRestrictedCone => {
+                let myself = std::mem::replace(self, Self::AddressRestrictedCone);
+                match myself {
+                    Self::None | Self::Unknown | Self::FullCone | Self::AddressRestrictedCone => {
+                        //do nothing
+                    }
+                    other => {
+                        *self = other;
+                    }
+                }
+            }
+            Self::PortRestrictedCone => {
+                let myself = std::mem::replace(self, Self::PortRestrictedCone);
+                match myself {
+                    Self::None
+                    | Self::Unknown
+                    | Self::FullCone
+                    | Self::AddressRestrictedCone
+                    | Self::PortRestrictedCone => {
+                        //do nothing
+                    }
+                    other => {
+                        *self = other;
+                    }
+                }
+            }
+            Self::SymmetricWithPortControl => {
+                let myself = std::mem::replace(self, Self::SymmetricWithPortControl);
+                match myself {
+                    Self::None
+                    | Self::Unknown
+                    | Self::FullCone
+                    | Self::AddressRestrictedCone
+                    | Self::PortRestrictedCone
+                    | Self::SymmetricWithPortControl => {
+                        //do nothing
+                    }
+                    other => {
+                        *self = other;
+                    }
+                }
+            }
+            Self::Symmetric => {
+                *self = Self::Symmetric;
+            }
+            Self::Unknown => {
+                //do nothing
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PortAllocationRule {
+    Random = 0,
+    FullCone = 1,
+    AddressSensitive = 2,
+    PortSensitive = 4,
+}
+impl PortAllocationRule {
+    pub fn from(byte: u8) -> Self {
+        match byte {
+            1 => Self::FullCone,
+            2 => Self::AddressSensitive,
+            4 => Self::PortSensitive,
+            _o => Self::Random,
+        }
+    }
+    pub fn update(&mut self, new_value: Self) {
+        match new_value {
+            Self::Random => {
+                //do nothing
+            }
+            Self::FullCone => {
+                let myself = std::mem::replace(self, Self::AddressSensitive);
+                match myself {
+                    Self::Random | Self::FullCone => {
+                        //do nothing
+                    }
+                    other => {
+                        *self = other;
+                    }
+                }
+            }
+            Self::AddressSensitive => {
+                let myself = std::mem::replace(self, Self::AddressSensitive);
+                match myself {
+                    Self::Random | Self::AddressSensitive => {
+                        //do nothing
+                    }
+                    other => {
+                        *self = other;
+                    }
+                }
+            }
+            Self::PortSensitive => {
+                let myself = std::mem::replace(self, Self::PortSensitive);
+                match myself {
+                    Self::Random | Self::AddressSensitive | Self::PortSensitive => {
+                        //do nothing
+                    }
+                    other => {
+                        *self = other;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Transport {
+    UDPoverIP4 = 0,
+    TCPoverIP4 = 1,
+    UDPoverIP6 = 2,
+    TCPoverIP6 = 3,
+}
+
+impl Transport {
+    pub fn from(byte: u8) -> Result<Self, u8> {
+        match byte {
+            0 => Ok(Self::UDPoverIP4),
+            1 => Ok(Self::TCPoverIP4),
+            2 => Ok(Self::UDPoverIP6),
+            3 => Ok(Self::TCPoverIP6),
+            other => Err(other),
+        }
+    }
+    pub fn byte(&self) -> u8 {
+        match self {
+            Self::UDPoverIP4 => 0,
+            Self::TCPoverIP4 => 1,
+            Self::UDPoverIP6 => 2,
+            Self::TCPoverIP6 => 3,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NetworkSettings {
+    pub pub_ip: IpAddr,
+    pub pub_port: u16,
+    pub nat_type: Nat,
+    pub port_allocation: (PortAllocationRule, i8),
+    pub transport: Transport,
+}
+
+impl NetworkSettings {
+    pub fn from(bytes: &[u8]) -> Vec<NetworkSettings> {
+        let mut bytes_iter = bytes.iter();
+        let mut ns_vec = vec![];
+        //TODO: support multiple NSs
+        while let Some(raw_nat_type) = bytes_iter.next() {
+            let nat_type = match raw_nat_type {
+                0 => Nat::Unknown,
+                1 => Nat::None,
+                2 => Nat::FullCone,
+                4 => Nat::AddressRestrictedCone,
+                8 => Nat::PortRestrictedCone,
+                16 => Nat::SymmetricWithPortControl,
+                32 => Nat::Symmetric,
+                _ => {
+                    eprintln!("Unrecognized NatType while parsing: {}", raw_nat_type);
+                    Nat::Unknown
+                }
+            };
+
+            let mut port_bytes: [u8; 2] = [0, 0];
+            port_bytes[0] = *bytes_iter.next().unwrap();
+            port_bytes[1] = *bytes_iter.next().unwrap();
+            let pub_port: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
+
+            let port_allocation_rule = match bytes_iter.next().unwrap() {
+                0 => PortAllocationRule::Random,
+                1 => PortAllocationRule::FullCone,
+                2 => PortAllocationRule::AddressSensitive,
+                4 => PortAllocationRule::PortSensitive,
+                _ => PortAllocationRule::Random,
+            };
+            let delta_port = *bytes_iter.next().unwrap() as i8;
+            let transport = Transport::from(*bytes_iter.next().unwrap()).unwrap();
+            let mut ip_bytes: Vec<u8> = vec![];
+            let pub_ip = match transport {
+                Transport::UDPoverIP4 | Transport::TCPoverIP4 => {
+                    for _i in 0..4 {
+                        ip_bytes.push(*bytes_iter.next().unwrap());
+                    }
+                    let array: [u8; 4] = ip_bytes.try_into().unwrap();
+                    IpAddr::from(array)
+                }
+                Transport::TCPoverIP6 | Transport::UDPoverIP6 => {
+                    for _i in 0..16 {
+                        ip_bytes.push(*bytes_iter.next().unwrap());
+                    }
+                    let array: [u8; 16] = ip_bytes.try_into().unwrap();
+                    IpAddr::from(array)
+                }
+            };
+            // for a_byte in bytes_iter {
+            //     ip_bytes.push(*a_byte);
+            // }
+            // let bytes_len = ip_bytes.len();
+            // let pub_ip = if bytes_len == 4 {
+            //     let array: [u8; 4] = ip_bytes.try_into().unwrap();
+            //     IpAddr::from(array)
+            // } else if bytes_len == 16 {
+            //     let array: [u8; 16] = ip_bytes.try_into().unwrap();
+            //     IpAddr::from(array)
+            // } else {
+            //     eprintln!("Unable to parse IP addr from: {:?}", ip_bytes);
+            //     IpAddr::from([0, 0, 0, 0])
+            // };
+            ns_vec.push(NetworkSettings {
+                pub_ip,
+                pub_port,
+                nat_type,
+                port_allocation: (port_allocation_rule, delta_port),
+                transport,
+            })
+        }
+        ns_vec
+    }
+
+    pub fn bytes(self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(32);
+        bytes.push(self.nat_type as u8);
+        for b in self.pub_port.to_be_bytes() {
+            bytes.push(b);
+        }
+        // put_u16(bytes, self.pub_port);
+        // bytes.put_u16(self.pub_port);
+        bytes.push(self.port_allocation.0 as u8);
+        // TODO: fix this!
+        // bytes.put_i8(self.port_allocation.1);
+        bytes.push(self.port_allocation.1 as u8);
+        bytes.push(self.transport.byte());
+        let pub_ip = self.pub_ip;
+        match pub_ip {
+            std::net::IpAddr::V4(ip4) => {
+                for b in ip4.octets() {
+                    bytes.push(b);
+                }
+            }
+            std::net::IpAddr::V6(ip4) => {
+                for b in ip4.octets() {
+                    bytes.push(b);
+                }
+            }
+        }
+        bytes
+    }
+    pub fn new_not_natted(pub_ip: IpAddr, pub_port: u16, transport: Transport) -> Self {
+        Self {
+            pub_ip,
+            pub_port,
+            nat_type: Nat::None,
+            port_allocation: (PortAllocationRule::FullCone, 0),
+            transport,
+        }
+    }
+    pub fn len(&self) -> usize {
+        if self.pub_ip.is_ipv4() {
+            9
+        } else {
+            21
+        }
+    }
+    pub fn update(&mut self, other: Self) {
+        self.pub_ip = other.pub_ip;
+        self.pub_port = other.pub_port;
+        self.nat_type = other.nat_type;
+        self.port_allocation = other.port_allocation;
+    }
+
+    pub fn set_port(&mut self, port: u16) {
+        self.pub_port = port;
+    }
+
+    pub fn get_predicted_addr(&self, mut iter: u8) -> (IpAddr, u16) {
+        let mut port = self.port_increment(self.pub_port);
+        while iter > 0 {
+            iter -= 1;
+            port = self.port_increment(port);
+        }
+        (self.pub_ip, port)
+    }
+
+    pub fn refresh_required(&self) -> bool {
+        self.port_allocation.0 != PortAllocationRule::FullCone
+    }
+    pub fn nat_at_most_address_sensitive(&self) -> bool {
+        self.nat_type == Nat::None
+            || self.nat_type == Nat::FullCone
+            || self.nat_type == Nat::AddressRestrictedCone
+    }
+    pub fn no_nat(&self) -> bool {
+        self.nat_type == Nat::None
+    }
+    pub fn nat_port_restricted(&self) -> bool {
+        self.nat_type == Nat::PortRestrictedCone
+    }
+    pub fn nat_symmetric(&self) -> bool {
+        self.nat_type == Nat::Symmetric
+    }
+    pub fn nat_symmetric_with_port_control(&self) -> bool {
+        self.nat_type == Nat::SymmetricWithPortControl
+    }
+    pub fn nat_unknown(&self) -> bool {
+        self.nat_type == Nat::Unknown
+    }
+    pub fn port_allocation_predictable(&self) -> bool {
+        self.port_allocation.0 == PortAllocationRule::FullCone
+            || self.port_allocation.0 == PortAllocationRule::AddressSensitive
+            || self.port_allocation.0 == PortAllocationRule::PortSensitive
+    }
+    pub fn port_sensitive_allocation(&self) -> bool {
+        self.port_allocation.0 == PortAllocationRule::PortSensitive
+    }
+    pub fn port_increment(&self, port: u16) -> u16 {
+        match self.port_allocation {
+            (PortAllocationRule::AddressSensitive | PortAllocationRule::PortSensitive, value) => {
+                if value > 0 {
+                    port + (value as u16)
+                } else {
+                    port - (value.unsigned_abs() as u16)
+                }
+            }
+            _ => port,
+        }
+    }
+}
+
+impl Default for NetworkSettings {
+    fn default() -> Self {
+        NetworkSettings {
+            pub_ip: IpAddr::from([0, 0, 0, 0]),
+            pub_port: 1026,
+            nat_type: Nat::Unknown,
+            port_allocation: (PortAllocationRule::Random, 0),
+            transport: Transport::UDPoverIP4,
+        }
+    }
+}

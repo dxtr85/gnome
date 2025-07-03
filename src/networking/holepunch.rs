@@ -8,6 +8,7 @@ use crate::networking::common::{
 };
 use crate::networking::status::Transport;
 use crate::networking::subscription::Subscription;
+use crate::networking::{Nat, NetworkSettings, PortAllocationRule, Transport as GTransport};
 use async_std::net::UdpSocket;
 use async_std::task::{sleep, spawn};
 use futures::{
@@ -20,8 +21,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, TryRecvError};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{GnomeId, NetworkSettings, SwarmName, Transport as GTransport};
-use swarm_consensus::{Nat, PortAllocationRule};
+use swarm_consensus::{GnomeId, SwarmName};
 
 // let puncher = "tudbut.de:4277";
 // let swarm_name = "irdm".to_string();

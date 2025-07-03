@@ -13,15 +13,14 @@ use crate::networking::{
 };
 use async_std::channel::Sender as ASender;
 // use crate::GnomeId;
+use crate::networking::{Nat, NetworkSettings, PortAllocationRule, Transport as GTransport};
 use async_std::net::UdpSocket;
 use async_std::task::{sleep, spawn};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{
-    GnomeId, NetworkSettings, PortAllocationRule, SwarmName, ToGnome, Transport as GTransport,
-};
+use swarm_consensus::{GnomeId, SwarmName, ToGnome};
 
 pub async fn direct_punching_service(
     to_gmgr: ASender<ToGnomeManager>,
@@ -29,7 +28,7 @@ pub async fn direct_punching_service(
     subscription_sender: Sender<Subscription>,
     decrypter: Decrypter,
     // token_endpoints_sender: Sender<(Sender<Token>, Receiver<Token>)>,
-    swarm_endpoints_receiver: Receiver<(SwarmName, Sender<ToGnome>, Receiver<NetworkSettings>)>,
+    swarm_endpoints_receiver: Receiver<(SwarmName, Sender<ToGnome>, Receiver<Vec<u8>>)>,
     pub_key_pem: String,
 ) {
     eprintln!("Waiting for direct connect requests.");
@@ -62,7 +61,7 @@ pub async fn direct_punching_service(
     // Then we receive trough settings_result external ip and port
     // of joining party and use our predicted ip and port to connect to it.
 
-    let mut swarms: HashMap<SwarmName, (Sender<ToGnome>, Receiver<NetworkSettings>)> =
+    let mut swarms: HashMap<SwarmName, (Sender<ToGnome>, Receiver<Vec<u8>>)> =
         HashMap::with_capacity(10);
     let (send_other_network_settings, recv_other_network_settings) = channel();
     let (send_my_network_settings, recv_my_network_settings) = channel();
@@ -154,7 +153,8 @@ async fn socket_maintainer(
     decrypter: Decrypter,
     // token_endpoints_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     my_network_settings_sender: Sender<NetworkSettings>,
-    other_network_settings_reciever: Receiver<(SwarmName, NetworkSettings)>,
+    // other_network_settings_reciever: Receiver<(SwarmName, NetworkSettings)>,
+    other_network_settings_reciever: Receiver<(SwarmName, Vec<u8>)>,
 ) {
     //TODO: Right now we only support communication over IPv4
     // since bind_addr is an IPv4 address.
@@ -192,52 +192,83 @@ async fn socket_maintainer(
             }
             // TODO: discover with stun server
             // eprintln!("DP recvd other: {:?}", other_settings);
-            if other_settings.pub_ip.is_ipv6() {
-                let bind_addr = (IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)), 0u16);
-                if let Ok(socket) = UdpSocket::bind(bind_addr).await {
-                    let ping_result = are_we_behind_a_nat(&socket).await;
-                    if let Ok((_nat, _port_control, our_addr)) = ping_result {
-                        let nat_type = if !_nat {
-                            swarm_consensus::Nat::None
-                        } else if _port_control {
-                            // TODO: maybe add UnknownWithPortControl?
-                            swarm_consensus::Nat::SymmetricWithPortControl
+            let mut other_settings_bundle = NetworkSettings::from(&other_settings);
+            if other_settings_bundle.is_empty() {
+                eprintln!("Unable to construct NetworkSettings from bytes");
+                continue;
+            }
+            while let Some(other_settings) = other_settings_bundle.pop() {
+                if other_settings.pub_ip.is_ipv6() {
+                    let bind_addr = (IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)), 0u16);
+                    if let Ok(socket) = UdpSocket::bind(bind_addr).await {
+                        let ping_result = are_we_behind_a_nat(&socket).await;
+                        if let Ok((_nat, _port_control, our_addr)) = ping_result {
+                            let nat_type = if !_nat {
+                                Nat::None
+                            } else if _port_control {
+                                // TODO: maybe add UnknownWithPortControl?
+                                Nat::SymmetricWithPortControl
+                            } else {
+                                Nat::Unknown
+                            };
+                            let my_ipv6_settings = NetworkSettings {
+                                pub_ip: our_addr.ip(),
+                                pub_port: our_addr.port(),
+                                // pub_port: server_port + 1,
+                                nat_type,
+                                port_allocation: (PortAllocationRule::FullCone, 0),
+                                transport: GTransport::UDPoverIP6,
+                            };
+                            eprintln!("My IPv6 addr: {:?}", our_addr.ip());
+                            let _ = my_network_settings_sender.send(my_ipv6_settings);
                         } else {
-                            swarm_consensus::Nat::Unknown
-                        };
-                        let my_ipv6_settings = NetworkSettings {
-                            pub_ip: our_addr.ip(),
-                            pub_port: our_addr.port(),
-                            // pub_port: server_port + 1,
-                            nat_type,
-                            port_allocation: (PortAllocationRule::FullCone, 0),
-                            transport: GTransport::UDPoverIP6,
-                        };
-                        eprintln!("My IPv6 addr: {:?}", our_addr.ip());
-                        let _ = my_network_settings_sender.send(my_ipv6_settings);
+                            eprintln!(
+                                "Failed to receive back STUN response via IPv6: {:?}",
+                                ping_result.err().unwrap()
+                            );
+                            let my_ipv6_settings = NetworkSettings {
+                                pub_ip: IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 3)),
+                                pub_port: 2,
+                                nat_type: Nat::Unknown,
+                                port_allocation: (PortAllocationRule::FullCone, 0),
+                                transport: GTransport::UDPoverIP6,
+                            };
+                            let _ = my_network_settings_sender.send(my_ipv6_settings);
+                        }
+                        // let my_addr = socket.local_addr().unwrap();
+                        // let my_ipv6_settings = NetworkSettings {
+                        //     pub_ip: my_addr.ip(),
+                        //     // pub_port: my_addr.port(),
+                        //     pub_port: server_port + 1,
+                        //     nat_type: swarm_consensus::Nat::None,
+                        //     port_allocation: (PortAllocationRule::FullCone, 0),
+                        // };
+                        // let _ = my_network_settings_sender.send(my_ipv6_settings);
+                        spawn(punch_and_communicate(
+                            socket,
+                            bind_addr,
+                            pub_key_pem.clone(),
+                            // _to_gmgr.clone(),
+                            subscription_sender.clone(),
+                            decrypter.clone(),
+                            // token_endpoints_sender.clone(),
+                            swarm_names.clone(),
+                            (my_settings, other_settings),
+                        ));
                     } else {
-                        eprintln!(
-                            "Failed to receive back STUN response via IPv6: {:?}",
-                            ping_result.err().unwrap()
-                        );
+                        eprintln!("Unable to bind IPv6 socket");
                         let my_ipv6_settings = NetworkSettings {
-                            pub_ip: IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 3)),
-                            pub_port: 2,
-                            nat_type: swarm_consensus::Nat::Unknown,
+                            pub_ip: IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)),
+                            pub_port: 0,
+                            nat_type: Nat::Unknown,
                             port_allocation: (PortAllocationRule::FullCone, 0),
                             transport: GTransport::UDPoverIP6,
                         };
                         let _ = my_network_settings_sender.send(my_ipv6_settings);
                     }
-                    // let my_addr = socket.local_addr().unwrap();
-                    // let my_ipv6_settings = NetworkSettings {
-                    //     pub_ip: my_addr.ip(),
-                    //     // pub_port: my_addr.port(),
-                    //     pub_port: server_port + 1,
-                    //     nat_type: swarm_consensus::Nat::None,
-                    //     port_allocation: (PortAllocationRule::FullCone, 0),
-                    // };
-                    // let _ = my_network_settings_sender.send(my_ipv6_settings);
+                } else {
+                    let _ = my_network_settings_sender.send(my_settings);
+                    // swarm_names.sort();
                     spawn(punch_and_communicate(
                         socket,
                         bind_addr,
@@ -249,33 +280,9 @@ async fn socket_maintainer(
                         swarm_names.clone(),
                         (my_settings, other_settings),
                     ));
-                } else {
-                    eprintln!("Unable to bind IPv6 socket");
-                    let my_ipv6_settings = NetworkSettings {
-                        pub_ip: IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)),
-                        pub_port: 0,
-                        nat_type: swarm_consensus::Nat::Unknown,
-                        port_allocation: (PortAllocationRule::FullCone, 0),
-                        transport: GTransport::UDPoverIP6,
-                    };
-                    let _ = my_network_settings_sender.send(my_ipv6_settings);
+                    socket = UdpSocket::bind(bind_addr).await.unwrap();
+                    my_settings = update_my_pub_addr(&socket, my_settings).await;
                 }
-            } else {
-                let _ = my_network_settings_sender.send(my_settings);
-                // swarm_names.sort();
-                spawn(punch_and_communicate(
-                    socket,
-                    bind_addr,
-                    pub_key_pem.clone(),
-                    // _to_gmgr.clone(),
-                    subscription_sender.clone(),
-                    decrypter.clone(),
-                    // token_endpoints_sender.clone(),
-                    swarm_names.clone(),
-                    (my_settings, other_settings),
-                ));
-                socket = UdpSocket::bind(bind_addr).await.unwrap();
-                my_settings = update_my_pub_addr(&socket, my_settings).await;
             }
         }
         // yield_now().await;

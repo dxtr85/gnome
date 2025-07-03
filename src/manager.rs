@@ -6,11 +6,13 @@ use async_std::task::sleep;
 use async_std::task::spawn;
 use std::collections::VecDeque;
 // use std::hash::{DefaultHasher, Hash, Hasher};
+use crate::networking::Nat;
+use crate::networking::NetworkSettings;
+use crate::networking::PortAllocationRule;
 use std::net::IpAddr;
 use std::time::Duration;
-use swarm_consensus::NetworkSettings;
-use swarm_consensus::{Nat, SwarmName};
-use swarm_consensus::{PortAllocationRule, SwarmTime};
+use swarm_consensus::SwarmName;
+use swarm_consensus::SwarmTime;
 // use crate::gnome::NetworkSettings;
 // use crate::swarm::{Swarm, SwarmID};
 use crate::networking::Notification;
@@ -562,7 +564,7 @@ impl Manager {
                         while let Some((s_id, conn_id, g_id)) =
                             self.waiting_for_settings.pop_front()
                         {
-                            let nsl = self.network_summary.get_network_settings();
+                            let nsl = self.network_summary.get_network_settings_bytes();
                             if let Some((sender, _sname)) = self.swarms.get(&s_id) {
                                 // for ns in nsl {
                                 eprintln!("Sending NS to Gnome");
@@ -705,7 +707,7 @@ impl Manager {
                 eprintln!("Received Pub Addr Request from Gnome");
                 if let Some((sender, s_name)) = self.swarms.get(&s_id) {
                     if s_name.founder == g_id {
-                        let ns = self.network_summary.get_network_settings();
+                        let ns = self.network_summary.get_network_settings_bytes();
                         eprintln!("Sending immediately {:?}", ns);
                         let _ =
                             sender.send(ManagerToGnome::ReplyNetworkSettings(ns, conn_id, g_id));
@@ -1169,9 +1171,13 @@ impl Manager {
             // let (band_send, band_recv) = channel();
             let (net_settings_send, net_settings_recv) = channel();
             if let Some(neighbor_settings) = neighbor_network_settings {
+                let mut bytes = vec![];
                 for setting in neighbor_settings {
                     eprintln!("Sending neighbor settings: {:?}", setting);
-                    let _ = net_settings_send.send(setting);
+                    bytes.append(&mut setting.bytes());
+                }
+                if !bytes.is_empty() {
+                    let _ = net_settings_send.send(bytes);
                 }
             }
             let mgr_sender = self.sender.clone();
@@ -1351,7 +1357,8 @@ impl Manager {
         swarm_name: SwarmName,
         sender: Sender<ToGnome>,
         // avail_bandwith_sender: Sender<u64>,
-        network_settings_receiver: Receiver<NetworkSettings>,
+        // network_settings_receiver: Receiver<NetworkSettings>,
+        network_settings_receiver: Receiver<Vec<u8>>,
     ) {
         eprintln!("Notifying network about {}", swarm_name);
         let r = self

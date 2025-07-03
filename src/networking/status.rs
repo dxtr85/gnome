@@ -1,6 +1,6 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use swarm_consensus::{Nat, NetworkSettings, PortAllocationRule, Transport as GTransport};
+use crate::networking::{Nat, NetworkSettings, PortAllocationRule, Transport as GTransport};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Transport {
@@ -307,10 +307,16 @@ impl NetworkSummary {
             ip6: IPStatus::new_ip6(),
         }
     }
-    pub fn get_network_settings(&self) -> Vec<NetworkSettings> {
-        let mut sett = self.ip4.get_settings(true);
-        sett.extend(self.ip6.get_settings(false));
-        sett
+    pub fn get_network_settings_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(128);
+        for ns in self.ip4.get_settings(true) {
+            bytes.append(&mut ns.bytes());
+        }
+        for ns in self.ip6.get_settings(false) {
+            bytes.append(&mut ns.bytes());
+        }
+        // sett.extend(self.ip6.get_settings(false));
+        bytes
     }
 
     pub fn process(

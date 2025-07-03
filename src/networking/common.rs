@@ -5,16 +5,16 @@ use crate::networking::stun::{
     build_request, stun_decode, stun_send, StunChangeRequest, StunMessage,
 };
 use crate::networking::subscription::Subscription;
-use aes_gcm::aead::Buffer;
 use async_std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use async_std::task;
 use async_std::task::{sleep, yield_now};
-use futures::SinkExt;
+// use futures::SinkExt;
 use std::collections::HashMap;
 use std::net::Ipv6Addr;
 use swarm_consensus::SwarmName;
 use swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
 // use bytes::{BufMut, BytesMut};
+use crate::networking::{Nat, NetworkSettings, PortAllocationRule};
 use futures::{
     future::FutureExt, // for `.fuse()`
     pin_mut,
@@ -24,7 +24,7 @@ use std::cmp::min;
 use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{GnomeId, Nat, NetworkSettings, PortAllocationRule};
+use swarm_consensus::GnomeId;
 
 use super::subscription::Requestor;
 
