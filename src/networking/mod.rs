@@ -32,8 +32,20 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender as SSender};
 use subscription::Requestor;
-use swarm_consensus::{GnomeToManager, Notification, NotificationBundle};
+use swarm_consensus::{GnomeId, NetworkSettings, SwarmName, ToGnome};
+// use swarm_consensus::{GnomeToManager, Notification, NotificationBundle};
 
+pub enum Notification {
+    AddSwarm(NotificationBundle),
+    RemoveSwarm(Vec<SwarmName>),
+    SetFounder(GnomeId),
+}
+pub struct NotificationBundle {
+    pub swarm_name: SwarmName,
+    pub request_sender: SSender<ToGnome>,
+    // pub token_sender: Sender<u64>,
+    pub network_settings_receiver: Receiver<NetworkSettings>,
+}
 // #[derive(Debug)]
 // enum ConnError {
 //     Disconnected,

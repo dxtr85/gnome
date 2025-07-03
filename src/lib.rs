@@ -3,6 +3,7 @@ use async_std::channel::Receiver as AReceiver;
 use async_std::channel::Sender as ASender;
 use async_std::task::sleep;
 use async_std::task::spawn;
+use networking::Notification;
 use rsa::pkcs1::RsaPublicKey;
 use rsa::pkcs8::der::Decode;
 use std::fs::read_to_string;
@@ -13,7 +14,7 @@ use std::time::Duration;
 use swarm_consensus::GnomeId;
 use swarm_consensus::GnomeToManager;
 use swarm_consensus::NetworkSettings;
-use swarm_consensus::Notification;
+// use swarm_consensus::Notification;
 use swarm_consensus::SwarmName;
 mod crypto;
 mod data_conversion;
@@ -28,8 +29,7 @@ use manager::Manager;
 use networking::run_networking_tasks;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::Receiver;
-use std::sync::mpsc::Sender;
-use swarm_consensus::NotificationBundle;
+// use swarm_consensus::NotificationBundle;
 // use swarm_consensus::Request;
 // use swarm_consensus::Response;
 
@@ -52,6 +52,7 @@ pub mod prelude {
     pub use swarm_consensus::SwarmName;
     pub use swarm_consensus::SyncData;
     pub use swarm_consensus::ToGnome;
+    pub use swarm_consensus::Transport;
 }
 
 pub async fn init(

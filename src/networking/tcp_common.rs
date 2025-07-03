@@ -373,6 +373,9 @@ pub async fn serve_socket(
                     } else {
                         eprintln!("Unable to decode message");
                     }
+                    if let Some(to_drop) = sender_to_drop {
+                        senders.remove(&to_drop);
+                    }
                 } else {
                     eprintln!("TCP Got a message on new channel...");
                     // eprintln!("Defined channels count: {}", senders.len());

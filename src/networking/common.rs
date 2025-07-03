@@ -319,7 +319,23 @@ pub async fn are_we_behind_a_nat(socket: &UdpSocket) -> Result<(bool, bool, Sock
     if received {
         let msg = stun_decode(&bytes);
         // println!("Received {} bytes from {:?}:\n{:?}", count, from, msg);
-        let mapped_address = msg.mapped_address().unwrap();
+        let mut pub_address = msg.mapped_address();
+        if pub_address.is_none() {
+            pub_address = msg.changed_address();
+        } else {
+            eprintln!("STUN Mapped address: {:?}", pub_address);
+        }
+        if pub_address.is_none() {
+            pub_address = msg.source_address();
+        } else {
+            eprintln!("STUN Changed address: {:?}", pub_address);
+        }
+        if pub_address.is_none() {
+            return Err("Did not receive STUN public address".to_string());
+        } else {
+            eprintln!("STUN Source address: {:?}", pub_address);
+        }
+        let mapped_address = pub_address.unwrap();
         if UdpSocket::bind((mapped_address.ip(), 0)).await.is_ok() {
             // if mapped_address == socket.local_addr().unwrap() {
             Ok((false, local_port == mapped_address.port(), mapped_address))

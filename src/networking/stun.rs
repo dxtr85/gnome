@@ -162,6 +162,12 @@ impl StunAttribute {
     pub fn is_changed_address(&self) -> bool {
         matches!(self.typ, StunAttributeType::ChangedAddress)
     }
+    pub fn is_source_address(&self) -> bool {
+        matches!(self.typ, StunAttributeType::SourceAddress)
+    }
+    pub fn is_response_address(&self) -> bool {
+        matches!(self.typ, StunAttributeType::ResponseAddress)
+    }
     pub fn get_address(&self) -> Option<SocketAddr> {
         if let StunAttributeValue::Address(stun_addr) = &self.value {
             Some(SocketAddr::new(
@@ -263,6 +269,24 @@ impl StunMessage {
     pub fn changed_address(&self) -> Option<SocketAddr> {
         for attr in &self.attributes {
             if attr.is_changed_address() {
+                return attr.get_address();
+            }
+        }
+        None
+    }
+    pub fn source_address(&self) -> Option<SocketAddr> {
+        for attr in &self.attributes {
+            if attr.is_source_address() {
+                return attr.get_address();
+            }
+        }
+        None
+    }
+
+    /// This attribute indicates where the response should be sent
+    pub fn response_address(&self) -> Option<SocketAddr> {
+        for attr in &self.attributes {
+            if attr.is_response_address() {
                 return attr.get_address();
             }
         }

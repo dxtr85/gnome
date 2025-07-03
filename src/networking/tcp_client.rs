@@ -1,6 +1,6 @@
 use super::common::swarm_names_from_bytes;
 use super::tcp_common::serve_socket;
-use super::Token;
+// use super::Token;
 use crate::crypto::Decrypter;
 use crate::crypto::Encrypter;
 use crate::crypto::SessionKey;
@@ -12,6 +12,7 @@ use crate::networking::subscription::Subscription;
 use crate::networking::tcp_common::send_subscribed_swarm_names;
 use async_std::io::ReadExt;
 use async_std::net::TcpStream;
+use async_std::task::sleep;
 use async_std::task::spawn;
 use futures::AsyncWriteExt;
 use futures::{
@@ -28,6 +29,7 @@ use swarm_consensus::GnomeId;
 use swarm_consensus::NetworkSettings;
 use swarm_consensus::PortAllocationRule;
 use swarm_consensus::SwarmName;
+use swarm_consensus::Transport as GTransport;
 
 pub async fn run_tcp_client(
     my_id: GnomeId,
@@ -39,15 +41,23 @@ pub async fn run_tcp_client(
     (ip, port): (IpAddr, u16),
 ) {
     eprintln!("TCP CLIENT {:?}:{}", ip, port);
-    let stream = TcpStream::connect((ip, port)).await;
-    eprintln!("TCP connect returned");
-    if stream.is_err() {
-        eprintln!("Could not establish TCP connection with {:?}", (ip, port));
+    // TODO: we need to race two tasks:
+    // 1 - connect task
+    // 2 - timeout
+    // Since we could wait forever and consume resources
+    //
+    let t1 = try_to_connect(ip, port).fuse();
+    let t2 = start_timer(Duration::from_secs(1)).fuse();
+    pin_mut!(t1, t2);
+    let (timeout, result) = select! {
+        result1 = t1 =>  (false, result1),
+        result2 = t2 => (true, result2),
+    };
+    if timeout || result.is_none() {
+        eprintln!("TCP connect timeout/error");
         return;
-    } else {
-        eprintln!("Established TCP connection with {:?}", (ip, port));
     }
-    let mut stream = stream.unwrap();
+    let mut stream = result.unwrap();
 
     // let send_result = socket.send_to(pub_key_pem.as_bytes(), send_addr).await;
     let send_result = stream.write(pub_key_pem.as_bytes()).await;
@@ -93,6 +103,22 @@ pub async fn run_tcp_client(
     // }
     // eprintln!("TCP Client is done");
     // receiver
+}
+async fn try_to_connect(ip: IpAddr, port: u16) -> Option<TcpStream> {
+    let stream = TcpStream::connect((ip, port)).await;
+    eprintln!("TCP connect returned");
+    if stream.is_err() {
+        eprintln!("Could not establish TCP connection with {:?}", (ip, port));
+        None
+    } else {
+        eprintln!("Established TCP connection with {:?}", (ip, port));
+        Some(stream.unwrap())
+    }
+}
+
+async fn start_timer(timespan: Duration) -> Option<TcpStream> {
+    sleep(timespan).await;
+    None
 }
 
 async fn establish_secure_connection(
@@ -208,6 +234,11 @@ async fn establish_secure_connection(
                 }
 
                 if let Some(pub_ip) = my_public_address {
+                    let transport = if pub_ip.0.is_ipv4() {
+                        GTransport::TCPoverIP4
+                    } else {
+                        GTransport::TCPoverIP6
+                    };
                     let mut own_nsettings = None;
                     // compare against local socket & build NetworkSettings
                     if let Ok(local_addr) = stream.local_addr() {
@@ -215,8 +246,9 @@ async fn establish_secure_connection(
                             //TODO: same port
                             if local_addr.ip() == pub_ip.0 {
                                 //TODO: no NAT?
-                                own_nsettings =
-                                    Some(NetworkSettings::new_not_natted(pub_ip.0, pub_ip.1));
+                                own_nsettings = Some(NetworkSettings::new_not_natted(
+                                    pub_ip.0, pub_ip.1, transport,
+                                ));
                             } else {
                                 //TODO: 1-1 port mapping
                                 let mset = NetworkSettings {
@@ -224,6 +256,7 @@ async fn establish_secure_connection(
                                     pub_port: pub_ip.1,
                                     nat_type: swarm_consensus::Nat::Unknown,
                                     port_allocation: (PortAllocationRule::FullCone, 127),
+                                    transport,
                                 };
                                 own_nsettings = Some(mset);
                             }
@@ -234,6 +267,7 @@ async fn establish_secure_connection(
                                 pub_port: pub_ip.1,
                                 nat_type: swarm_consensus::Nat::Unknown,
                                 port_allocation: (PortAllocationRule::Random, 127),
+                                transport,
                             };
                             own_nsettings = Some(mset);
                         }

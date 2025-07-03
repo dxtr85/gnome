@@ -1,6 +1,6 @@
 use super::serve_socket;
 use super::status::Transport;
-use super::Token;
+// use super::Token;
 use crate::crypto::Decrypter;
 use crate::crypto::Encrypter;
 use crate::crypto::SessionKey;
@@ -28,6 +28,7 @@ use swarm_consensus::GnomeId;
 use swarm_consensus::NetworkSettings;
 use swarm_consensus::PortAllocationRule;
 use swarm_consensus::SwarmName;
+use swarm_consensus::Transport as GTransport;
 
 pub async fn run_client(
     swarm_names: Vec<SwarmName>,
@@ -133,13 +134,20 @@ pub async fn run_client(
         tcp_addr = None;
         let mut own_nsettings = None;
         if let Some(pub_ip) = my_pub_addr {
+            let transport = if pub_ip.0.is_ipv4() {
+                GTransport::UDPoverIP4
+            } else {
+                GTransport::UDPoverIP6
+            };
             // compare against local socket & build NetworkSettings
             if let Ok(local_addr) = socket.local_addr() {
                 if local_addr.port() == pub_ip.1 {
                     //TODO: same port
                     if local_addr.ip() == pub_ip.0 {
                         //TODO: no NAT?
-                        own_nsettings = Some(NetworkSettings::new_not_natted(pub_ip.0, pub_ip.1));
+                        own_nsettings = Some(NetworkSettings::new_not_natted(
+                            pub_ip.0, pub_ip.1, transport,
+                        ));
                     } else {
                         //TODO: 1-1 port mapping
                         let mset = NetworkSettings {
@@ -147,6 +155,7 @@ pub async fn run_client(
                             pub_port: pub_ip.1,
                             nat_type: swarm_consensus::Nat::Unknown,
                             port_allocation: (PortAllocationRule::Random, 127),
+                            transport,
                         };
                         own_nsettings = Some(mset);
                     }
@@ -157,6 +166,7 @@ pub async fn run_client(
                         pub_port: pub_ip.1,
                         nat_type: swarm_consensus::Nat::Unknown,
                         port_allocation: (PortAllocationRule::Random, 126),
+                        transport,
                     };
                     own_nsettings = Some(mset);
                 }

@@ -1,10 +1,11 @@
 // use super::common::are_we_behind_a_nat;
 use super::common::{are_we_behind_a_nat, discover_network_settings};
-use super::token::Token;
+// use super::token::Token;
 use crate::crypto::{Decrypter, Encrypter};
 use crate::manager::ToGnomeManager;
 use crate::networking::holepunch::cluster_punch_it;
 use crate::networking::status::Transport;
+use crate::networking::tcp_client::run_tcp_client;
 use crate::networking::{
     client::run_client,
     holepunch::{punch_it, start_communication},
@@ -19,12 +20,12 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
 use swarm_consensus::{
-    GnomeId, GnomeToManager, NetworkSettings, PortAllocationRule, SwarmName, ToGnome,
+    GnomeId, NetworkSettings, PortAllocationRule, SwarmName, ToGnome, Transport as GTransport,
 };
 
 pub async fn direct_punching_service(
     to_gmgr: ASender<ToGnomeManager>,
-    server_port: u16,
+    _server_port: u16,
     subscription_sender: Sender<Subscription>,
     decrypter: Decrypter,
     // token_endpoints_sender: Sender<(Sender<Token>, Receiver<Token>)>,
@@ -81,6 +82,7 @@ pub async fn direct_punching_service(
     let mut waiting_for_my_settings = false;
     let mut send_to_gnome: Option<Sender<ToGnome>> = None;
     let sleep_time = Duration::from_millis(16);
+    // let mut ns_to_gmgr = vec![];
     loop {
         // print!("dps");
         if let Ok((swarm_name, to_gnome_sender, net_set_recv)) = swarm_endpoints_receiver.try_recv()
@@ -93,7 +95,10 @@ pub async fn direct_punching_service(
                 let settings_result = net_set_recv.try_recv();
                 // match settings_result {
                 if let Ok(other_settings) = settings_result {
-                    // eprintln!("Got some other settings");
+                    eprintln!("DP Got {:?}", other_settings);
+                    // eprintln!("Maybe should also send those to TCP?");
+                    // // if other_settings.no_nat()
+                    // ns_to_gmgr.push(other_settings.clone());
                     let _ = send_other_network_settings.send((swarm_name.clone(), other_settings));
                     // eprintln!("DPunch waiting for my settings: TRUE");
                     waiting_for_my_settings = true;
@@ -115,7 +120,7 @@ pub async fn direct_punching_service(
                     // );
                     if let Some(_gnome) = send_to_gnome.take() {
                         // let _ = to_gnome.send(request);
-                        to_gmgr
+                        let _ = to_gmgr
                             .send(ToGnomeManager::PublicAddress(
                                 my_settings.pub_ip,
                                 my_settings.pub_port,
@@ -130,6 +135,9 @@ pub async fn direct_punching_service(
                 waiting_for_my_settings = false;
             }
         }
+        // while let Some(ns) = ns_to_gmgr.pop() {
+        //     let _ = to_gmgr.send(ToGnomeManager::TryTcpConnect(ns)).await;
+        // }
         // yield_now().await;
         sleep(sleep_time).await;
     }
@@ -139,7 +147,7 @@ pub async fn direct_punching_service(
 /// Once it receives a NetworkSettings struct, it tries to open a communication
 /// channel with that Neighbor and spawns a new socket for any new incoming NetworkSettings
 async fn socket_maintainer(
-    to_gmgr: ASender<ToGnomeManager>,
+    _to_gmgr: ASender<ToGnomeManager>,
     pub_key_pem: String,
     // gnome_id: GnomeId,
     subscription_sender: Sender<Subscription>,
@@ -203,6 +211,7 @@ async fn socket_maintainer(
                             // pub_port: server_port + 1,
                             nat_type,
                             port_allocation: (PortAllocationRule::FullCone, 0),
+                            transport: GTransport::UDPoverIP6,
                         };
                         eprintln!("My IPv6 addr: {:?}", our_addr.ip());
                         let _ = my_network_settings_sender.send(my_ipv6_settings);
@@ -216,6 +225,7 @@ async fn socket_maintainer(
                             pub_port: 2,
                             nat_type: swarm_consensus::Nat::Unknown,
                             port_allocation: (PortAllocationRule::FullCone, 0),
+                            transport: GTransport::UDPoverIP6,
                         };
                         let _ = my_network_settings_sender.send(my_ipv6_settings);
                     }
@@ -232,7 +242,7 @@ async fn socket_maintainer(
                         socket,
                         bind_addr,
                         pub_key_pem.clone(),
-                        // gnome_id.clone(),
+                        // _to_gmgr.clone(),
                         subscription_sender.clone(),
                         decrypter.clone(),
                         // token_endpoints_sender.clone(),
@@ -246,6 +256,7 @@ async fn socket_maintainer(
                         pub_port: 0,
                         nat_type: swarm_consensus::Nat::Unknown,
                         port_allocation: (PortAllocationRule::FullCone, 0),
+                        transport: GTransport::UDPoverIP6,
                     };
                     let _ = my_network_settings_sender.send(my_ipv6_settings);
                 }
@@ -256,7 +267,7 @@ async fn socket_maintainer(
                     socket,
                     bind_addr,
                     pub_key_pem.clone(),
-                    // gnome_id.clone(),
+                    // _to_gmgr.clone(),
                     subscription_sender.clone(),
                     decrypter.clone(),
                     // token_endpoints_sender.clone(),
@@ -302,7 +313,7 @@ async fn punch_and_communicate(
     socket: UdpSocket,
     bind_addr: (IpAddr, u16),
     pub_key_pem: String,
-    // gnome_id: GnomeId,
+    // to_gmgr: ASender<ToGnomeManager>,
     sub_sender: Sender<Subscription>,
     decrypter: Decrypter,
     // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
@@ -404,6 +415,31 @@ async fn punch_and_communicate(
                 sub_sender.clone(),
             ));
             // return;
+        } else {
+            let encr = Encrypter::create_from_data(&pub_key_pem).unwrap();
+            let my_id = GnomeId(encr.hash());
+            //todo: here we should send back to gmgr
+            // or simply start a TCP client with given settings
+            // let _ = to_gmgr
+            //     .send(ToGnomeManager::TryTcpConnect(other_settings))
+            //     .await;
+            for i in 0..11 {
+                eprintln!(
+                    "DPTrying to communicate over TCP {}:{}",
+                    other_settings.pub_ip,
+                    other_settings.pub_port + i
+                );
+                run_tcp_client(
+                    my_id,
+                    swarm_names.clone(),
+                    sub_sender.clone(),
+                    decrypter.clone(),
+                    // pipes_sender,
+                    pub_key_pem.clone(),
+                    (other_settings.pub_ip, other_settings.pub_port + i),
+                )
+                .await
+            }
         };
     }
 

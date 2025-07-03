@@ -9,7 +9,7 @@ use crate::networking::common::{
 use crate::networking::status::Transport;
 use crate::networking::subscription::Subscription;
 use async_std::net::UdpSocket;
-use async_std::task::{sleep, spawn, yield_now};
+use async_std::task::{sleep, spawn};
 use futures::{
     future::FutureExt, // for `.fuse()`
     pin_mut,
@@ -20,7 +20,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, TryRecvError};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{GnomeId, NetworkSettings, SwarmName};
+use swarm_consensus::{GnomeId, NetworkSettings, SwarmName, Transport as GTransport};
 use swarm_consensus::{Nat, PortAllocationRule};
 
 // let puncher = "tudbut.de:4277";
@@ -158,6 +158,11 @@ async fn holepunch_task(
         eprintln!("Proxy returned my own IP again, done trying.");
         return;
     }
+    let transport = if remote_1_addr.is_ipv4() {
+        GTransport::UDPoverIP4
+    } else {
+        GTransport::UDPoverIP6
+    };
     let remote_controls_port = magic_ports.is_magic(remote_1_port);
     let (remote_nat, remote_port_rule) = if remote_controls_port {
         (
@@ -184,6 +189,7 @@ async fn holepunch_task(
                 pub_port: remote_1_port,
                 nat_type: remote_nat,
                 port_allocation: remote_port_rule,
+                transport,
             },
         ),
     )
@@ -269,6 +275,7 @@ async fn holepunch_task(
                 pub_port: target_remote_port,
                 nat_type: remote_nat,
                 port_allocation: remote_port_rule, //TODO maybe we can learn some more on this?
+                transport: GTransport::UDPoverIP4,
             },
         ),
     )

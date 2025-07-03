@@ -7,13 +7,12 @@ use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{
-    GnomeToManager, Nat, Neighbor, NetworkSettings, Notification, NotificationBundle,
-    PortAllocationRule, SwarmName, ToGnome,
-};
+use swarm_consensus::{Nat, Neighbor, NetworkSettings, PortAllocationRule, SwarmName, ToGnome};
 
 use crate::manager::ToGnomeManager;
 use crate::networking::status::Transport;
+use crate::networking::Notification;
+// use crate::networking::NotificationBundle;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Requestor {

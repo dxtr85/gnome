@@ -31,6 +31,7 @@ use swarm_consensus::SwarmSyncResponse;
 use swarm_consensus::SwarmTime;
 use swarm_consensus::SwarmType;
 use swarm_consensus::SyncData;
+use swarm_consensus::Transport;
 
 // Every received Dgram starts with message identification header
 // (and optional second byte for casting messages).
@@ -998,83 +999,104 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
     }
 }
 
-fn insert_network_settings(bytes: &mut Vec<u8>, network_settings: NetworkSettings) {
-    bytes.push(network_settings.nat_type as u8);
-    put_u16(bytes, network_settings.pub_port);
-    // bytes.put_u16(network_settings.pub_port);
-    bytes.push(network_settings.port_allocation.0 as u8);
-    // TODO: fix this!
-    // bytes.put_i8(network_settings.port_allocation.1);
-    bytes.push(network_settings.port_allocation.1 as u8);
-    let pub_ip = network_settings.pub_ip;
-    match pub_ip {
-        std::net::IpAddr::V4(ip4) => {
-            for b in ip4.octets() {
-                bytes.push(b);
+fn insert_network_settings(bytes: &mut Vec<u8>, network_settings_vec: Vec<NetworkSettings>) {
+    //TODO: support sending multiple NSs.
+    // TODO: add transport byte
+    for network_settings in network_settings_vec {
+        bytes.push(network_settings.nat_type as u8);
+        put_u16(bytes, network_settings.pub_port);
+        // bytes.put_u16(network_settings.pub_port);
+        bytes.push(network_settings.port_allocation.0 as u8);
+        // TODO: fix this!
+        // bytes.put_i8(network_settings.port_allocation.1);
+        bytes.push(network_settings.port_allocation.1 as u8);
+        bytes.push(network_settings.transport.byte());
+        let pub_ip = network_settings.pub_ip;
+        match pub_ip {
+            std::net::IpAddr::V4(ip4) => {
+                for b in ip4.octets() {
+                    bytes.push(b);
+                }
             }
-        }
-        std::net::IpAddr::V6(ip4) => {
-            for b in ip4.octets() {
-                bytes.push(b);
+            std::net::IpAddr::V6(ip4) => {
+                for b in ip4.octets() {
+                    bytes.push(b);
+                }
             }
         }
     }
 }
-fn parse_network_settings(bytes: &[u8]) -> NetworkSettings {
+fn parse_network_settings(bytes: &[u8]) -> Vec<NetworkSettings> {
     let mut bytes_iter = bytes.iter();
-    let raw_nat_type = bytes_iter.next().unwrap();
-    let nat_type = match raw_nat_type {
-        0 => Nat::Unknown,
-        1 => Nat::None,
-        2 => Nat::FullCone,
-        4 => Nat::AddressRestrictedCone,
-        8 => Nat::PortRestrictedCone,
-        16 => Nat::SymmetricWithPortControl,
-        32 => Nat::Symmetric,
-        _ => {
-            eprintln!("Unrecognized NatType while parsing: {}", raw_nat_type);
-            Nat::Unknown
-        }
-    };
+    let mut ns_vec = vec![];
+    //TODO: support multiple NSs
+    while let Some(raw_nat_type) = bytes_iter.next() {
+        let nat_type = match raw_nat_type {
+            0 => Nat::Unknown,
+            1 => Nat::None,
+            2 => Nat::FullCone,
+            4 => Nat::AddressRestrictedCone,
+            8 => Nat::PortRestrictedCone,
+            16 => Nat::SymmetricWithPortControl,
+            32 => Nat::Symmetric,
+            _ => {
+                eprintln!("Unrecognized NatType while parsing: {}", raw_nat_type);
+                Nat::Unknown
+            }
+        };
 
-    let mut port_bytes: [u8; 2] = [0, 0];
-    port_bytes[0] = *bytes_iter.next().unwrap();
-    port_bytes[1] = *bytes_iter.next().unwrap();
-    let pub_port: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
+        let mut port_bytes: [u8; 2] = [0, 0];
+        port_bytes[0] = *bytes_iter.next().unwrap();
+        port_bytes[1] = *bytes_iter.next().unwrap();
+        let pub_port: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
 
-    let port_allocation_rule = match bytes_iter.next().unwrap() {
-        0 => PortAllocationRule::Random,
-        1 => PortAllocationRule::FullCone,
-        2 => PortAllocationRule::AddressSensitive,
-        4 => PortAllocationRule::PortSensitive,
-        _ => PortAllocationRule::Random,
-    };
-    let delta_port = *bytes_iter.next().unwrap() as i8;
-    // port_bytes[0] = bytes_iter.next().unwrap();
-    // port_bytes[1] = bytes_iter.next().unwrap();
-    // let port_range_min: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
-    // port_bytes[0] = bytes_iter.next().unwrap();
-    // port_bytes[1] = bytes_iter.next().unwrap();
-    // let port_range_max: u16 = ((port_bytes[0]) as u16) << 8 | port_bytes[1] as u16;
-    let mut ip_bytes: Vec<u8> = vec![];
-    for a_byte in bytes_iter {
-        ip_bytes.push(*a_byte);
+        let port_allocation_rule = match bytes_iter.next().unwrap() {
+            0 => PortAllocationRule::Random,
+            1 => PortAllocationRule::FullCone,
+            2 => PortAllocationRule::AddressSensitive,
+            4 => PortAllocationRule::PortSensitive,
+            _ => PortAllocationRule::Random,
+        };
+        let delta_port = *bytes_iter.next().unwrap() as i8;
+        let transport = Transport::from(*bytes_iter.next().unwrap()).unwrap();
+        let mut ip_bytes: Vec<u8> = vec![];
+        let pub_ip = match transport {
+            Transport::UDPoverIP4 | Transport::TCPoverIP4 => {
+                for _i in 0..4 {
+                    ip_bytes.push(*bytes_iter.next().unwrap());
+                }
+                let array: [u8; 4] = ip_bytes.try_into().unwrap();
+                IpAddr::from(array)
+            }
+            Transport::TCPoverIP6 | Transport::UDPoverIP6 => {
+                for _i in 0..16 {
+                    ip_bytes.push(*bytes_iter.next().unwrap());
+                }
+                let array: [u8; 16] = ip_bytes.try_into().unwrap();
+                IpAddr::from(array)
+            }
+        };
+        // for a_byte in bytes_iter {
+        //     ip_bytes.push(*a_byte);
+        // }
+        // let bytes_len = ip_bytes.len();
+        // let pub_ip = if bytes_len == 4 {
+        //     let array: [u8; 4] = ip_bytes.try_into().unwrap();
+        //     IpAddr::from(array)
+        // } else if bytes_len == 16 {
+        //     let array: [u8; 16] = ip_bytes.try_into().unwrap();
+        //     IpAddr::from(array)
+        // } else {
+        //     eprintln!("Unable to parse IP addr from: {:?}", ip_bytes);
+        //     IpAddr::from([0, 0, 0, 0])
+        // };
+        ns_vec.push(NetworkSettings {
+            pub_ip,
+            pub_port,
+            nat_type,
+            port_allocation: (port_allocation_rule, delta_port),
+            transport,
+        })
     }
-    let bytes_len = ip_bytes.len();
-    let pub_ip = if bytes_len == 4 {
-        let array: [u8; 4] = ip_bytes.try_into().unwrap();
-        IpAddr::from(array)
-    } else if bytes_len == 16 {
-        let array: [u8; 16] = ip_bytes.try_into().unwrap();
-        IpAddr::from(array)
-    } else {
-        eprintln!("Unable to parse IP addr from: {:?}", ip_bytes);
-        IpAddr::from([0, 0, 0, 0])
-    };
-    NetworkSettings {
-        pub_ip,
-        pub_port,
-        nat_type,
-        port_allocation: (port_allocation_rule, delta_port),
-    }
+    ns_vec
 }

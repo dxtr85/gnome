@@ -8,12 +8,13 @@ use std::collections::VecDeque;
 // use std::hash::{DefaultHasher, Hash, Hasher};
 use std::net::IpAddr;
 use std::time::Duration;
+use swarm_consensus::NetworkSettings;
 use swarm_consensus::{Nat, SwarmName};
-use swarm_consensus::{NetworkSettings, Notification};
 use swarm_consensus::{PortAllocationRule, SwarmTime};
 // use crate::gnome::NetworkSettings;
 // use crate::swarm::{Swarm, SwarmID};
-use crate::NotificationBundle;
+use crate::networking::Notification;
+use crate::networking::NotificationBundle;
 use async_std::channel::Receiver as AReceiver;
 use async_std::channel::Sender as ASender;
 use rsa::{
@@ -48,6 +49,7 @@ pub enum ToGnomeManager {
     ProvideNeighboringSwarms(SwarmID),
     DisconnectSwarmIfNoNeighbors(SwarmID),
     PublicAddress(IpAddr, u16, Nat, (PortAllocationRule, i8), Transport),
+    // TryTcpConnect(NetworkSettings),
     Quit,
 }
 
@@ -562,15 +564,20 @@ impl Manager {
                         {
                             let nsl = self.network_summary.get_network_settings();
                             if let Some((sender, _sname)) = self.swarms.get(&s_id) {
-                                for ns in nsl {
-                                    eprintln!("Sending NS to Gnome");
-                                    let _ = sender.send(ManagerToGnome::ReplyNetworkSettings(
-                                        ns, conn_id, g_id,
-                                    ));
-                                }
+                                // for ns in nsl {
+                                eprintln!("Sending NS to Gnome");
+                                let _ = sender
+                                    .send(ManagerToGnome::ReplyNetworkSettings(nsl, conn_id, g_id));
+                                // }
                             }
                         }
                     }
+                    // ToGnomeManager::TryTcpConnect(ns) => {
+                    //     //todo:
+                    //     // send this to networking
+                    //     // self.to_networking.send(Notification::AddSwarm(()));
+                    //     eprintln!("GMgrNS: {:?}", ns);
+                    // }
                     ToGnomeManager::FromGnome(request) => {
                         // eprintln!("GMgr Got {:?}", request);
                         let disconnected_opt = self.serve_gnome_requests(request).await;
@@ -698,11 +705,10 @@ impl Manager {
                 eprintln!("Received Pub Addr Request from Gnome");
                 if let Some((sender, s_name)) = self.swarms.get(&s_id) {
                     if s_name.founder == g_id {
-                        for ns in self.network_summary.get_network_settings() {
-                            eprintln!("Sending immediately {:?}", ns);
-                            let _ = sender
-                                .send(ManagerToGnome::ReplyNetworkSettings(ns, conn_id, g_id));
-                        }
+                        let ns = self.network_summary.get_network_settings();
+                        eprintln!("Sending immediately {:?}", ns);
+                        let _ =
+                            sender.send(ManagerToGnome::ReplyNetworkSettings(ns, conn_id, g_id));
                     } else {
                         self.waiting_for_settings.push_back((s_id, conn_id, g_id));
                     }

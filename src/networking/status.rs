@@ -1,6 +1,6 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use swarm_consensus::{Nat, NetworkSettings, PortAllocationRule};
+use swarm_consensus::{Nat, NetworkSettings, PortAllocationRule, Transport as GTransport};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Transport {
@@ -93,7 +93,7 @@ impl TransportStatus {
         //         }
         //     }
     }
-    pub fn get_settings(&self, pub_ip: IpAddr) -> NetworkSettings {
+    pub fn get_settings(&self, pub_ip: IpAddr, transport: GTransport) -> NetworkSettings {
         //TODO: port should depend on Nat type
         let pub_port = match self.nat {
             Nat::None | Nat::FullCone | Nat::SymmetricWithPortControl => {
@@ -108,6 +108,7 @@ impl TransportStatus {
             pub_port,
             nat_type: self.nat,
             port_allocation: (self.port_rule, self.minimum_increase_between_ports as i8),
+            transport,
         }
     }
 }
@@ -273,13 +274,23 @@ impl IPStatus {
         // Some(comm_channels)
         None
     }
-    pub fn get_settings(&self) -> Vec<NetworkSettings> {
+    pub fn get_settings(&self, is_ipv4: bool) -> Vec<NetworkSettings> {
         let mut res = vec![];
         if self.udp.state == TransportState::Working {
-            res.push(self.udp.get_settings(self.pub_address.clone()));
+            let transport = if is_ipv4 {
+                GTransport::UDPoverIP4
+            } else {
+                GTransport::UDPoverIP6
+            };
+            res.push(self.udp.get_settings(self.pub_address.clone(), transport));
         }
         if self.tcp.state == TransportState::Working {
-            res.push(self.tcp.get_settings(self.pub_address.clone()));
+            let transport = if is_ipv4 {
+                GTransport::UDPoverIP4
+            } else {
+                GTransport::UDPoverIP6
+            };
+            res.push(self.tcp.get_settings(self.pub_address.clone(), transport));
         }
         res
     }
@@ -297,8 +308,8 @@ impl NetworkSummary {
         }
     }
     pub fn get_network_settings(&self) -> Vec<NetworkSettings> {
-        let mut sett = self.ip4.get_settings();
-        sett.extend(self.ip6.get_settings());
+        let mut sett = self.ip4.get_settings(true);
+        sett.extend(self.ip6.get_settings(false));
         sett
     }
 
