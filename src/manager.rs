@@ -349,7 +349,7 @@ impl Manager {
                             spawn(start_a_timer(
                                 self.req_sender.clone(),
                                 message,
-                                Duration::from_secs(3),
+                                Duration::from_secs(10),
                             ));
                             if !swarm_name.founder.is_any() {
                                 self.notify_other_swarms(swarm_id, swarm_name.clone(), aware_gnome);
@@ -728,6 +728,10 @@ impl Manager {
                 } else {
                     self.waiting_for_settings.push_back((s_id, conn_id, g_id));
                 }
+                eprintln!(
+                    "waiting_for_settings size: {}",
+                    self.waiting_for_settings.len()
+                );
             }
 
             GnomeToManager::NeighboringSwarms(swarm_id, swarm_names) => {
@@ -1119,7 +1123,11 @@ impl Manager {
             exclude_swarm
         );
         let mut excluded_swarm = if let Some(s_name) = &exclude_swarm {
-            Some((s_name.clone(), None))
+            if s_name.founder.is_any() {
+                None
+            } else {
+                Some((s_name.clone(), None))
+            }
         } else {
             None
         };
