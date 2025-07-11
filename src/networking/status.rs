@@ -7,6 +7,14 @@ pub enum Transport {
     Udp,
     Tcp,
 }
+impl Transport {
+    pub fn is_udp(&self) -> bool {
+        matches!(self, Self::Udp)
+    }
+    pub fn is_tcp(&self) -> bool {
+        matches!(self, Self::Tcp)
+    }
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TransportState {
@@ -14,6 +22,11 @@ pub enum TransportState {
     NotAvailable,
     Filtered,
     Working,
+}
+impl TransportState {
+    pub fn unknown(&self) -> bool {
+        matches!(self, Self::Unknown)
+    }
 }
 pub struct TransportStatus {
     state: TransportState,
@@ -25,19 +38,30 @@ pub struct TransportStatus {
     minimum_increase_between_ports: u16,
 }
 impl TransportStatus {
-    pub fn new() -> Self {
+    pub fn new(port: u16) -> Self {
         TransportStatus {
             state: TransportState::Unknown,
             nat: Nat::Unknown,
             port_rule: PortAllocationRule::Random,
-            last_port_number: 0,
+            last_port_number: port,
             min_port_number: 0,
             max_port_number: 0,
             minimum_increase_between_ports: 0,
         }
     }
-    pub fn update(&mut self, nat: Nat, port: u16, rule: PortAllocationRule) {
-        let port_diff = port - self.last_port_number;
+    pub fn update(&mut self, nat: Nat, port: u16, (rule, _step): (PortAllocationRule, i8)) {
+        self.state = TransportState::Working;
+        self.nat.update(nat);
+        self.port_rule.update(rule);
+        if self.nat.no_nat() {
+            // Do not update ports if no nat
+            return;
+        }
+        let port_diff = if port > self.last_port_number {
+            port - self.last_port_number
+        } else {
+            self.last_port_number - port
+        };
         if port_diff < self.minimum_increase_between_ports {
             self.minimum_increase_between_ports = port_diff;
         }
@@ -47,9 +71,7 @@ impl TransportStatus {
         if port < self.min_port_number {
             self.min_port_number = port;
         }
-        self.state = TransportState::Working;
-        self.nat.update(nat);
-        self.port_rule.update(rule);
+        self.last_port_number = port;
         //todo
         // self.ip6.udp.state = TransportState::Working;
         // match nat {
@@ -119,18 +141,38 @@ pub struct IPStatus {
     tcp: TransportStatus,
 }
 impl IPStatus {
-    pub fn new_ip4() -> Self {
+    pub fn new_ip4(port: u16) -> Self {
         IPStatus {
             pub_address: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
-            udp: TransportStatus::new(),
-            tcp: TransportStatus::new(),
+            udp: TransportStatus::new(port),
+            tcp: TransportStatus::new(port),
         }
     }
-    pub fn new_ip6() -> Self {
+    pub fn new_ip6(port: u16) -> Self {
         IPStatus {
             pub_address: IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)),
-            udp: TransportStatus::new(),
-            tcp: TransportStatus::new(),
+            udp: TransportStatus::new(port),
+            tcp: TransportStatus::new(port),
+        }
+    }
+    pub fn is_ip_known(&self) -> bool {
+        match self.pub_address {
+            IpAddr::V4(v4) => {
+                for oct in v4.octets() {
+                    if oct > 0 {
+                        return true;
+                    }
+                }
+                false
+            }
+            IpAddr::V6(v6) => {
+                for oct in v6.octets() {
+                    if oct > 0 {
+                        return true;
+                    }
+                }
+                false
+            }
         }
     }
     pub fn update(
@@ -138,7 +180,7 @@ impl IPStatus {
         ip: IpAddr,
         port: u16,
         nat: Nat,
-        rule: PortAllocationRule,
+        (rule, step): (PortAllocationRule, i8),
         transport: Transport,
     ) -> Option<Vec<(IpAddr, u16, Nat, (PortAllocationRule, i8))>> {
         let other_zeroes = {
@@ -163,10 +205,10 @@ impl IPStatus {
                 }
             }
         };
-        let oct = match ip {
-            IpAddr::V4(ip) => *ip.octets().last().take().unwrap(),
-            IpAddr::V6(ip) => *ip.octets().last().take().unwrap(),
-        };
+        // let oct = match ip {
+        //     IpAddr::V4(ip) => *ip.octets().last().take().unwrap(),
+        //     IpAddr::V6(ip) => *ip.octets().last().take().unwrap(),
+        // };
         //TODO: port numbers from 2 to 5 also have meaning
         // 2 - no data received - remote host offline
         // 3 - decode failure - something went wrong, but communication
@@ -184,7 +226,7 @@ impl IPStatus {
                         if port == 0 {
                             self.udp.state = TransportState::NotAvailable;
                         } else if port == 1 {
-                            self.udp.state = TransportState::Working;
+                            // self.udp.state = TransportState::Working;
                         } else if port == 2 {
                             //TODO: maybe only STUN gets filtered?
                             self.udp.state = TransportState::Filtered;
@@ -196,7 +238,7 @@ impl IPStatus {
                         if port == 0 {
                             self.tcp.state = TransportState::NotAvailable;
                         } else if port == 1 {
-                            self.tcp.state = TransportState::Working;
+                            // self.tcp.state = TransportState::Working;
                         } else if port == 2 {
                             //TODO: maybe only STUN gets filtered?
                             self.tcp.state = TransportState::Filtered;
@@ -233,10 +275,22 @@ impl IPStatus {
                         eprintln!("Unexpected port: {} (from: {})", other, ip);
                     }
                 }
+                if self.udp.state.unknown() && transport.is_udp() {
+                    self.udp.state = TransportState::Working;
+                }
+                if self.tcp.state.unknown() && transport.is_tcp() {
+                    self.tcp.state = TransportState::Working;
+                }
             }
         } else {
             // Here we received a proper port number,
             // so we should update ip & port attributes
+            if self.udp.state.unknown() && transport.is_udp() {
+                self.udp.state = TransportState::Working;
+            }
+            if self.tcp.state.unknown() && transport.is_tcp() {
+                self.tcp.state = TransportState::Working;
+            }
             //
             // But we receive this info from various sources,
             // (both internally & externally)
@@ -246,10 +300,16 @@ impl IPStatus {
             self.pub_address = ip;
             match transport {
                 Transport::Udp => {
-                    self.udp.update(nat, port, rule);
+                    self.udp.update(nat, port, (rule, step));
+                    if nat.no_nat() {
+                        self.tcp.update(nat, port, (rule, step));
+                    }
                 }
                 Transport::Tcp => {
-                    self.tcp.update(nat, port, rule);
+                    self.tcp.update(nat, port, (rule, step));
+                    if nat.no_nat() {
+                        self.udp.update(nat, port, (rule, step));
+                    }
                 }
             }
         }
@@ -272,6 +332,7 @@ impl IPStatus {
         //     }
         // }
         // Some(comm_channels)
+
         None
     }
     pub fn get_settings(&self, is_ipv4: bool) -> Vec<NetworkSettings> {
@@ -286,12 +347,13 @@ impl IPStatus {
         }
         if self.tcp.state == TransportState::Working {
             let transport = if is_ipv4 {
-                GTransport::UDPoverIP4
+                GTransport::TCPoverIP4
             } else {
-                GTransport::UDPoverIP6
+                GTransport::TCPoverIP6
             };
             res.push(self.tcp.get_settings(self.pub_address.clone(), transport));
         }
+        eprintln!("ReturningMyNS: {:?}", res);
         res
     }
 }
@@ -301,11 +363,25 @@ pub struct NetworkSummary {
     ip6: IPStatus,
 }
 impl NetworkSummary {
-    pub fn empty() -> Self {
+    pub fn empty(port: u16) -> Self {
         NetworkSummary {
-            ip4: IPStatus::new_ip4(),
-            ip6: IPStatus::new_ip6(),
+            ip4: IPStatus::new_ip4(port),
+            ip6: IPStatus::new_ip6(port + 1),
         }
+    }
+    pub fn get_network_settings(&self) -> Vec<NetworkSettings> {
+        let mut bytes = Vec::with_capacity(4);
+        // for ns in self.ip4.get_settings(true) {
+        if self.ip4.is_ip_known() {
+            bytes.append(&mut self.ip4.get_settings(true));
+        }
+        // }
+        // for ns in self.ip6.get_settings(false) {
+        if self.ip6.is_ip_known() {
+            bytes.append(&mut self.ip6.get_settings(false));
+        }
+        // sett.extend(self.ip6.get_settings(false));
+        bytes
     }
     pub fn get_network_settings_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(128);
@@ -327,7 +403,10 @@ impl NetworkSummary {
         (rule, step): (PortAllocationRule, i8),
         transport: Transport,
     ) -> Option<Vec<(IpAddr, u16, Nat, (PortAllocationRule, i8))>> {
-        eprintln!("Processing PubAddr");
+        eprintln!(
+            "Processing PubAddr {}:{}({:?}, {:?})",
+            ip, port, transport, nat
+        );
         //TODO: return Some if our address has changed in a way
         // that it would not be possible to connect to us
         // None
@@ -379,9 +458,9 @@ impl NetworkSummary {
         // not expecting to receive a legitlmate port less than 1024
         // but anyway…
         if ip.is_ipv4() {
-            self.ip4.update(ip, port, nat, rule, transport)
+            self.ip4.update(ip, port, nat, (rule, step), transport)
         } else {
-            self.ip6.update(ip, port, nat, rule, transport)
+            self.ip6.update(ip, port, nat, (rule, step), transport)
         }
     }
 }

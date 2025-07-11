@@ -484,6 +484,9 @@ impl Nat {
             }
         }
     }
+    pub fn no_nat(&self) -> bool {
+        matches!(self, Self::None)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -585,8 +588,29 @@ impl NetworkSettings {
         let mut bytes_iter = bytes.iter();
         let mut ns_vec = vec![];
         //TODO: support multiple NSs
-        while let Some(raw_nat_type) = bytes_iter.next() {
-            let nat_type = match raw_nat_type {
+        while let Some(ip_ver) = bytes_iter.next() {
+            let mut ip_bytes: Vec<u8> = vec![];
+            let pub_ip = match ip_ver {
+                4 => {
+                    for _i in 0..4 {
+                        ip_bytes.push(*bytes_iter.next().unwrap());
+                    }
+                    let array: [u8; 4] = ip_bytes.try_into().unwrap();
+                    IpAddr::from(array)
+                }
+                6 => {
+                    for _i in 0..16 {
+                        ip_bytes.push(*bytes_iter.next().unwrap());
+                    }
+                    let array: [u8; 16] = ip_bytes.try_into().unwrap();
+                    IpAddr::from(array)
+                }
+                other => {
+                    panic!("Uncecognized IP version: {}", other);
+                }
+            };
+
+            let nat_type = match bytes_iter.next().unwrap() {
                 0 => Nat::Unknown,
                 1 => Nat::None,
                 2 => Nat::FullCone,
@@ -594,8 +618,8 @@ impl NetworkSettings {
                 8 => Nat::PortRestrictedCone,
                 16 => Nat::SymmetricWithPortControl,
                 32 => Nat::Symmetric,
-                _ => {
-                    eprintln!("Unrecognized NatType while parsing: {}", raw_nat_type);
+                other => {
+                    eprintln!("Unrecognized NatType while parsing: {}", other);
                     Nat::Unknown
                 }
             };
@@ -613,24 +637,16 @@ impl NetworkSettings {
                 _ => PortAllocationRule::Random,
             };
             let delta_port = *bytes_iter.next().unwrap() as i8;
-            let transport = Transport::from(*bytes_iter.next().unwrap()).unwrap();
-            let mut ip_bytes: Vec<u8> = vec![];
-            let pub_ip = match transport {
-                Transport::UDPoverIP4 | Transport::TCPoverIP4 => {
-                    for _i in 0..4 {
-                        ip_bytes.push(*bytes_iter.next().unwrap());
-                    }
-                    let array: [u8; 4] = ip_bytes.try_into().unwrap();
-                    IpAddr::from(array)
-                }
-                Transport::TCPoverIP6 | Transport::UDPoverIP6 => {
-                    for _i in 0..16 {
-                        ip_bytes.push(*bytes_iter.next().unwrap());
-                    }
-                    let array: [u8; 16] = ip_bytes.try_into().unwrap();
-                    IpAddr::from(array)
-                }
-            };
+            let mut transport = Transport::from(*bytes_iter.next().unwrap()).unwrap();
+            if transport == Transport::UDPoverIP4 && *ip_ver == 6 {
+                transport = Transport::UDPoverIP6;
+            } else if transport == Transport::TCPoverIP4 && *ip_ver == 6 {
+                transport = Transport::TCPoverIP6;
+            } else if transport == Transport::UDPoverIP6 && *ip_ver == 4 {
+                transport = Transport::UDPoverIP4;
+            } else if transport == Transport::TCPoverIP6 && *ip_ver == 4 {
+                transport = Transport::TCPoverIP4;
+            }
             // for a_byte in bytes_iter {
             //     ip_bytes.push(*a_byte);
             // }
@@ -658,6 +674,21 @@ impl NetworkSettings {
 
     pub fn bytes(self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(32);
+        let pub_ip = self.pub_ip;
+        match pub_ip {
+            std::net::IpAddr::V4(ip4) => {
+                bytes.push(4);
+                for b in ip4.octets() {
+                    bytes.push(b);
+                }
+            }
+            std::net::IpAddr::V6(ip4) => {
+                bytes.push(6);
+                for b in ip4.octets() {
+                    bytes.push(b);
+                }
+            }
+        }
         bytes.push(self.nat_type as u8);
         for b in self.pub_port.to_be_bytes() {
             bytes.push(b);
@@ -669,19 +700,6 @@ impl NetworkSettings {
         // bytes.put_i8(self.port_allocation.1);
         bytes.push(self.port_allocation.1 as u8);
         bytes.push(self.transport.byte());
-        let pub_ip = self.pub_ip;
-        match pub_ip {
-            std::net::IpAddr::V4(ip4) => {
-                for b in ip4.octets() {
-                    bytes.push(b);
-                }
-            }
-            std::net::IpAddr::V6(ip4) => {
-                for b in ip4.octets() {
-                    bytes.push(b);
-                }
-            }
-        }
         bytes
     }
     pub fn new_not_natted(pub_ip: IpAddr, pub_port: u16, transport: Transport) -> Self {

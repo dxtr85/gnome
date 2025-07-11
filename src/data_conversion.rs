@@ -313,9 +313,9 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
         let data = SyncData::new(Vec::from(&bytes[data_idx..])).unwrap();
         Payload::Block(BlockID(bid), signature, data)
     };
-    eprintln!("DCHeader: {}", header);
-    eprintln!("DCPayload: {}", payload);
-    eprintln!("DCSwarmTime: {}", swarm_time);
+    // eprintln!("DCHeader: {}", header);
+    // eprintln!("DCPayload: {}", payload);
+    // eprintln!("DCSwarmTime: {}", swarm_time);
     Ok(Message {
         swarm_time,
         neighborhood,

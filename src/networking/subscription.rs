@@ -205,12 +205,12 @@ pub async fn subscriber(
                 Subscription::TransportNotAvailable(req) => {
                     //TODO
                     let (ip, tr) = match req {
-                        Requestor::Udp => (IpAddr::from_str("0.0.0.2").unwrap(), Transport::Udp),
-                        Requestor::Tcp => (IpAddr::from_str("0.0.0.3").unwrap(), Transport::Tcp),
-                        Requestor::Udpv6 => (IpAddr::from_str("::2").unwrap(), Transport::Udp),
-                        Requestor::Tcpv6 => (IpAddr::from_str("::3").unwrap(), Transport::Tcp),
+                        Requestor::Udp => (IpAddr::from_str("0.0.0.0").unwrap(), Transport::Udp),
+                        Requestor::Tcp => (IpAddr::from_str("0.0.0.0").unwrap(), Transport::Tcp),
+                        Requestor::Udpv6 => (IpAddr::from_str("::").unwrap(), Transport::Udp),
+                        Requestor::Tcpv6 => (IpAddr::from_str("::").unwrap(), Transport::Tcp),
                     };
-                    to_gmgr
+                    let _ = to_gmgr
                         .send(ToGnomeManager::PublicAddress(
                             ip,
                             0,
@@ -232,12 +232,12 @@ pub async fn subscriber(
                 }
                 Subscription::TransportAvailable(req) => {
                     let (ip, tr) = match req {
-                        Requestor::Udp => (IpAddr::from_str("0.0.0.2").unwrap(), Transport::Udp),
-                        Requestor::Tcp => (IpAddr::from_str("0.0.0.3").unwrap(), Transport::Tcp),
-                        Requestor::Udpv6 => (IpAddr::from_str("::2").unwrap(), Transport::Udp),
-                        Requestor::Tcpv6 => (IpAddr::from_str("::3").unwrap(), Transport::Tcp),
+                        Requestor::Udp => (IpAddr::from_str("0.0.0.0").unwrap(), Transport::Udp),
+                        Requestor::Tcp => (IpAddr::from_str("0.0.0.0").unwrap(), Transport::Tcp),
+                        Requestor::Udpv6 => (IpAddr::from_str("::").unwrap(), Transport::Udp),
+                        Requestor::Tcpv6 => (IpAddr::from_str("::").unwrap(), Transport::Tcp),
                     };
-                    to_gmgr
+                    let _ = to_gmgr
                         .send(ToGnomeManager::PublicAddress(
                             ip,
                             1,
