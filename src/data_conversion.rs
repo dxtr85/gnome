@@ -205,6 +205,15 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
                     // println!("read: {}, {:?}", gnome_id, key);
                     Configuration::InsertPubkey(gnome_id, key)
                 }
+                244 => {
+                    // eprintln!("Bytes: {:?} (idx: {})", bytes, data_idx);
+                    let new_value = bytes[data_idx + 9];
+                    // eprintln!("new_value: {}", new_value);
+                    data_idx += 10;
+                    // eprintln!("next_byte: {}", bytes[data_idx]);
+                    // println!("read: {}, {:?}", gnome_id, key);
+                    Configuration::ChangeDiameter(gnome_id, new_value)
+                }
                 // TODO:
                 other => {
                     // println!("Custom: {}", other);
@@ -524,7 +533,7 @@ pub fn neighbor_response_to_bytes(n_resp: NeighborResponse, bytes: &mut Vec<u8>)
             put_u32(bytes, sync_response.swarm_time.0);
             put_u32(bytes, sync_response.round_start.0);
             bytes.push(sync_response.swarm_type.as_byte());
-            // put_u64(bytes, sync_response.app_root_hash);
+            bytes.push(sync_response.swarm_diameter.0 as u8);
             bytes.push(sync_response.key_reg_size);
             bytes.push(sync_response.capability_size);
             bytes.push(sync_response.policy_size);
@@ -876,14 +885,15 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
             //     bytes[data_idx + 26],
             //     bytes[data_idx + 27],
             // ]);
-            let key_reg_size = bytes[data_idx + 20];
-            let capability_size = bytes[data_idx + 21];
-            let policy_size = bytes[data_idx + 22];
-            let broadcast_size = bytes[data_idx + 23];
-            let multicast_size = bytes[data_idx + 24];
-            let more_key_reg_messages = bytes[data_idx + 25] != 0;
+            let swarm_diameter = SwarmTime(bytes[data_idx + 20] as u32);
+            let key_reg_size = bytes[data_idx + 21];
+            let capability_size = bytes[data_idx + 22];
+            let policy_size = bytes[data_idx + 23];
+            let broadcast_size = bytes[data_idx + 24];
+            let multicast_size = bytes[data_idx + 25];
+            let more_key_reg_messages = bytes[data_idx + 26] != 0;
             let mut key_reg_pairs = vec![];
-            let mut idx = data_idx + 26;
+            let mut idx = data_idx + 27;
             while idx < bytes_len {
                 let mut g_vec = [0; 8];
                 for i in 0..8 {
@@ -902,7 +912,7 @@ pub fn bytes_to_neighbor_response(mut bytes: Vec<u8>) -> NeighborResponse {
                 swarm_time,
                 round_start,
                 swarm_type,
-                // app_root_hash,
+                swarm_diameter,
                 key_reg_size,
                 capability_size,
                 policy_size,
