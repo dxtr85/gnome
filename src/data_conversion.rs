@@ -667,6 +667,16 @@ pub fn neighbor_request_to_bytes(n_req: NeighborRequest, bytes: &mut Vec<u8>) {
             }
             bytes.push(cast_id.0);
         }
+        NeighborRequest::SendToCastSource(is_bcast, cast_id, c_data) => {
+            bytes.push(246);
+            if is_bcast {
+                bytes.push(1);
+            } else {
+                bytes.push(0);
+            }
+            bytes.push(cast_id.0);
+            bytes.append(&mut c_data.bytes());
+        }
         NeighborRequest::Custom(id, data) => {
             bytes.push(id);
             for byte in data.bytes() {
@@ -768,6 +778,13 @@ pub fn bytes_to_neighbor_request(bytes: Vec<u8>) -> NeighborRequest {
             let is_bcast = bytes[data_idx + 1] > 0;
             let cast_id = CastID(bytes[data_idx + 2]);
             NeighborRequest::SourceDrained(is_bcast, cast_id)
+        }
+        246 => {
+            let is_bcast = bytes[data_idx + 1] > 0;
+            let cast_id = CastID(bytes[data_idx + 2]);
+            let c_bytes = Vec::from(&bytes[3..]);
+            let c_data = CastData::new(c_bytes).unwrap();
+            NeighborRequest::SendToCastSource(is_bcast, cast_id, c_data)
         }
         other => {
             let dta = if bytes.len() > data_idx + 1 {
