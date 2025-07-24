@@ -182,7 +182,7 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
                 249 => {
                     let c_id: CastID = CastID(bytes[data_idx + 9]);
                     data_idx += 10;
-                    Configuration::EndMulticast(c_id)
+                    Configuration::EndMulticast(gnome_id, c_id)
                 }
                 248 => {
                     data_idx += 1;
@@ -333,6 +333,7 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
     })
 }
 pub fn bytes_to_cast_message(bytes: &[u8]) -> Result<CastMessage, ConversionError> {
+    // eprintln!("bytes_to_cast_message: {:?}", bytes);
     let dgram_header = bytes[0];
     let c_id = CastID(bytes[1]);
     let data = CastData::new(Vec::from(&bytes[2..])).unwrap();
