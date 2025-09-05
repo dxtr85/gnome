@@ -45,12 +45,17 @@ pub mod prelude {
     pub use crate::networking::NetworkSettings;
     pub use crate::networking::PortAllocationRule;
     pub use crate::networking::Transport;
+    pub use swarm_consensus::ByteSet;
+    pub use swarm_consensus::CapabiliTree;
+    pub use swarm_consensus::Capabilities;
     pub use swarm_consensus::CastData;
     pub use swarm_consensus::CastID;
     pub use swarm_consensus::GnomeId;
     pub use swarm_consensus::GnomeToApp;
     pub use swarm_consensus::NeighborRequest;
     pub use swarm_consensus::NeighborResponse;
+    pub use swarm_consensus::Policy;
+    pub use swarm_consensus::Requirement;
     pub use swarm_consensus::SwarmID;
     pub use swarm_consensus::SwarmName;
     pub use swarm_consensus::SyncData;

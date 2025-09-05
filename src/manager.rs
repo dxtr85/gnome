@@ -5,6 +5,8 @@ use crate::networking::status::Transport;
 use async_std::task::sleep;
 use async_std::task::spawn;
 use std::collections::VecDeque;
+use swarm_consensus::Policy;
+use swarm_consensus::Requirement;
 // use std::hash::{DefaultHasher, Hash, Hasher};
 use crate::networking::Nat;
 use crate::networking::NetworkSettings;
@@ -69,6 +71,7 @@ pub enum FromGnomeManager {
     // MyPublicIPs(Vec<(IpAddr, u16, Nat, (PortAllocationRulej, i8))>),
     MyPublicIPs(Vec<NetworkSettings>),
     AllNeighborsGone,
+    RunningPolicies(Vec<(Policy, Requirement)>),
     Disconnected(Vec<(SwarmID, SwarmName)>),
 }
 pub struct Manager {
@@ -901,6 +904,12 @@ impl Manager {
                 let _ = self
                     .resp_sender
                     .send(FromGnomeManager::SwarmBusy(s_id, is_busy))
+                    .await;
+            }
+            GnomeToManager::RunningPolicies(policies) => {
+                let _ = self
+                    .resp_sender
+                    .send(FromGnomeManager::RunningPolicies(policies))
                     .await;
             }
             GnomeToManager::Disconnected(s_id, s_name) => {
