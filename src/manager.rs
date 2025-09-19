@@ -54,6 +54,7 @@ pub enum ToGnomeManager {
     DisconnectSwarmIfNoNeighbors(SwarmID),
     PublicAddress(IpAddr, u16, Nat, (PortAllocationRule, i8), Transport),
     ProvidePublicIPs,
+    SetRunningPolicy(SwarmName, Policy, Requirement),
     Quit,
 }
 
@@ -659,6 +660,14 @@ impl Manager {
                             }
                         }
                     }
+                    ToGnomeManager::SetRunningPolicy(s_name, pol, req) => {
+                        eprintln!("GMgr rcvd SetRunningPolicy for {s_name}");
+                        if let Some(s_id) = self.name_to_id.get(&s_name) {
+                            if let Some((sender, _n)) = self.swarms.get(s_id) {
+                                sender.send(ManagerToGnome::SetRunningPolicy(pol, req));
+                            }
+                        }
+                    }
                 }
             }
             // sleep(sleep_time).await;
@@ -1187,7 +1196,9 @@ impl Manager {
             }
         }
         if randomizer.is_empty() {
-            excluded_swarm
+            None
+            // eprintln!("Returning excluded");
+            // excluded_swarm
         } else {
             randomizer.into_iter().next()
         }

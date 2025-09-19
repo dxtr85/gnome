@@ -214,7 +214,21 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
                     // println!("read: {}, {:?}", gnome_id, key);
                     Configuration::ChangeDiameter(gnome_id, new_value)
                 }
-                // TODO:
+                243 => {
+                    let mut new_bytes = Vec::from(&bytes[data_idx + 9..]);
+                    let init_len = new_bytes.len();
+
+                    eprintln!("New bytes: {:?}", new_bytes);
+                    let pol = Policy::from(&mut new_bytes);
+                    eprintln!("pol: {:?}", pol);
+                    eprintln!("New bytes: {:?}", new_bytes);
+
+                    let req = Requirement::from(&mut new_bytes);
+                    let final_len = new_bytes.len();
+                    data_idx += 9 + init_len - final_len;
+                    Configuration::SetRunningPolicy(gnome_id, pol, req)
+                    // TODO:
+                }
                 other => {
                     // println!("Custom: {}", other);
                     // 1 byte for Reconf id
