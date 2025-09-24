@@ -5,6 +5,8 @@ use crate::networking::status::Transport;
 use async_std::task::sleep;
 use async_std::task::spawn;
 use std::collections::VecDeque;
+use swarm_consensus::ByteSet;
+use swarm_consensus::Capabilities;
 use swarm_consensus::Policy;
 use swarm_consensus::Requirement;
 // use std::hash::{DefaultHasher, Hash, Hasher};
@@ -55,6 +57,7 @@ pub enum ToGnomeManager {
     PublicAddress(IpAddr, u16, Nat, (PortAllocationRule, i8), Transport),
     ProvidePublicIPs,
     SetRunningPolicy(SwarmName, Policy, Requirement),
+    SetRunningCapability(SwarmName, Capabilities, Vec<GnomeId>),
     Quit,
 }
 
@@ -73,6 +76,8 @@ pub enum FromGnomeManager {
     MyPublicIPs(Vec<NetworkSettings>),
     AllNeighborsGone,
     RunningPolicies(Vec<(Policy, Requirement)>),
+    RunningCapabilities(Vec<(Capabilities, Vec<GnomeId>)>),
+    RunningByteSets(Vec<(u8, ByteSet)>),
     Disconnected(Vec<(SwarmID, SwarmName)>),
 }
 pub struct Manager {
@@ -668,6 +673,14 @@ impl Manager {
                             }
                         }
                     }
+                    ToGnomeManager::SetRunningCapability(s_name, cap, v_gids) => {
+                        eprintln!("GMgr rcvd SetRunningCapability for {s_name}");
+                        if let Some(s_id) = self.name_to_id.get(&s_name) {
+                            if let Some((sender, _n)) = self.swarms.get(s_id) {
+                                sender.send(ManagerToGnome::SetRunningCapability(cap, v_gids));
+                            }
+                        }
+                    }
                 }
             }
             // sleep(sleep_time).await;
@@ -919,6 +932,18 @@ impl Manager {
                 let _ = self
                     .resp_sender
                     .send(FromGnomeManager::RunningPolicies(policies))
+                    .await;
+            }
+            GnomeToManager::RunningCapabilities(caps) => {
+                let _ = self
+                    .resp_sender
+                    .send(FromGnomeManager::RunningCapabilities(caps))
+                    .await;
+            }
+            GnomeToManager::RunningByteSets(bsets) => {
+                let _ = self
+                    .resp_sender
+                    .send(FromGnomeManager::RunningByteSets(bsets))
                     .await;
             }
             GnomeToManager::Disconnected(s_id, s_name) => {

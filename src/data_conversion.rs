@@ -229,6 +229,36 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
                     Configuration::SetRunningPolicy(gnome_id, pol, req)
                     // TODO:
                 }
+                242 => {
+                    let mut new_bytes = Vec::from(&bytes[data_idx + 9..]);
+                    let init_len = new_bytes.len();
+
+                    eprintln!("New bytes: {:?}", new_bytes);
+                    let cap = Capabilities::from(new_bytes.remove(0));
+                    eprintln!("cap: {:?}", cap);
+                    eprintln!("New bytes: {:?}", new_bytes);
+                    let b1 = new_bytes.remove(0);
+                    let b2 = new_bytes.remove(0);
+                    let how_many = u16::from_be_bytes([b1, b2]);
+                    let mut v_gids = Vec::with_capacity(how_many as usize);
+                    for _i in 0..how_many {
+                        let b1 = new_bytes.remove(0);
+                        let b2 = new_bytes.remove(0);
+                        let b3 = new_bytes.remove(0);
+                        let b4 = new_bytes.remove(0);
+                        let b5 = new_bytes.remove(0);
+                        let b6 = new_bytes.remove(0);
+                        let b7 = new_bytes.remove(0);
+                        let b8 = new_bytes.remove(0);
+                        let gnome_id: u64 = as_u64_be(&[b1, b2, b3, b4, b5, b6, b7, b8]);
+                        v_gids.push(GnomeId(gnome_id));
+                    }
+
+                    let final_len = new_bytes.len();
+                    data_idx += 9 + init_len - final_len;
+                    Configuration::SetRunningCapability(gnome_id, cap, v_gids)
+                    // TODO:
+                }
                 other => {
                     // println!("Custom: {}", other);
                     // 1 byte for Reconf id
