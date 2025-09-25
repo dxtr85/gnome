@@ -58,6 +58,7 @@ pub enum ToGnomeManager {
     ProvidePublicIPs,
     SetRunningPolicy(SwarmName, Policy, Requirement),
     SetRunningCapability(SwarmName, Capabilities, Vec<GnomeId>),
+    SetRunningByteSet(SwarmName, u8, ByteSet),
     Quit,
 }
 
@@ -678,6 +679,14 @@ impl Manager {
                         if let Some(s_id) = self.name_to_id.get(&s_name) {
                             if let Some((sender, _n)) = self.swarms.get(s_id) {
                                 sender.send(ManagerToGnome::SetRunningCapability(cap, v_gids));
+                            }
+                        }
+                    }
+                    ToGnomeManager::SetRunningByteSet(s_name, b_id, bset) => {
+                        eprintln!("GMgr rcvd SetRunningByteSet for {s_name}");
+                        if let Some(s_id) = self.name_to_id.get(&s_name) {
+                            if let Some((sender, _n)) = self.swarms.get(s_id) {
+                                sender.send(ManagerToGnome::SetRunningByteSet(b_id, bset));
                             }
                         }
                     }

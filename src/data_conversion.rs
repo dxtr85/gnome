@@ -1,5 +1,7 @@
 #![allow(clippy::unusual_byte_groupings)]
 use core::panic;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt;
 use std::ops::Deref;
 
@@ -10,6 +12,7 @@ use crate::networking::Transport;
 use std::error::Error;
 use std::net::IpAddr;
 use swarm_consensus::BlockID;
+use swarm_consensus::ByteSet;
 use swarm_consensus::Capabilities;
 use swarm_consensus::CastData;
 use swarm_consensus::CastID;
@@ -257,7 +260,41 @@ pub fn bytes_to_message(bytes: Vec<u8>) -> Result<Message, ConversionError> {
                     let final_len = new_bytes.len();
                     data_idx += 9 + init_len - final_len;
                     Configuration::SetRunningCapability(gnome_id, cap, v_gids)
-                    // TODO:
+                }
+                241 => {
+                    // TODO
+                    let mut new_bytes = Vec::from(&bytes[data_idx + 9..]);
+                    let init_len = new_bytes.len();
+
+                    // eprintln!("New bytes: {:?}", new_bytes);
+                    let b_id = new_bytes.remove(0);
+                    let tpe = new_bytes.remove(0); // eprintln!("cap: {:?}", cap);
+                                                   // eprintln!("New bytes: {:?}", new_bytes);
+                    let b1 = new_bytes.remove(0);
+                    let b2 = new_bytes.remove(0);
+                    let how_many = u16::from_be_bytes([b1, b2]);
+                    let bset = if tpe == 1 {
+                        let mut bts = HashSet::with_capacity(how_many as usize);
+                        for _i in 0..how_many {
+                            let b = new_bytes.remove(0);
+                            bts.insert(b);
+                        }
+                        ByteSet::Bytes(bts)
+                    } else if tpe == 2 {
+                        let mut bts = HashSet::with_capacity(how_many as usize);
+                        for _i in 0..how_many {
+                            let b1 = new_bytes.remove(0);
+                            let b2 = new_bytes.remove(0);
+                            bts.insert(u16::from_be_bytes([b1, b2]));
+                        }
+                        ByteSet::Pairs(bts)
+                    } else {
+                        panic!("Unexpected ByteSet type: {tpe}");
+                    };
+
+                    let final_len = new_bytes.len();
+                    data_idx += 9 + init_len - final_len;
+                    Configuration::SetRunningByteSet(gnome_id, b_id, bset)
                 }
                 other => {
                     // println!("Custom: {}", other);
