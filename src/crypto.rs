@@ -16,7 +16,7 @@ use rsa::{
 };
 
 use std::{
-    fs::OpenOptions,
+    fs::{self, OpenOptions},
     // hash::{DefaultHasher, Hash, Hasher},
     path::PathBuf,
 };
@@ -204,6 +204,9 @@ pub fn store_key_pair_as_pem_files(
 ) -> Result<(), String> {
     let priv_path = folder.join("id_rsa");
     println!("priv: {:?}", priv_path);
+    if !folder.exists() {
+        let _ = fs::create_dir(folder.clone());
+    }
     if !priv_path.exists() {
         OpenOptions::new()
             .create_new(true)
