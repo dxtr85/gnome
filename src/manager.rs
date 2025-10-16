@@ -1,5 +1,6 @@
 use crate::crypto::sha_hash;
 use crate::crypto::Decrypter;
+use crate::data_conversion;
 use crate::networking::status::NetworkSummary;
 use crate::networking::status::Transport;
 use async_std::task::sleep;
@@ -7,6 +8,7 @@ use async_std::task::spawn;
 use std::collections::VecDeque;
 use swarm_consensus::ByteSet;
 use swarm_consensus::Capabilities;
+use swarm_consensus::CastData;
 use swarm_consensus::Policy;
 use swarm_consensus::Requirement;
 // use std::hash::{DefaultHasher, Hash, Hasher};
@@ -59,6 +61,8 @@ pub enum ToGnomeManager {
     SetRunningPolicy(SwarmName, Policy, Requirement),
     SetRunningCapability(SwarmName, Capabilities, Vec<GnomeId>),
     SetRunningByteSet(SwarmName, u8, ByteSet),
+    CustomNeighborRequest(SwarmName, GnomeId, u8, CastData),
+    CustomNeighborResponse(SwarmName, GnomeId, u8, CastData),
     Quit,
 }
 
@@ -623,6 +627,20 @@ impl Manager {
                             let _ = self
                                 .to_networking
                                 .send(Notification::RemoveSwarm(removed_names));
+                        }
+                    }
+                    ToGnomeManager::CustomNeighborRequest(s_name, g_id, req_id, data) => {
+                        eprintln!("GMgr got CustomNeighborRequest");
+                        if let Some(s_id) = self.name_to_id.get(&s_name) {
+                            let (to_gnome, _n) = self.swarms.get(s_id).unwrap();
+                            to_gnome.send(ManagerToGnome::SendCustom(true, g_id, req_id, data));
+                        }
+                    }
+                    ToGnomeManager::CustomNeighborResponse(s_name, g_id, req_id, data) => {
+                        eprintln!("GMgr got CustomNeighborResponse");
+                        if let Some(s_id) = self.name_to_id.get(&s_name) {
+                            let (to_gnome, _n) = self.swarms.get(s_id).unwrap();
+                            to_gnome.send(ManagerToGnome::SendCustom(false, g_id, req_id, data));
                         }
                     }
                     ToGnomeManager::Quit => {
