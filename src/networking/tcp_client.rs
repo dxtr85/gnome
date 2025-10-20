@@ -303,12 +303,12 @@ async fn establish_secure_connection(
             ));
         } else {
             eprintln!("Failed to decrypt message");
-            stream.close().await;
+            let _ = stream.close().await;
             // return;
         }
     } else {
         eprintln!("Failed to receive data from remote");
-        stream.close().await;
+        let _ = stream.close().await;
         // return;
     }
 }
@@ -334,7 +334,7 @@ pub async fn prepare_and_serve(
     receive_remote_swarm_names(&mut stream, &mut remote_names).await;
     if remote_names.is_empty() {
         eprintln!("Neighbor {} did not provide swarm list", remote_gnome_id);
-        stream.close().await;
+        let _ = stream.close().await;
         return;
         // } else {
         //     eprintln!("TCP Client Remote names from bytes: {:?}", remote_names);
@@ -352,7 +352,7 @@ pub async fn prepare_and_serve(
     );
     if common_names.is_empty() {
         eprintln!("No common interests with {}", remote_gnome_id);
-        stream.close().await;
+        let _ = stream.close().await;
         return;
     }
     // eprintln!("TCP Common swarm names: {:?}", common_names);

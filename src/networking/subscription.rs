@@ -2,7 +2,7 @@
 use async_std::channel::Sender as ASender;
 use async_std::task::sleep;
 // use rsa::sha2::digest::HashMarker;
-use crate::networking::{Nat, NetworkSettings, PortAllocationRule};
+use crate::networking::{Nat, PortAllocationRule};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::str::FromStr;

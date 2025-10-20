@@ -8,7 +8,6 @@ use rsa::pkcs1::RsaPublicKey;
 use rsa::pkcs8::der::Decode;
 use std::fs::read_to_string;
 pub use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::time::Duration;
 use swarm_consensus::GnomeId;

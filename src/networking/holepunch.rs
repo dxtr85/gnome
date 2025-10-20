@@ -119,7 +119,7 @@ async fn holepunch_task(
     puncher: SocketAddr,
     sub_sender: Sender<Subscription>,
     decrypter: Decrypter,
-    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    _pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     pub_key_pem: String,
     swarm_name: SwarmName,
     mut bind_port: u16,

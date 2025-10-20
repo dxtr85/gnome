@@ -224,7 +224,7 @@ async fn establish_secure_connection(
     swarm_names: Vec<SwarmName>,
 ) -> (bool, Option<(IpAddr, u16)>) {
     // eprintln!("UDP Client trying to establish secure connection");
-    let mut remote_gnome_id: GnomeId = GnomeId(0);
+    // let remote_gnome_id: GnomeId = GnomeId(0);
     let session_key: SessionKey; // = SessionKey::from_key(&[0; 32]);
     let remote_addr: SocketAddr; // = "0.0.0.0:0".parse().unwrap();
     let count;

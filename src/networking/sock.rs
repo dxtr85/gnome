@@ -5,7 +5,6 @@ use crate::data_conversion::bytes_to_message;
 use crate::data_conversion::bytes_to_neighbor_request;
 use crate::data_conversion::bytes_to_neighbor_response;
 use crate::networking::subscription::Subscription;
-use crate::networking::token::Token;
 use swarm_consensus::CastID;
 use swarm_consensus::CastType;
 use swarm_consensus::SwarmName;
@@ -78,8 +77,8 @@ async fn race_tasks(
     let mut senders: HashMap<u8, (Sender<Message>, Sender<CastMessage>)> = HashMap::new();
     let mut receivers: HashMap<u8, Receiver<WrappedMessage>> = HashMap::new();
     let mut out_of_order_recvd = HashMap::new();
-    let min_tokens_threshold: u64 = 1500;
-    let mut available_tokens: u64 = min_tokens_threshold;
+    // let min_tokens_threshold: u64 = 1500;
+    // let available_tokens: u64 = min_tokens_threshold;
     let mut new_channel_mappings: HashMap<u8, SwarmName> = HashMap::new();
     // println!("racing: {:?}", send_recv_pairs);
     for (i, (sender, c_sender, receiver)) in send_recv_pairs.into_iter().enumerate() {

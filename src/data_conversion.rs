@@ -1,16 +1,11 @@
 #![allow(clippy::unusual_byte_groupings)]
 use core::panic;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::ops::Deref;
 
-use crate::networking::Nat;
 use crate::networking::NetworkSettings;
-use crate::networking::PortAllocationRule;
-use crate::networking::Transport;
 use std::error::Error;
-use std::net::IpAddr;
 use swarm_consensus::BlockID;
 use swarm_consensus::ByteSet;
 use swarm_consensus::Capabilities;

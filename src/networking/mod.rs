@@ -15,14 +15,12 @@ mod tcp_common;
 mod tcp_server;
 mod token;
 use self::client::run_client;
-use self::common::are_we_behind_a_nat;
-use self::holepunch::holepunch;
 use self::server::run_server;
 use self::sock::serve_socket;
 // pub use self::status::NetworkSummary;
 use self::subscription::subscriber;
 use self::tcp_server::run_tcp_server;
-use self::token::{token_dispenser, Token};
+use self::token::Token;
 use crate::crypto::Decrypter;
 use async_std::channel::Sender;
 use async_std::net::TcpListener;
@@ -85,10 +83,10 @@ pub async fn run_networking_tasks(
     let (sub_send_one_dis, sub_recv_one_dis) = channel();
     let (sub_send_two, sub_recv_two) = channel();
     // let (token_dispenser_send, token_dispenser_recv) = channel();
-    let (holepunch_sender, holepunch_receiver) = channel();
+    let (holepunch_sender, _holepunch_receiver) = channel();
     // let (token_pipes_sender, token_pipes_receiver) = channel();
     let (send_pair, recv_pair) = channel();
-    eprintln!("spawn token_dispenser");
+    // eprintln!("spawn token_dispenser");
     // spawn(token_dispenser(
     //     buffer_size_bytes,
     //     uplink_bandwith_bytes_sec,

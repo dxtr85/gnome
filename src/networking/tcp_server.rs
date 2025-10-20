@@ -1,6 +1,5 @@
 use super::common::swarm_names_from_bytes;
 use super::tcp_common::serve_socket;
-use super::Token;
 use crate::crypto::Encrypter;
 use crate::crypto::{generate_symmetric_key, SessionKey};
 use crate::networking::common::collect_subscribed_swarm_names;

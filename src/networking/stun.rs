@@ -128,7 +128,7 @@ fn parse_attribute_type(typ_raw: u16) -> StunAttributeType {
         0x0009 => StunAttributeType::ErrorCode,
         0x000a => StunAttributeType::UnknownAttributes,
         0x000b => StunAttributeType::ReflectedFrom,
-        other => {
+        _other => {
             // println!("Unexpected attr type: {}", other);
             StunAttributeType::Unexpected
         }

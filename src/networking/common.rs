@@ -243,7 +243,7 @@ pub fn create_a_neighbor_for_each_swarm(
         Receiver<WrappedMessage>,
     )>,
     // encrypter: Encrypter,
-    pub_key_pem: String,
+    _pub_key_pem: String,
 ) {
     eprintln!("Neighbor member of swarms:");
     for r_name in &remote_names {

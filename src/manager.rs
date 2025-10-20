@@ -1,6 +1,5 @@
 use crate::crypto::sha_hash;
 use crate::crypto::Decrypter;
-use crate::data_conversion;
 use crate::networking::status::NetworkSummary;
 use crate::networking::status::Transport;
 use async_std::task::sleep;
@@ -159,7 +158,7 @@ impl Manager {
         gnome_id: GnomeId,
         pub_key_der: Vec<u8>,
         priv_key_pem: String,
-        network_settings: Option<NetworkSettings>, //TODO: use this info
+        _network_settings: Option<NetworkSettings>, //TODO: use this info
         to_networking: Sender<Notification>,
         decrypter: Decrypter,
         req_receiver: AReceiver<ToGnomeManager>,
@@ -294,7 +293,7 @@ impl Manager {
                             continue;
                         }
                         eprintln!("Manager Received JoinSwarm({})", swarm_name);
-                        if let Some(es_id) = self.name_to_id.get(&swarm_name) {
+                        if let Some(_es_id) = self.name_to_id.get(&swarm_name) {
                             eprintln!("Not joining {}, we are already there", swarm_name);
                             //     if let Some((sender, es_name)) = self.swarms.get(es_id){
                             //         if swarm_name ==*es_name{
@@ -633,14 +632,16 @@ impl Manager {
                         eprintln!("GMgr got CustomNeighborRequest");
                         if let Some(s_id) = self.name_to_id.get(&s_name) {
                             let (to_gnome, _n) = self.swarms.get(s_id).unwrap();
-                            to_gnome.send(ManagerToGnome::SendCustom(true, g_id, req_id, data));
+                            let _ =
+                                to_gnome.send(ManagerToGnome::SendCustom(true, g_id, req_id, data));
                         }
                     }
                     ToGnomeManager::CustomNeighborResponse(s_name, g_id, req_id, data) => {
                         eprintln!("GMgr got CustomNeighborResponse");
                         if let Some(s_id) = self.name_to_id.get(&s_name) {
                             let (to_gnome, _n) = self.swarms.get(s_id).unwrap();
-                            to_gnome.send(ManagerToGnome::SendCustom(false, g_id, req_id, data));
+                            let _ = to_gnome
+                                .send(ManagerToGnome::SendCustom(false, g_id, req_id, data));
                         }
                     }
                     ToGnomeManager::Quit => {
@@ -688,7 +689,7 @@ impl Manager {
                         eprintln!("GMgr rcvd SetRunningPolicy for {s_name}");
                         if let Some(s_id) = self.name_to_id.get(&s_name) {
                             if let Some((sender, _n)) = self.swarms.get(s_id) {
-                                sender.send(ManagerToGnome::SetRunningPolicy(pol, req));
+                                let _ = sender.send(ManagerToGnome::SetRunningPolicy(pol, req));
                             }
                         }
                     }
@@ -696,7 +697,8 @@ impl Manager {
                         eprintln!("GMgr rcvd SetRunningCapability for {s_name}");
                         if let Some(s_id) = self.name_to_id.get(&s_name) {
                             if let Some((sender, _n)) = self.swarms.get(s_id) {
-                                sender.send(ManagerToGnome::SetRunningCapability(cap, v_gids));
+                                let _ =
+                                    sender.send(ManagerToGnome::SetRunningCapability(cap, v_gids));
                             }
                         }
                     }
@@ -704,7 +706,7 @@ impl Manager {
                         eprintln!("GMgr rcvd SetRunningByteSet for {s_name}");
                         if let Some(s_id) = self.name_to_id.get(&s_name) {
                             if let Some((sender, _n)) = self.swarms.get(s_id) {
-                                sender.send(ManagerToGnome::SetRunningByteSet(b_id, bset));
+                                let _ = sender.send(ManagerToGnome::SetRunningByteSet(b_id, bset));
                             }
                         }
                     }
@@ -1192,7 +1194,7 @@ impl Manager {
             "next_avail_neighboring_swarm (exclude: {:?})\n name_to_id:",
             exclude_swarm
         );
-        let mut excluded_swarm = if let Some(s_name) = &exclude_swarm {
+        let mut _excluded_swarm = if let Some(s_name) = &exclude_swarm {
             if s_name.founder.is_any() {
                 None
             } else {
@@ -1213,7 +1215,7 @@ impl Manager {
         }
         // TODO: some better way to get a random name
         let mut randomizer = HashSet::new();
-        let mut exclude_neighbor = None;
+        // let mut exclude_neighbor = None;
         eprintln!("neighboring_swarms:");
         if let Some(exclude_name) = exclude_swarm.clone() {
             for (neighboring_swarm, neighbors) in &self.neighboring_swarms {
@@ -1229,8 +1231,8 @@ impl Manager {
                         };
                         randomizer.insert(to_add);
                     } else if let Some(n) = neighbors.iter().next() {
-                        excluded_swarm = Some((exclude_name.clone(), Some(*n)));
-                        exclude_neighbor = Some(*n);
+                        _excluded_swarm = Some((exclude_name.clone(), Some(*n)));
+                        // exclude_neighbor = Some(*n);
                     }
                 }
             }
@@ -1417,7 +1419,7 @@ impl Manager {
                     Err(())
                 }
             }
-            let n_ids = if let Some(ns) = &neighbors {
+            let _n_ids = if let Some(ns) = &neighbors {
                 let mut list = vec![];
                 for n in ns {
                     list.push(n.id);
@@ -1472,7 +1474,7 @@ impl Manager {
         network_settings_receiver: Receiver<Vec<u8>>,
     ) {
         eprintln!("Notifying network about {}", swarm_name);
-        let r = self
+        let _r = self
             .to_networking
             .send(Notification::AddSwarm(NotificationBundle {
                 swarm_name,

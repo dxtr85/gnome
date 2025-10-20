@@ -1,8 +1,6 @@
 use super::serve_socket;
-use super::Token;
 use crate::crypto::Encrypter;
 use crate::crypto::{generate_symmetric_key, SessionKey};
-use crate::networking::common::are_we_behind_a_nat;
 use crate::networking::common::collect_subscribed_swarm_names;
 use crate::networking::common::create_a_neighbor_for_each_swarm;
 use crate::networking::common::discover_network_settings;

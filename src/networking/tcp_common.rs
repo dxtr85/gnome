@@ -6,7 +6,6 @@ use crate::data_conversion::bytes_to_message;
 use crate::data_conversion::bytes_to_neighbor_request;
 use crate::data_conversion::bytes_to_neighbor_response;
 use async_std::io::ReadExt;
-use async_std::task;
 use core::panic;
 use futures::AsyncWriteExt;
 use futures::{
@@ -16,15 +15,12 @@ use futures::{
 };
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::time::Duration;
 use swarm_consensus::CastID;
 use swarm_consensus::CastType;
 use swarm_consensus::NeighborRequest;
 use swarm_consensus::SwarmName;
 use swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
 
-use super::sock::TokenDispenser;
-use super::Token;
 use crate::networking::subscription::Subscription;
 use async_std::net::TcpStream;
 
@@ -55,8 +51,8 @@ pub async fn serve_socket(
     let mut senders: HashMap<u8, (Sender<Message>, Sender<CastMessage>)> = HashMap::new();
     let mut receivers: HashMap<u8, Receiver<WrappedMessage>> = HashMap::new();
     let mut out_of_order_recvd = HashMap::new();
-    let min_tokens_threshold: u64 = 1500;
-    let mut available_tokens: u64 = min_tokens_threshold;
+    // let min_tokens_threshold: u64 = 1500;
+    // let available_tokens: u64 = min_tokens_threshold;
     let mut new_channel_mappings: HashMap<u8, SwarmName> = HashMap::new();
     // println!("racing: {:?}", send_recv_pairs);
     for (i, (sender, c_sender, receiver)) in send_recv_pairs.into_iter().enumerate() {
@@ -208,11 +204,11 @@ pub async fn serve_socket(
             eprintln!("SRVC Error received: {:?}", _err);
             if &_err == "No receivers" {
                 eprintln!("No receivers, terminating!");
-                stream.close().await;
+                let _ = stream.close().await;
                 break;
             } else if from_socket {
                 eprintln!("Connection error, terminating!");
-                stream.close().await;
+                let _ = stream.close().await;
                 break;
             }
             // TODO: should end serving this socket
@@ -466,10 +462,10 @@ pub async fn serve_socket(
             total_bytes.push(size_bytes[0]);
             total_bytes.push(size_bytes[1]);
             total_bytes.append(&mut ciphered);
-            let all_header_bytes = 45; //TODO: TCP has more than UDP
-                                       // let len = all_header_bytes + actual_len as u64;
-                                       // let taken = token_dispenser.take(len);
-                                       // if taken == len {
+            // let all_header_bytes = 45; //TODO: TCP has more than UDP
+            // let len = all_header_bytes + actual_len as u64;
+            // let taken = token_dispenser.take(len);
+            // if taken == len {
             let _send_result = stream.write(&total_bytes).await;
             let _flush_result = stream.flush().await;
             // available_tokens = if len > available_tokens {
@@ -517,7 +513,7 @@ async fn read_bytes_from_remote(
 
 pub async fn send_subscribed_swarm_names(socket: &mut TcpStream, names: &Vec<SwarmName>) {
     let buf = swarm_names_as_bytes(names, 1450);
-    let send_result = socket.write(&buf).await;
+    let _send_result = socket.write(&buf).await;
     let _f_result = socket.flush().await;
     // if let Ok(count) = send_result {
     //     eprintln!("TCP Sent {} bytes", count);
