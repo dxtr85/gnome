@@ -358,12 +358,14 @@ impl Manager {
                             // and maybe try again.
                             eprintln!("Seting waiting_for_neighbors to {}", swarm_id);
                             self.waiting_for_neighbors = Some(swarm_id);
+                            // if !quit {
                             let message = ToGnomeManager::DisconnectSwarmIfNoNeighbors(swarm_id);
                             spawn(start_a_timer(
                                 self.req_sender.clone(),
                                 message,
                                 Duration::from_secs(10),
                             ));
+                            // }
                             if !swarm_name.founder.is_any() {
                                 self.notify_other_swarms(swarm_id, swarm_name.clone(), aware_gnome);
                             }
@@ -646,13 +648,21 @@ impl Manager {
                     }
                     ToGnomeManager::Quit => {
                         eprintln!("GMgr Got quit");
+                        let mut disconected = vec![];
                         for (s_id, (to_gnome, _neighbors)) in &self.swarms {
                             eprintln!("Sending disconnect request to swarm: {:?}", s_id);
+                            disconected.push((
+                                *s_id,
+                                SwarmName::new(GnomeId::any(), String::new()).unwrap(),
+                            ));
                             let _ = to_gnome.send(ManagerToGnome::Disconnect);
                         }
                         // eprintln!("Swarms: {:?}", self.swarms);
                         // if self.swarms.is_empty() {
-                        //     self.resp_sender.send(FromGnomeManager::Disconnected).await;
+                        let _ = self
+                            .resp_sender
+                            .send(FromGnomeManager::Disconnected(disconected))
+                            .await;
                         // }
                         quit = true;
                     }
