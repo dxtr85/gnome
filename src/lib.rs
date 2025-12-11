@@ -45,7 +45,7 @@ pub mod prelude {
     pub use crate::networking::PortAllocationRule;
     pub use crate::networking::Transport;
     pub use swarm_consensus::ByteSet;
-    pub use swarm_consensus::CapabiliTree;
+    pub use swarm_consensus::CapabiLeaf;
     pub use swarm_consensus::Capabilities;
     pub use swarm_consensus::CastData;
     pub use swarm_consensus::CastID;
