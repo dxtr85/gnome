@@ -10,16 +10,19 @@ use crate::networking::common::send_subscribed_swarm_names;
 use crate::networking::status::Transport;
 use crate::networking::subscription::Requestor;
 use crate::networking::subscription::Subscription;
-use async_std::net::UdpSocket;
-use async_std::task::spawn;
+// use async_std::net::UdpSocket;
+// use async_std::task::spawn;
+use a_swarm_consensus::GnomeId;
+use a_swarm_consensus::SwarmName;
+use smol::net::UdpSocket;
+use smol::Executor;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use swarm_consensus::GnomeId;
-use swarm_consensus::SwarmName;
+use std::sync::Arc;
 
 pub async fn run_server(
-    // host_ip: IpAddr,
+    executor: Arc<Executor<'_>>,
     mut socket: UdpSocket,
     sub_sender: Sender<Subscription>,
     mut sub_receiver: Receiver<Subscription>,
@@ -117,17 +120,19 @@ pub async fn run_server(
         .await;
 
         // swarm_names.sort();
-        spawn(prepare_and_serve(
-            dedicated_socket,
-            gnome_id,
-            remote_gnome_id,
-            session_key,
-            sub_sender.clone(),
-            swarm_names,
-            // token_pipes_sender.clone(),
-            // encrypter,
-            remote_pub_key_pem,
-        ));
+        executor
+            .spawn(prepare_and_serve(
+                dedicated_socket,
+                gnome_id,
+                remote_gnome_id,
+                session_key,
+                sub_sender.clone(),
+                swarm_names,
+                // token_pipes_sender.clone(),
+                // encrypter,
+                remote_pub_key_pem,
+            ))
+            .detach();
         eprintln!("--------------------------------------");
     }
     // eprintln!("UDP server is done");

@@ -5,12 +5,16 @@ use crate::data_conversion::bytes_to_message;
 use crate::data_conversion::bytes_to_neighbor_request;
 use crate::data_conversion::bytes_to_neighbor_response;
 use crate::networking::subscription::Subscription;
-use swarm_consensus::CastID;
-use swarm_consensus::CastType;
-use swarm_consensus::SwarmName;
+use a_swarm_consensus::CastID;
+use a_swarm_consensus::CastType;
+use a_swarm_consensus::SwarmName;
+use smol::Timer;
 
-use async_std::net::UdpSocket;
-use async_std::task;
+// use async_std::net::UdpSocket;
+use smol::net::UdpSocket;
+// use async_std::task;
+use a_swarm_consensus::NeighborRequest;
+use a_swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
 use core::panic;
 use futures::{
     future::FutureExt, // for `.fuse()`
@@ -20,8 +24,6 @@ use futures::{
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::NeighborRequest;
-use swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
 
 async fn read_bytes_from_socket(
     socket: &UdpSocket,
@@ -89,7 +91,8 @@ async fn race_tasks(
     // let mut buf2 = [0u8; 1500];
     let mut buf2 = [0u8; 1];
     eprintln!("Waiting for initial tokens");
-    task::sleep(Duration::from_millis(1)).await;
+    // task::sleep(Duration::from_millis(1)).await;
+    Timer::after(Duration::from_millis(1)).await;
     // let max_tokens = if let Ok(Token::Provision(tkns)) = token_reciever.try_recv() {
     //     tkns * 1000
     // } else {

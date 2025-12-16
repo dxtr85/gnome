@@ -1,21 +1,26 @@
-use async_std::channel as achannel;
-use async_std::channel::Receiver as AReceiver;
-use async_std::channel::Sender as ASender;
-use async_std::task::sleep;
-use async_std::task::spawn;
+// use async_std::channel as achannel;
+use smol::channel as achannel;
+// use async_std::channel::Receiver as AReceiver;
+// use async_std::channel::Sender as ASender;
+// use async_std::task::sleep;
+use a_swarm_consensus::GnomeId;
+use a_swarm_consensus::GnomeToManager;
 use networking::Notification;
 use rsa::pkcs1::RsaPublicKey;
 use rsa::pkcs8::der::Decode;
+use smol::channel::Receiver as AReceiver;
+use smol::channel::Sender as ASender;
+use smol::Executor;
+use smol::Timer;
 use std::fs::read_to_string;
 pub use std::net::IpAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
-use swarm_consensus::GnomeId;
-use swarm_consensus::GnomeToManager;
-// use swarm_consensus::NetworkSettings;
+// use a_swarm_consensus::NetworkSettings;
 
-// use swarm_consensus::Notification;
-use swarm_consensus::SwarmName;
+// use a_swarm_consensus::Notification;
+use a_swarm_consensus::SwarmName;
 mod crypto;
 mod data_conversion;
 mod manager;
@@ -30,9 +35,9 @@ use networking::run_networking_tasks;
 use networking::NetworkSettings;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::Receiver;
-// use swarm_consensus::NotificationBundle;
-// use swarm_consensus::Request;
-// use swarm_consensus::Response;
+// use a_swarm_consensus::NotificationBundle;
+// use a_swarm_consensus::Request;
+// use a_swarm_consensus::Response;
 
 pub mod prelude {
     pub use crate::crypto::sha_hash;
@@ -44,24 +49,25 @@ pub mod prelude {
     pub use crate::networking::NetworkSettings;
     pub use crate::networking::PortAllocationRule;
     pub use crate::networking::Transport;
-    pub use swarm_consensus::ByteSet;
-    pub use swarm_consensus::CapabiLeaf;
-    pub use swarm_consensus::Capabilities;
-    pub use swarm_consensus::CastData;
-    pub use swarm_consensus::CastID;
-    pub use swarm_consensus::GnomeId;
-    pub use swarm_consensus::GnomeToApp;
-    pub use swarm_consensus::NeighborRequest;
-    pub use swarm_consensus::NeighborResponse;
-    pub use swarm_consensus::Policy;
-    pub use swarm_consensus::Requirement;
-    pub use swarm_consensus::SwarmID;
-    pub use swarm_consensus::SwarmName;
-    pub use swarm_consensus::SyncData;
-    pub use swarm_consensus::ToGnome;
+    pub use a_swarm_consensus::ByteSet;
+    pub use a_swarm_consensus::CapabiLeaf;
+    pub use a_swarm_consensus::Capabilities;
+    pub use a_swarm_consensus::CastData;
+    pub use a_swarm_consensus::CastID;
+    pub use a_swarm_consensus::GnomeId;
+    pub use a_swarm_consensus::GnomeToApp;
+    pub use a_swarm_consensus::NeighborRequest;
+    pub use a_swarm_consensus::NeighborResponse;
+    pub use a_swarm_consensus::Policy;
+    pub use a_swarm_consensus::Requirement;
+    pub use a_swarm_consensus::SwarmID;
+    pub use a_swarm_consensus::SwarmName;
+    pub use a_swarm_consensus::SyncData;
+    pub use a_swarm_consensus::ToGnome;
 }
 
 pub async fn init(
+    executor: Arc<Executor<'_>>,
     work_dir: PathBuf,
     neighbor_settings: Option<Vec<(GnomeId, NetworkSettings)>>,
     default_bandwidth_per_swarm: u64,
@@ -71,7 +77,7 @@ pub async fn init(
     SwarmName,
 ) {
     // ) {
-    // println!("init start");
+    eprintln!("init start");
     let (req_sender, req_receiver) = achannel::unbounded();
     let (resp_sender, resp_receiver) = achannel::unbounded();
     let mut my_name = SwarmName {
@@ -147,9 +153,10 @@ pub async fn init(
     }
     // pub_key_pem.retain(|c| !c.is_whitespace());
     // println!("Pub key: {:?}", res);
+    let c_ex = executor.clone();
     let (mut gmgr, networking_receiver) =
         // create_manager_and_receiver(gnome_id, Some(network_settings));
-        create_manager_and_receiver(my_name.founder, pub_key_der, priv_key_pem, None, decrypter.clone().unwrap(), (req_sender.clone(),req_receiver),
+        create_manager_and_receiver(c_ex,my_name.founder, pub_key_der, priv_key_pem, None, decrypter.clone().unwrap(), (req_sender.clone(),req_receiver),
         resp_sender.clone());
 
     // let app_sync_hash = 0; // TODO when we read data from disk we update app_sync_hash
@@ -205,17 +212,21 @@ pub async fn init(
     //         modulo * 64
     //     }
     // };
-    let _join = spawn(run_networking_tasks(
-        gmgr.get_sender(),
-        // server_ip,
-        // broadcast_ip,
-        server_port,
-        // nic_buffer_size,
-        // upload_bytes_per_sec,
-        networking_receiver,
-        decrypter.unwrap(),
-        pub_key_pem,
-    ));
+    let c_ex = executor.clone();
+    executor
+        .spawn(run_networking_tasks(
+            c_ex,
+            gmgr.get_sender(),
+            // server_ip,
+            // broadcast_ip,
+            server_port,
+            // nic_buffer_size,
+            // upload_bytes_per_sec,
+            networking_receiver,
+            decrypter.unwrap(),
+            pub_key_pem,
+        ))
+        .detach();
     // TODO: spawn a loop with manager inside handling both user requests and
     //      swarm management
     //      Here we need to store information about swarms that our neighbors
@@ -251,11 +262,14 @@ pub async fn init(
     //       of total bandwith available.
     //       If we are between min and min_off we can stay in this configuration.
     //
-    spawn(gmgr.do_your_job(default_bandwidth_per_swarm));
+    executor
+        .spawn(gmgr.do_your_job(default_bandwidth_per_swarm))
+        .detach();
     (req_sender, resp_receiver, my_name)
 }
 
 pub fn create_manager_and_receiver(
+    executor: Arc<Executor<'_>>,
     gnome_id: GnomeId,
     pub_key_der: Vec<u8>,
     priv_key_pem: String,
@@ -268,7 +282,9 @@ pub fn create_manager_and_receiver(
     // let network_settings = None;
     // let mgr = start(gnome_id, network_settings, networking_sender);
     let (sender, receiver) = channel();
-    spawn(serve_gnome_requests(receiver, req_sender.clone()));
+    executor
+        .spawn(serve_gnome_requests(receiver, req_sender.clone()))
+        .detach();
     let mgr = Manager::new(
         gnome_id,
         pub_key_der,
@@ -293,7 +309,8 @@ async fn serve_gnome_requests(
         if let Ok(request) = from_gnome.recv_timeout(recv_timeout) {
             let _ = to_manager.send(ToGnomeManager::FromGnome(request)).await;
         } else {
-            sleep(recv_timeout).await
+            // sleep(recv_timeout).await
+            Timer::after(recv_timeout).await;
         }
     }
 }

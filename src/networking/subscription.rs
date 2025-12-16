@@ -1,14 +1,16 @@
 // use crate::crypto::Decrypter;
-use async_std::channel::Sender as ASender;
-use async_std::task::sleep;
+// use async_std::channel::Sender as ASender;
+// use async_std::task::sleep;
+use smol::channel::Sender as ASender;
+use smol::Timer;
 // use rsa::sha2::digest::HashMarker;
 use crate::networking::{Nat, PortAllocationRule};
+use a_swarm_consensus::{Neighbor, SwarmName, ToGnome};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{Neighbor, SwarmName, ToGnome};
 
 use crate::manager::ToGnomeManager;
 use crate::networking::status::Transport;
@@ -284,6 +286,7 @@ pub async fn subscriber(
             }
         }
         // print!("Y");
-        sleep(sleep_time).await;
+        // sleep(sleep_time).await;
+        Timer::after(sleep_time).await;
     }
 }

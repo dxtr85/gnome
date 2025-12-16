@@ -2,28 +2,35 @@ use crate::crypto::sha_hash;
 use crate::crypto::Decrypter;
 use crate::networking::status::NetworkSummary;
 use crate::networking::status::Transport;
-use async_std::task::sleep;
-use async_std::task::spawn;
+// use async_std::task::sleep;
+// use async_std::task::spawn;
+use a_swarm_consensus::ByteSet;
+use a_swarm_consensus::Capabilities;
+use a_swarm_consensus::CastData;
+use a_swarm_consensus::Policy;
+use a_swarm_consensus::Requirement;
+use smol::spawn;
+use smol::Timer;
 use std::collections::VecDeque;
-use swarm_consensus::ByteSet;
-use swarm_consensus::Capabilities;
-use swarm_consensus::CastData;
-use swarm_consensus::Policy;
-use swarm_consensus::Requirement;
 // use std::hash::{DefaultHasher, Hash, Hasher};
 use crate::networking::Nat;
 use crate::networking::NetworkSettings;
 use crate::networking::PortAllocationRule;
+use a_swarm_consensus::SwarmName;
+use a_swarm_consensus::SwarmTime;
 use std::net::IpAddr;
 use std::time::Duration;
-use swarm_consensus::SwarmName;
-use swarm_consensus::SwarmTime;
 // use crate::gnome::NetworkSettings;
 // use crate::swarm::{Swarm, SwarmID};
 use crate::networking::Notification;
 use crate::networking::NotificationBundle;
-use async_std::channel::Receiver as AReceiver;
-use async_std::channel::Sender as ASender;
+// use async_std::channel::Receiver as AReceiver;
+// use async_std::channel::Sender as ASender;
+use a_swarm_consensus::GnomeToManager;
+use a_swarm_consensus::ManagerToGnome;
+use a_swarm_consensus::{GnomeId, Neighbor};
+use a_swarm_consensus::{GnomeToApp, ToGnome};
+use a_swarm_consensus::{Swarm, SwarmID};
 use rsa::{
     pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey},
     pkcs1v15::{Signature, SigningKey, VerifyingKey},
@@ -35,14 +42,11 @@ use rsa::{
     // RsaPrivateKey,
     RsaPublicKey,
 };
+use smol::channel::Receiver as AReceiver;
+use smol::channel::Sender as ASender;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use swarm_consensus::GnomeToManager;
-use swarm_consensus::ManagerToGnome;
-use swarm_consensus::{GnomeId, Neighbor};
-use swarm_consensus::{GnomeToApp, ToGnome};
-use swarm_consensus::{Swarm, SwarmID};
 
 pub enum ToGnomeManager {
     JoinRandom(Option<SwarmName>), // We ask GMgr to join a swarm of his own selection
@@ -364,7 +368,8 @@ impl Manager {
                                 self.req_sender.clone(),
                                 message,
                                 Duration::from_secs(10),
-                            ));
+                            ))
+                            .detach();
                             // }
                             if !swarm_name.founder.is_any() {
                                 self.notify_other_swarms(swarm_id, swarm_name.clone(), aware_gnome);
@@ -622,7 +627,8 @@ impl Manager {
                             if quit {
                                 eprintln!("quit is true");
                                 let sleep_time = Duration::from_nanos(sleep_nanos);
-                                sleep(sleep_time).await;
+                                // sleep(sleep_time).await;
+                                Timer::after(sleep_time).await;
                                 break;
                             }
                             let _ = self
@@ -752,7 +758,8 @@ impl Manager {
                         self.req_sender.clone(),
                         message,
                         Duration::from_secs(3),
-                    ));
+                    ))
+                    .detach();
                 }
                 eprintln!("Founder Det: {} {} {:?}", swarm_id, s_name, _res);
                 eprintln!("existing: {:?}", self.name_to_id.keys());
@@ -1521,7 +1528,8 @@ pub async fn start_a_timer(
     timeout: Duration,
 ) {
     // let timeout = Duration::from_secs(5);
-    sleep(timeout).await;
+    // sleep(timeout).await;
+    Timer::after(timeout).await;
     // eprintln!("Timeout for {} is over", message);
     let _ = sender.send(message).await;
 }

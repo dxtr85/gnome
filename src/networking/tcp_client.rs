@@ -14,25 +14,32 @@ use crate::networking::Nat;
 use crate::networking::NetworkSettings;
 use crate::networking::PortAllocationRule;
 use crate::networking::Transport as GTransport;
-use async_std::io::ReadExt;
-use async_std::net::TcpStream;
-use async_std::task::sleep;
-use async_std::task::spawn;
+// use async_std::io::ReadExt;
+// use async_std::net::TcpStream;
+// use async_std::task::sleep;
+// use async_std::task::spawn;
 use futures::AsyncWriteExt;
 use futures::{
     future::FutureExt, // for `.fuse()`
     pin_mut,
     select,
 };
+use smol::io::AsyncReadExt as ReadExt;
+use smol::net::TcpStream;
+// use smol::spawn;
+use a_swarm_consensus::GnomeId;
+use a_swarm_consensus::SwarmName;
+use smol::Executor;
+use smol::Timer;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::mpsc::{channel, Sender};
+use std::sync::Arc;
 use std::time::Duration;
-use swarm_consensus::GnomeId;
-use swarm_consensus::SwarmName;
 
 pub async fn run_tcp_client(
+    executor: Arc<Executor<'_>>,
     my_id: GnomeId,
     swarm_names: Vec<SwarmName>,
     sender: Sender<Subscription>,
@@ -81,7 +88,7 @@ pub async fn run_tcp_client(
 
     let timeout_sec = Duration::from_secs(5);
     let (t_send, _timeout) = channel();
-    spawn(time_out(timeout_sec, Some(t_send)));
+    executor.spawn(time_out(timeout_sec, Some(t_send))).detach();
     // while timeout.try_recv().is_err() {
     if swarm_names.is_empty() {
         eprintln!("User is not subscribed to any Swarms");
@@ -90,7 +97,9 @@ pub async fn run_tcp_client(
         // return receiver;
     }
     // eprintln!("TCP Client swarm_names: {:?}", swarm_names);
+    let c_ex = executor.clone();
     establish_secure_connection(
+        c_ex,
         my_id,
         stream.clone(),
         sender.clone(),
@@ -118,11 +127,13 @@ async fn try_to_connect(ip: IpAddr, port: u16) -> Option<TcpStream> {
 }
 
 async fn start_timer(timespan: Duration) -> Option<TcpStream> {
-    sleep(timespan).await;
+    // sleep(timespan).await;
+    Timer::after(timespan).await;
     None
 }
 
 async fn establish_secure_connection(
+    executor: Arc<Executor<'_>>,
     my_id: GnomeId,
     mut stream: TcpStream,
     sender: Sender<Subscription>,
@@ -290,17 +301,19 @@ async fn establish_secure_connection(
             }
             let remote_id_pub_key_pem =
                 std::str::from_utf8(&remote_pubkey_pem).unwrap().to_string();
-            spawn(prepare_and_serve(
-                my_id,
-                stream,
-                // remote_gnome_id,
-                session_key,
-                swarm_names,
-                sender.clone(),
-                // pipes_sender.clone(),
-                // encr,
-                remote_id_pub_key_pem,
-            ));
+            executor
+                .spawn(prepare_and_serve(
+                    my_id,
+                    stream,
+                    // remote_gnome_id,
+                    session_key,
+                    swarm_names,
+                    sender.clone(),
+                    // pipes_sender.clone(),
+                    // encr,
+                    remote_id_pub_key_pem,
+                ))
+                .detach();
         } else {
             eprintln!("Failed to decrypt message");
             let _ = stream.close().await;

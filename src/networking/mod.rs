@@ -22,15 +22,19 @@ use self::subscription::subscriber;
 use self::tcp_server::run_tcp_server;
 use self::token::Token;
 use crate::crypto::Decrypter;
-use async_std::channel::Sender;
-use async_std::net::TcpListener;
-use async_std::net::UdpSocket;
-use async_std::task::spawn;
+// use async_std::channel::Sender;
+// use async_std::net::TcpListener;
+// use async_std::net::UdpSocket;
+use a_swarm_consensus::{GnomeId, SwarmName, ToGnome};
+use smol::channel::Sender;
+use smol::net::TcpListener;
+use smol::net::UdpSocket;
+use smol::Executor;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, Receiver, Sender as SSender};
+use std::sync::Arc;
 use subscription::Requestor;
-use swarm_consensus::{GnomeId, SwarmName, ToGnome};
 // use swarm_consensus::{GnomeToManager, Notification, NotificationBundle};
 
 pub enum Notification {
@@ -61,6 +65,7 @@ pub struct NotificationBundle {
 // impl Error for ConnError {}
 
 pub async fn run_networking_tasks(
+    executor: Arc<Executor<'_>>,
     to_gmgr: Sender<ToGnomeManager>,
     server_port: u16,
     // buffer_size_bytes: u64,
@@ -87,7 +92,7 @@ pub async fn run_networking_tasks(
     // let (token_pipes_sender, token_pipes_receiver) = channel();
     let (send_pair, recv_pair) = channel();
     // eprintln!("spawn token_dispenser");
-    // spawn(token_dispenser(
+    // executor.spawn(token_dispenser(
     //     buffer_size_bytes,
     //     uplink_bandwith_bytes_sec,
     //     // token_msg_sender,
@@ -112,19 +117,21 @@ pub async fn run_networking_tasks(
     // if sub_sends.is_empty() {
     //     sub_sends.insert(Requestor::Udp, sub_send_one);
     // }
-    spawn(subscriber(
-        to_gmgr.clone(),
-        sub_sends,
-        // decrypter.clone(),
-        // token_pipes_sender.clone(),
-        // pub_key_pem.clone(),
-        sub_recv_two,
-        // sub_send_two.clone(),
-        notification_receiver,
-        // token_dispenser_send,
-        holepunch_sender,
-        send_pair,
-    ));
+    executor
+        .spawn(subscriber(
+            to_gmgr.clone(),
+            sub_sends,
+            // decrypter.clone(),
+            // token_pipes_sender.clone(),
+            // pub_key_pem.clone(),
+            sub_recv_two,
+            // sub_send_two.clone(),
+            notification_receiver,
+            // token_dispenser_send,
+            holepunch_sender,
+            send_pair,
+        ))
+        .detach();
     let mut swarm_names = vec![];
     sub_recv_one = collect_subscribed_swarm_names(
         &mut swarm_names,
@@ -134,30 +141,38 @@ pub async fn run_networking_tasks(
     )
     .await;
     eprintln!("received swarm names len: {}", swarm_names.len());
-    // swarm_names.sort();
-    spawn(run_client(
-        swarm_names,
-        sub_send_two.clone(),
-        decrypter.clone(),
-        // token_pipes_sender.clone(),
-        pub_key_pem.clone(),
-        None,
-    ));
+    let c_ex = executor.clone();
+    executor
+        .spawn(run_client(
+            c_ex,
+            swarm_names,
+            sub_send_two.clone(),
+            decrypter.clone(),
+            // token_pipes_sender.clone(),
+            pub_key_pem.clone(),
+            None,
+        ))
+        .detach();
     // .await;
     // IPv4
     if let Ok(listener) = tcp_bind_result {
         // let mut my_names = vec![];
         // sub_recv_one =
         //     collect_subscribed_swarm_names(&mut my_names, sub_send_two.clone(), sub_recv_one).await;
-        // eprintln!("Run TCP server with swarm names: {:?}", my_names);
-        spawn(run_tcp_server(
-            listener,
-            sub_send_two.clone(),
-            sub_recv_one_bis,
-            // token_pipes_sender.clone(),
-            pub_key_pem.clone(),
-            // my_names,
-        ));
+        eprintln!("Run TCP server with swarm names: ");
+        let c_ex = executor.clone();
+        executor
+            .spawn(run_tcp_server(
+                c_ex,
+                listener,
+                sub_send_two.clone(),
+                sub_recv_one_bis,
+                // token_pipes_sender.clone(),
+                pub_key_pem.clone(),
+                // my_names,
+            ))
+            .detach();
+        eprintln!("Run TCP server with swarm names AFTER");
         let _ = sub_send_two.send(subscription::Subscription::TransportAvailable(
             Requestor::Tcp,
         ));
@@ -171,13 +186,18 @@ pub async fn run_networking_tasks(
         ));
     }
     if let Ok(socket) = bind_result {
-        spawn(run_server(
-            socket,
-            sub_send_two.clone(),
-            sub_recv_one,
-            // token_pipes_sender.clone(),
-            pub_key_pem.clone(),
-        ));
+        eprintln!("HAVE bind result OK");
+        let c_ex = executor.clone();
+        executor
+            .spawn(run_server(
+                c_ex,
+                socket,
+                sub_send_two.clone(),
+                sub_recv_one,
+                // token_pipes_sender.clone(),
+                pub_key_pem.clone(),
+            ))
+            .detach();
         let _ = sub_send_two.send(subscription::Subscription::TransportAvailable(
             Requestor::Udp,
         ));
@@ -187,20 +207,27 @@ pub async fn run_networking_tasks(
             Requestor::Udp,
         ));
     };
+    eprintln!("one");
     // IPv6
     if let Ok(listener) = ipv6_tcp_bind_result {
+        eprintln!("one in");
         // let mut my_names = vec![];
         // sub_recv_one =
         //     collect_subscribed_swarm_names(&mut my_names, sub_send_two.clone(), sub_recv_one).await;
-        // eprintln!("Run TCP server with swarm names: {:?}", my_names);
-        spawn(run_tcp_server(
-            listener,
-            sub_send_two.clone(),
-            sub_recv_one_cis,
-            // token_pipes_sender.clone(),
-            pub_key_pem.clone(),
-            // my_names,
-        ));
+        eprintln!("Run TCP server with swarm names:2");
+        let c_ex = executor.clone();
+        executor
+            .spawn(run_tcp_server(
+                c_ex,
+                listener,
+                sub_send_two.clone(),
+                sub_recv_one_cis,
+                // token_pipes_sender.clone(),
+                pub_key_pem.clone(),
+                // my_names,
+            ))
+            .detach();
+        eprintln!("Run TCP server with swarm names:2AFTER");
         let _ = sub_send_two.send(subscription::Subscription::TransportAvailable(
             Requestor::Tcpv6,
         ));
@@ -213,14 +240,20 @@ pub async fn run_networking_tasks(
             Requestor::Tcpv6,
         ));
     }
+    eprintln!("two");
     if let Ok(socket) = ipv6_bind_result {
-        spawn(run_server(
-            socket,
-            sub_send_two.clone(),
-            sub_recv_one_dis,
-            // token_pipes_sender.clone(),
-            pub_key_pem.clone(),
-        ));
+        eprintln!("HEVE bind resuls6: OK");
+        let c_ex = executor.clone();
+        let _r = executor
+            .spawn(run_server(
+                c_ex,
+                socket,
+                sub_send_two.clone(),
+                sub_recv_one_dis,
+                // token_pipes_sender.clone(),
+                pub_key_pem.clone(),
+            ))
+            .detach();
         let _ = sub_send_two.send(subscription::Subscription::TransportAvailable(
             Requestor::Udpv6,
         ));
@@ -258,24 +291,29 @@ pub async fn run_networking_tasks(
     // if we_are_behind_nat {
     // In case we are behind a NAT we need to run direct_punch and holepunch
     // Both of those services need a sophisticated procedure for connection establishment.
-    spawn(direct_punching_service(
-        to_gmgr.clone(),
-        server_port,
-        sub_send_two.clone(),
-        // req_sender.clone(),
-        // resp_receiver,
-        decrypter.clone(),
-        // token_pipes_sender.clone(),
-        recv_pair,
-        // receiver,
-        pub_key_pem.clone(),
-        // swarm_name.clone(),
-        // net_set_recv,
-        // None,
-    ));
+    eprintln!("spwaning dps");
+    let c_ex = executor.clone();
+    executor
+        .spawn(direct_punching_service(
+            c_ex,
+            to_gmgr.clone(),
+            server_port,
+            sub_send_two.clone(),
+            // req_sender.clone(),
+            // resp_receiver,
+            decrypter.clone(),
+            // token_pipes_sender.clone(),
+            recv_pair,
+            // receiver,
+            pub_key_pem.clone(),
+            // swarm_name.clone(),
+            // net_set_recv,
+            // None,
+        ))
+        .detach();
     //     // let puncher = "tudbut.de:4277";
     //     let puncher = SocketAddr::new("217.160.249.125".parse().unwrap(), 4277);
-    //     spawn(holepunch(
+    //     executor.spawn(holepunch(
     //         puncher,
     //         // host_ip,
     //         sub_send_two,
@@ -291,7 +329,7 @@ pub async fn run_networking_tasks(
     // let (decode_req_send, decode_req_recv) = channel();
     // let (decode_resp_send, decode_resp_recv) = channel();
     // println!("bifor");
-    // spawn(decrypter_service(
+    // executor.spawn(decrypter_service(
     //     decrypter,
     //     decode_resp_send,
     //     decode_req_recv,

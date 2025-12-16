@@ -14,23 +14,26 @@ use crate::networking::tcp_client::run_tcp_client;
 use crate::networking::NetworkSettings;
 use crate::networking::PortAllocationRule;
 use crate::networking::Transport as GTransport;
-use async_std::net::UdpSocket;
-use async_std::task::spawn;
+// use async_std::net::UdpSocket;
+use a_swarm_consensus::GnomeId;
+use a_swarm_consensus::SwarmName;
 use futures::{
     future::FutureExt, // for `.fuse()`
     pin_mut,
     select,
 };
+use smol::net::UdpSocket;
+use smol::Executor;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Sender};
+use std::sync::Arc;
 use std::time::Duration;
-use swarm_consensus::GnomeId;
-use swarm_consensus::SwarmName;
 
 pub async fn run_client(
+    executor: Arc<Executor<'_>>,
     swarm_names: Vec<SwarmName>,
     sender: Sender<Subscription>,
     decrypter: Decrypter,
@@ -55,7 +58,7 @@ pub async fn run_client(
     //         modulo * 64
     //     }
     // };
-    // eprintln!("SKT CLIENT {:?}", target_host);
+    eprintln!("SKT CLIENT {:?}", target_host);
     let mut tcp_addr = None;
     let (socket, send_addr) = if let Some((sock, net_set)) = target_host {
         tcp_addr = Some(net_set.get_predicted_addr(0));
@@ -97,7 +100,7 @@ pub async fn run_client(
         eprintln!("Trying to communicate over UDP with {:?}", send_addr);
         let timeout_sec = Duration::from_secs(1);
         let (t_send, timeout) = channel();
-        spawn(time_out(timeout_sec, Some(t_send)));
+        executor.spawn(time_out(timeout_sec, Some(t_send))).detach();
         while timeout.try_recv().is_err() && !success {
             if swarm_names.is_empty() {
                 eprintln!("User is not subscribed to any Swarms");
@@ -116,6 +119,7 @@ pub async fn run_client(
             // Only when STUN timeout we should assume UDP is blocked
             // and only use TCP
             (success, my_pub_addr) = establish_secure_connection(
+                executor.clone(),
                 my_id,
                 &socket,
                 sender.clone(),
@@ -187,8 +191,10 @@ pub async fn run_client(
         //TODO: Distribute UDP failure
     }
     if let Some(addr) = tcp_addr {
+        let c_ex = executor.clone();
         eprintln!("Trying to communicate over TCP…");
         run_tcp_client(
+            c_ex,
             my_id,
             swarm_names,
             sender,
@@ -216,6 +222,7 @@ async fn wait_for_bytes(socket: &UdpSocket) {
     }
 }
 async fn establish_secure_connection(
+    executor: Arc<Executor<'_>>,
     my_id: GnomeId,
     socket: &UdpSocket,
     sender: Sender<Subscription>,
@@ -223,7 +230,7 @@ async fn establish_secure_connection(
     // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,
 ) -> (bool, Option<(IpAddr, u16)>) {
-    // eprintln!("UDP Client trying to establish secure connection");
+    eprintln!("UDP Client trying to establish secure connection");
     // let remote_gnome_id: GnomeId = GnomeId(0);
     let session_key: SessionKey; // = SessionKey::from_key(&[0; 32]);
     let remote_addr: SocketAddr; // = "0.0.0.0:0".parse().unwrap();
@@ -324,17 +331,19 @@ async fn establish_secure_connection(
             }
             let remote_id_pub_key_pem =
                 std::str::from_utf8(&remote_pubkey_pem).unwrap().to_string();
-            spawn(prepare_and_serve(
-                my_id,
-                dedicated_socket,
-                // remote_gnome_id,
-                session_key,
-                swarm_names,
-                sender.clone(),
-                // pipes_sender.clone(),
-                // encr,
-                remote_id_pub_key_pem,
-            ));
+            executor
+                .spawn(prepare_and_serve(
+                    my_id,
+                    dedicated_socket,
+                    // remote_gnome_id,
+                    session_key,
+                    swarm_names,
+                    sender.clone(),
+                    // pipes_sender.clone(),
+                    // encr,
+                    remote_id_pub_key_pem,
+                ))
+                .detach();
             return (true, my_public_address);
         } else {
             eprintln!("UDP Failed to decrypt message");

@@ -11,18 +11,22 @@ use crate::networking::{
     holepunch::{punch_it, start_communication},
     subscription::Subscription,
 };
-use async_std::channel::Sender as ASender;
+// use async_std::channel::Sender as ASender;
+use smol::channel::Sender as ASender;
 // use crate::GnomeId;
 use crate::networking::{Nat, NetworkSettings, PortAllocationRule, Transport as GTransport};
-use async_std::net::UdpSocket;
-use async_std::task::{sleep, spawn};
+// use async_std::net::UdpSocket;
+use a_swarm_consensus::{GnomeId, SwarmName, ToGnome};
+use smol::net::UdpSocket;
+use smol::{Executor, Timer};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 use std::time::Duration;
-use swarm_consensus::{GnomeId, SwarmName, ToGnome};
 
 pub async fn direct_punching_service(
+    executor: Arc<Executor<'_>>,
     to_gmgr: ASender<ToGnomeManager>,
     _server_port: u16,
     subscription_sender: Sender<Subscription>,
@@ -66,16 +70,19 @@ pub async fn direct_punching_service(
     let (send_other_network_settings, recv_other_network_settings) = channel();
     let (send_my_network_settings, recv_my_network_settings) = channel();
     // TODO: maybe only run it when it makes sense?
-    spawn(socket_maintainer(
-        to_gmgr.clone(),
-        pub_key_pem.clone(),
-        // gnome_id,
-        subscription_sender.clone(),
-        decrypter.clone(),
-        // token_endpoints_sender.clone(),
-        send_my_network_settings,
-        recv_other_network_settings,
-    ));
+    executor
+        .spawn(socket_maintainer(
+            executor.clone(),
+            to_gmgr.clone(),
+            pub_key_pem.clone(),
+            // gnome_id,
+            subscription_sender.clone(),
+            decrypter.clone(),
+            // token_endpoints_sender.clone(),
+            send_my_network_settings,
+            recv_other_network_settings,
+        ))
+        .detach();
     // println!("after sm spawn");
 
     let mut waiting_for_my_settings = false;
@@ -139,7 +146,8 @@ pub async fn direct_punching_service(
         //     let _ = to_gmgr.send(ToGnomeManager::TryTcpConnect(ns)).await;
         // }
         // yield_now().await;
-        sleep(sleep_time).await;
+        // sleep(sleep_time).await;
+        Timer::after(sleep_time).await;
     }
 }
 
@@ -147,6 +155,7 @@ pub async fn direct_punching_service(
 /// Once it receives a NetworkSettings struct, it tries to open a communication
 /// channel with that Neighbor and spawns a new socket for any new incoming NetworkSettings
 async fn socket_maintainer(
+    executor: Arc<Executor<'_>>,
     _to_gmgr: ASender<ToGnomeManager>,
     pub_key_pem: String,
     // gnome_id: GnomeId,
@@ -180,7 +189,8 @@ async fn socket_maintainer(
     let sleep_time = Duration::from_secs(1);
     loop {
         current_iter += 1;
-        sleep(sleep_time).await;
+        // sleep(sleep_time).await;
+        Timer::after(sleep_time).await;
         if current_iter > trigger_update_at_iter {
             current_iter = 0;
             my_settings = update_my_pub_addr(&socket, my_settings).await;
@@ -246,17 +256,21 @@ async fn socket_maintainer(
                             //     port_allocation: (PortAllocationRule::FullCone, 0),
                             // };
                             // let _ = my_network_settings_sender.send(my_ipv6_settings);
-                            spawn(punch_and_communicate(
-                                socket,
-                                bind_addr,
-                                pub_key_pem.clone(),
-                                // _to_gmgr.clone(),
-                                subscription_sender.clone(),
-                                decrypter.clone(),
-                                // token_endpoints_sender.clone(),
-                                swarm_names.clone(),
-                                (my_settings, other_settings),
-                            ));
+                            let c_ex = executor.clone();
+                            executor
+                                .spawn(punch_and_communicate(
+                                    c_ex,
+                                    socket,
+                                    bind_addr,
+                                    pub_key_pem.clone(),
+                                    // _to_gmgr.clone(),
+                                    subscription_sender.clone(),
+                                    decrypter.clone(),
+                                    // token_endpoints_sender.clone(),
+                                    swarm_names.clone(),
+                                    (my_settings, other_settings),
+                                ))
+                                .detach();
                         } else {
                             eprintln!("Unable to bind IPv6 socket");
                             let my_ipv6_settings = NetworkSettings {
@@ -314,17 +328,22 @@ async fn socket_maintainer(
                             //     port_allocation: (PortAllocationRule::FullCone, 0),
                             // };
                             // let _ = my_network_settings_sender.send(my_ipv6_settings);
-                            spawn(punch_and_communicate(
-                                socket,
-                                bind_addr,
-                                pub_key_pem.clone(),
-                                // _to_gmgr.clone(),
-                                subscription_sender.clone(),
-                                decrypter.clone(),
-                                // token_endpoints_sender.clone(),
-                                swarm_names.clone(),
-                                (my_settings, other_settings),
-                            ));
+                            let c_ex = executor.clone();
+
+                            executor
+                                .spawn(punch_and_communicate(
+                                    c_ex,
+                                    socket,
+                                    bind_addr,
+                                    pub_key_pem.clone(),
+                                    // _to_gmgr.clone(),
+                                    subscription_sender.clone(),
+                                    decrypter.clone(),
+                                    // token_endpoints_sender.clone(),
+                                    swarm_names.clone(),
+                                    (my_settings, other_settings),
+                                ))
+                                .detach();
                         } else {
                             eprintln!("Unable to bind IPv6 socket");
                             let my_ipv6_settings = NetworkSettings {
@@ -345,7 +364,9 @@ async fn socket_maintainer(
                             other_settings.pub_ip,
                             other_settings.pub_port //+ i
                         );
+                        let c_ex = executor.clone();
                         run_tcp_client(
+                            c_ex,
                             my_id,
                             swarm_names.clone(),
                             subscription_sender.clone(),
@@ -361,18 +382,21 @@ async fn socket_maintainer(
                     }
                 } else if other_settings.transport == GTransport::UDPoverIP4 {
                     let _ = my_network_settings_sender.send(my_settings);
-                    // swarm_names.sort();
-                    spawn(punch_and_communicate(
-                        socket,
-                        bind_addr,
-                        pub_key_pem.clone(),
-                        // _to_gmgr.clone(),
-                        subscription_sender.clone(),
-                        decrypter.clone(),
-                        // token_endpoints_sender.clone(),
-                        swarm_names.clone(),
-                        (my_settings, other_settings),
-                    ));
+                    let c_ex = executor.clone();
+                    executor
+                        .spawn(punch_and_communicate(
+                            c_ex,
+                            socket,
+                            bind_addr,
+                            pub_key_pem.clone(),
+                            // _to_gmgr.clone(),
+                            subscription_sender.clone(),
+                            decrypter.clone(),
+                            // token_endpoints_sender.clone(),
+                            swarm_names.clone(),
+                            (my_settings, other_settings),
+                        ))
+                        .detach();
                     socket = UdpSocket::bind(bind_addr).await.unwrap();
                     my_settings = update_my_pub_addr(&socket, my_settings).await;
                 } else if other_settings.transport == GTransport::TCPoverIP4 {
@@ -386,7 +410,9 @@ async fn socket_maintainer(
                         other_settings.pub_ip,
                         other_settings.pub_port //+ i
                     );
+                    let c_ex = executor.clone();
                     run_tcp_client(
+                        c_ex,
                         my_id,
                         swarm_names.clone(),
                         subscription_sender.clone(),
@@ -434,6 +460,7 @@ async fn update_my_pub_addr(
 }
 
 async fn punch_and_communicate(
+    executor: Arc<Executor<'_>>,
     socket: UdpSocket,
     bind_addr: (IpAddr, u16),
     pub_key_pem: String,
@@ -447,6 +474,7 @@ async fn punch_and_communicate(
     if other_settings.no_nat() {
         // eprintln!("DP Case 0 - there is no NAT for {:?}", other_settings);
         run_client(
+            executor.clone(),
             swarm_names.clone(),
             sub_sender,
             decrypter,
@@ -529,15 +557,17 @@ async fn punch_and_communicate(
         };
         // let socket_recv_result = socket_receiver.recv();
         if let Some(dedicated_socket) = punch_it_result {
-            spawn(start_communication(
-                dedicated_socket,
-                swarm_names,
-                pub_key_pem.clone(),
-                // gnome_id,
-                decrypter.clone(),
-                // pipes_sender.clone(),
-                sub_sender.clone(),
-            ));
+            executor
+                .spawn(start_communication(
+                    dedicated_socket,
+                    swarm_names,
+                    pub_key_pem.clone(),
+                    // gnome_id,
+                    decrypter.clone(),
+                    // pipes_sender.clone(),
+                    sub_sender.clone(),
+                ))
+                .detach();
             // return;
         } else {
             eprintln!("Unable to communicate over UDP with {:?}", other_settings);

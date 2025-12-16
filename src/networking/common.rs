@@ -5,16 +5,20 @@ use crate::networking::stun::{
     build_request, stun_decode, stun_send, StunChangeRequest, StunMessage,
 };
 use crate::networking::subscription::Subscription;
-use async_std::net::{IpAddr, Ipv4Addr, UdpSocket};
-use async_std::task;
-use async_std::task::{sleep, yield_now};
+// use async_std::net::{IpAddr, Ipv4Addr, UdpSocket};
+// use async_std::task;
+// use async_std::task::{sleep, yield_now};
+use smol::future::yield_now;
+use smol::net::{IpAddr, Ipv4Addr, UdpSocket};
+use smol::Timer;
 // use futures::SinkExt;
+use a_swarm_consensus::SwarmName;
+use a_swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
 use std::collections::HashMap;
 use std::net::Ipv6Addr;
-use swarm_consensus::SwarmName;
-use swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
 // use bytes::{BufMut, BytesMut};
 use crate::networking::{Nat, NetworkSettings, PortAllocationRule};
+use a_swarm_consensus::GnomeId;
 use futures::{
     future::FutureExt, // for `.fuse()`
     pin_mut,
@@ -24,7 +28,6 @@ use std::cmp::min;
 use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::GnomeId;
 
 use super::subscription::Requestor;
 
@@ -57,7 +60,8 @@ pub async fn collect_subscribed_swarm_names(
             };
         }
         // yield_now().await;
-        sleep(sleep_time).await;
+        // sleep(sleep_time).await;
+        Timer::after(sleep_time).await;
     }
     // eprintln!("Collected swarm names: {:?}", names);
     receiver
@@ -412,13 +416,14 @@ pub async fn identify_nat(socket: &UdpSocket, have_port_control: bool) -> Nat {
     let mut received_responses = Vec::new();
     // eprintln!("Waiting for STUN to respond...");
     while millis_remaining > 0 && received_responses.len() < 2 {
-        let t1 = sleep(Duration::from_millis(1)).fuse();
+        // let t1 = sleep(Duration::from_millis(1)).fuse();
+        let t1 = Timer::after(Duration::from_millis(16)).fuse();
         let t2 = receive_response(socket).fuse();
 
         pin_mut!(t1, t2);
         select! {
             _result1 = t1 =>{
-                 millis_remaining-=1;
+                 millis_remaining-=16;
              },
             result2 = t2 => {
                 // eprintln!("Received a response: {:?}", result2);
@@ -470,7 +475,8 @@ pub async fn time_out(mut time: Duration, sender: Option<Sender<()>>) {
     while time > Duration::ZERO {
         // print!(".");
         time -= time_step;
-        sleep(time_step).await;
+        // sleep(time_step).await;
+        Timer::after(time_step).await;
     }
     // println!("timed out");
     if let Some(sender) = sender {
@@ -784,7 +790,8 @@ pub async fn read_bytes_from_local_stream(
             eprintln!("End serving socket with no local receivers");
             break;
         }
-        task::sleep(sleep_time).await;
+        // task::sleep(sleep_time).await;
+        Timer::after(sleep_time).await;
     }
     Err("No receivers".to_string())
     // Err(ConnError::LocalStreamClosed)

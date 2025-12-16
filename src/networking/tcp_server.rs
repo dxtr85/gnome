@@ -8,20 +8,26 @@ use crate::networking::common::create_a_neighbor_for_each_swarm;
 use crate::networking::common::distil_common_names;
 use crate::networking::subscription::{Requestor, Subscription};
 use crate::networking::tcp_common::send_subscribed_swarm_names;
-use async_std::io::ReadExt;
-use async_std::net::{TcpListener, TcpStream};
-use async_std::stream::StreamExt;
-use async_std::task::spawn;
+// use async_std::io::ReadExt;
+// use async_std::net::{TcpListener, TcpStream};
+// use async_std::stream::StreamExt;
+// use async_std::task::spawn;
 use futures::AsyncWriteExt;
+use smol::io::AsyncReadExt as ReadExt;
+use smol::net::{TcpListener, TcpStream};
+use smol::stream::StreamExt;
+use smol::Executor;
 use std::net::IpAddr;
 // use std::net::SocketAddr;
+use a_swarm_consensus::GnomeId;
+use a_swarm_consensus::SwarmName;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
-use swarm_consensus::GnomeId;
-use swarm_consensus::SwarmName;
 
 pub async fn run_tcp_server(
+    executor: Arc<Executor<'_>>,
     listener: TcpListener,
     sub_sender: Sender<Subscription>,
     mut sub_receiver: Receiver<Subscription>,
@@ -51,18 +57,23 @@ pub async fn run_tcp_server(
             )
             .await;
             // eprintln!("TCP server swarm_names: {:?}", swarm_names);
-            spawn(serve_dedicated_connection(
-                stream,
-                pub_key_pem.clone(),
-                sub_sender.clone(),
-                // token_pipes_sender.clone(),
-                swarm_names.clone(),
-            ));
+            let c_ex = executor.clone();
+            executor
+                .spawn(serve_dedicated_connection(
+                    c_ex,
+                    stream,
+                    pub_key_pem.clone(),
+                    sub_sender.clone(),
+                    // token_pipes_sender.clone(),
+                    swarm_names.clone(),
+                ))
+                .detach();
         }
     }
 }
 
 async fn serve_dedicated_connection(
+    executor: Arc<Executor<'_>>,
     stream: TcpStream,
     pub_key_pem: String,
     sub_sender: Sender<Subscription>,
@@ -96,18 +107,20 @@ async fn serve_dedicated_connection(
     // let swarm_names = vec![SwarmName::new(GnomeId::any(), "/".to_string()).unwrap()];
 
     // swarm_names.sort();
-    spawn(prepare_and_serve(
-        reader,
-        writer,
-        gnome_id,
-        remote_gnome_id,
-        session_key,
-        sub_sender.clone(),
-        swarm_names,
-        // token_pipes_sender.clone(),
-        // encrypter,
-        remote_pub_key_pem,
-    ));
+    executor
+        .spawn(prepare_and_serve(
+            reader,
+            writer,
+            gnome_id,
+            remote_gnome_id,
+            session_key,
+            sub_sender.clone(),
+            swarm_names,
+            // token_pipes_sender.clone(),
+            // encrypter,
+            remote_pub_key_pem,
+        ))
+        .detach();
     eprintln!("--------------------------------------");
 }
 

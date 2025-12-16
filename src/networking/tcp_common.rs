@@ -5,7 +5,12 @@ use crate::data_conversion::bytes_to_cast_message;
 use crate::data_conversion::bytes_to_message;
 use crate::data_conversion::bytes_to_neighbor_request;
 use crate::data_conversion::bytes_to_neighbor_response;
-use async_std::io::ReadExt;
+// use async_std::io::ReadExt;
+use a_swarm_consensus::CastID;
+use a_swarm_consensus::CastType;
+use a_swarm_consensus::NeighborRequest;
+use a_swarm_consensus::SwarmName;
+use a_swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
 use core::panic;
 use futures::AsyncWriteExt;
 use futures::{
@@ -13,16 +18,13 @@ use futures::{
     pin_mut,
     select,
 };
+use smol::io::AsyncReadExt as ReadExt;
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use swarm_consensus::CastID;
-use swarm_consensus::CastType;
-use swarm_consensus::NeighborRequest;
-use swarm_consensus::SwarmName;
-use swarm_consensus::{CastContent, CastMessage, Message, Neighbor, SwarmTime, WrappedMessage};
 
 use crate::networking::subscription::Subscription;
-use async_std::net::TcpStream;
+// use async_std::net::TcpStream;
+use smol::net::TcpStream;
 
 pub async fn serve_socket(
     session_key: SessionKey,

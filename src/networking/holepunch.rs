@@ -9,19 +9,21 @@ use crate::networking::common::{
 use crate::networking::status::Transport;
 use crate::networking::subscription::Subscription;
 use crate::networking::{Nat, NetworkSettings, PortAllocationRule, Transport as GTransport};
-use async_std::net::UdpSocket;
-use async_std::task::{sleep, spawn};
+// use async_std::net::UdpSocket;
+// use async_std::task::{sleep, spawn};
+use a_swarm_consensus::{GnomeId, SwarmName};
 use futures::{
     future::FutureExt, // for `.fuse()`
     pin_mut,
     select,
 };
+use smol::net::UdpSocket;
+use smol::{spawn, Timer};
 use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::{channel, TryRecvError};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
-use swarm_consensus::{GnomeId, SwarmName};
 
 // let puncher = "tudbut.de:4277";
 // let swarm_name = "irdm".to_string();
@@ -70,7 +72,8 @@ pub async fn holepunch(
             match err {
                 TryRecvError::Disconnected => break,
                 _ => {
-                    sleep(sleep_duration).await;
+                    // sleep(sleep_duration).await;
+                    Timer::after(sleep_duration).await;
                     continue;
                 }
             }
@@ -87,7 +90,8 @@ pub async fn holepunch(
             pub_key_pem.clone(),
             swarm_name,
             bind_port,
-        ));
+        ))
+        .detach();
     }
 }
 
@@ -203,7 +207,8 @@ async fn holepunch_task(
             decrypter.clone(),
             // pipes_sender.clone(),
             sub_sender.clone(),
-        ));
+        ))
+        .detach();
         return;
     };
 
@@ -288,7 +293,8 @@ async fn holepunch_task(
             decrypter.clone(),
             // pipes_sender.clone(),
             sub_sender.clone(),
-        ));
+        ))
+        .detach();
         return;
     };
 
@@ -314,7 +320,8 @@ async fn holepunch_task(
             decrypter.clone(),
             // pipes_sender.clone(),
             sub_sender.clone(),
-        ));
+        ))
+        .detach();
         // return;
     };
 
@@ -505,7 +512,8 @@ impl MagicPorts {
 }
 
 async fn timeout(time: &Duration) -> Result<(), u8> {
-    sleep(*time).await;
+    // sleep(*time).await;
+    Timer::after(*time).await;
     Err(0)
 }
 async fn try_communicate(socket: &UdpSocket, remote_addr: SocketAddr) -> Result<SocketAddr, u8> {
@@ -515,14 +523,16 @@ async fn try_communicate(socket: &UdpSocket, remote_addr: SocketAddr) -> Result<
         eprintln!("Unable to send first message: {:?}", send_result);
         return Err(2);
     }
-    sleep(Duration::from_millis(1)).await;
+    // sleep(Duration::from_millis(1)).await;
+    Timer::after(Duration::from_millis(1)).await;
     buf[0] = 1;
     let send_result = socket.send_to(&buf, remote_addr).await;
     if send_result.is_err() {
         eprintln!("Unable to send second message: {:?}", send_result);
         return Err(1);
     }
-    sleep(Duration::from_millis(10)).await;
+    // sleep(Duration::from_millis(10)).await;
+    Timer::after(Duration::from_millis(10)).await;
     buf[0] = 0;
     let send_result = socket.send_to(&buf, remote_addr).await;
     if send_result.is_err() {
@@ -573,7 +583,8 @@ async fn probe_socket(
     for i in (1..10).rev() {
         let _ = socket.send_to(&[i as u8], remote_addr).await;
         // eprint!("{} ", i);
-        sleep(sleep_time).await;
+        // sleep(sleep_time).await;
+        Timer::after(sleep_time).await;
     }
     let mut socket_found = false;
     let mut timed_out = false;
@@ -671,7 +682,7 @@ pub async fn punch_it(
         other_settings.pub_ip, other_settings.pub_port
     );
     let (sender, reciever) = channel();
-    spawn(probe_socket(socket, remote_adr, sender.clone()));
+    spawn(probe_socket(socket, remote_adr, sender.clone())).detach();
     let mut dedicated_socket: Option<UdpSocket> = None;
     let mut responsive_socket_result;
     let retries_count_start = 6u8;
@@ -696,7 +707,7 @@ pub async fn punch_it(
                     remote_adr =
                         other_settings.get_predicted_addr(retries_count_start - retries_remaining);
                     // remote_adr.set_port(next_port);
-                    spawn(probe_socket(socket, remote_adr, sender.clone()));
+                    spawn(probe_socket(socket, remote_adr, sender.clone())).detach();
                     retries_remaining -= 1;
                 } else {
                     break;
@@ -716,7 +727,8 @@ pub async fn punch_it(
                 // println!("Receiver error: {:?}", e);
             }
         }
-        sleep(punch_interval).await;
+        // sleep(punch_interval).await;
+        Timer::after(punch_interval).await;
     }
     drop(reciever);
     // if dedicated_socket.is_none() {
@@ -751,7 +763,7 @@ pub async fn cluster_punch_it(
     let (send, recv) = channel();
     for i in 0..my_count {
         if let Ok(a_socket) = UdpSocket::bind((my_ip, my_port_min + i)).await {
-            spawn(probe_socket(a_socket, (his_ip, his_current), send.clone()));
+            spawn(probe_socket(a_socket, (his_ip, his_current), send.clone())).detach();
             his_current += his_step;
             if his_current > his_port_max {
                 his_current = his_port_min;
@@ -768,18 +780,19 @@ pub async fn cluster_punch_it(
     let sleep_duration = Duration::from_millis(50);
     let mut dedicated_socket = None;
     let (t_send, timeout) = channel();
-    spawn(time_out(timeout_sec, Some(t_send)));
+    spawn(time_out(timeout_sec, Some(t_send))).detach();
     while timeout.try_recv().is_err() {
         let recv_result = recv.try_recv();
         if recv_result.is_err() {
-            sleep(sleep_duration).await;
+            // sleep(sleep_duration).await;
+            Timer::after(sleep_duration).await;
             continue;
         }
         match recv_result {
             Ok((socket, None)) => {
                 let local_port = socket.local_addr().unwrap().port();
                 let mut his_next = next_remote_port.remove(&local_port).unwrap();
-                spawn(probe_socket(socket, (his_ip, his_next), send.clone()));
+                spawn(probe_socket(socket, (his_ip, his_next), send.clone())).detach();
                 his_next += his_step;
                 if his_next > his_port_max {
                     his_next = his_port_min;
@@ -1001,6 +1014,7 @@ pub async fn start_communication(
         // pipes_sender.clone(),
         // encr,
         id_pub_key_pem,
-    ));
+    ))
+    .detach();
     // resp_receiver
 }

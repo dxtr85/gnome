@@ -1,6 +1,7 @@
 // use aes_gcm::aead::Buffer;
-use async_std::net::UdpSocket;
+// use async_std::net::UdpSocket;
 use rand::random;
+use smol::net::UdpSocket;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 // TODO:
 // - retrieve a list of stun servers (first use a fixed address or two)
