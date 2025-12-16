@@ -207,10 +207,10 @@ pub async fn run_networking_tasks(
             Requestor::Udp,
         ));
     };
-    eprintln!("one");
+    // eprintln!("one");
     // IPv6
     if let Ok(listener) = ipv6_tcp_bind_result {
-        eprintln!("one in");
+        // eprintln!("one in");
         // let mut my_names = vec![];
         // sub_recv_one =
         //     collect_subscribed_swarm_names(&mut my_names, sub_send_two.clone(), sub_recv_one).await;
@@ -240,7 +240,7 @@ pub async fn run_networking_tasks(
             Requestor::Tcpv6,
         ));
     }
-    eprintln!("two");
+    // eprintln!("two");
     if let Ok(socket) = ipv6_bind_result {
         eprintln!("HEVE bind resuls6: OK");
         let c_ex = executor.clone();
@@ -291,7 +291,7 @@ pub async fn run_networking_tasks(
     // if we_are_behind_nat {
     // In case we are behind a NAT we need to run direct_punch and holepunch
     // Both of those services need a sophisticated procedure for connection establishment.
-    eprintln!("spwaning dps");
+    // eprintln!("spwaning dps");
     let c_ex = executor.clone();
     executor
         .spawn(direct_punching_service(

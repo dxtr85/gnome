@@ -10,8 +10,10 @@ use a_swarm_consensus::CastData;
 use a_swarm_consensus::Policy;
 use a_swarm_consensus::Requirement;
 use smol::spawn;
+use smol::Executor;
 use smol::Timer;
 use std::collections::VecDeque;
+use std::sync::Arc;
 // use std::hash::{DefaultHasher, Hash, Hasher};
 use crate::networking::Nat;
 use crate::networking::NetworkSettings;
@@ -238,6 +240,7 @@ impl Manager {
     //
     pub async fn do_your_job(
         mut self,
+        executor: Arc<Executor<'_>>,
         bandwidth_per_swarm: u64,
         // req_receiver: Receiver<ToGnomeManager>,
         // resp_sender: Sender<FromGnomeManager>,
@@ -352,9 +355,13 @@ impl Manager {
                             eprintln!("No pairs found in neighboring swarms");
                         }
                         eprintln!("Joining {}… ", swarm_name,);
-                        if let Ok((swarm_id, (user_req, user_res))) =
-                            self.join_a_swarm(swarm_name.clone(), bandwidth_per_swarm, None, None)
-                        {
+                        if let Ok((swarm_id, (user_req, user_res))) = self.join_a_swarm(
+                            executor.clone(),
+                            swarm_name.clone(),
+                            bandwidth_per_swarm,
+                            None,
+                            None,
+                        ) {
                             // Start a timer for a few seconds.
                             // When it ends Mgr checks if it received
                             // ActiveNeighbors message from this new swarm.
@@ -405,6 +412,7 @@ impl Manager {
                             eprintln!("Starting a listening swarm");
                         }
                         if let Ok((swarm_id, (user_req, user_res))) = self.join_a_swarm(
+                            executor.clone(),
                             swarm_name.clone(),
                             bandwidth_per_swarm,
                             neighbor_settings,
@@ -1292,6 +1300,7 @@ impl Manager {
 
     pub fn join_a_swarm(
         &mut self,
+        executor: Arc<Executor<'_>>,
         name: SwarmName,
         assigned_bandwidth: u64,
         neighbor_network_settings: Option<Vec<NetworkSettings>>,
@@ -1446,6 +1455,7 @@ impl Manager {
                 vec![]
             };
             let (sender, receiver) = Swarm::join(
+                executor,
                 name.clone(),
                 // app_sync_hash,
                 swarm_id,

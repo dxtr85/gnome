@@ -184,6 +184,7 @@ pub async fn init(
         Some(filtered_neighbor_settings)
     };
     if let Ok((swarm_id, (user_req, user_res))) = gmgr.join_a_swarm(
+        executor.clone(),
         SwarmName::new(GnomeId::any(), "/".to_string()).unwrap(),
         default_bandwidth_per_swarm,
         filtered_neighbor_settings,
@@ -262,8 +263,9 @@ pub async fn init(
     //       of total bandwith available.
     //       If we are between min and min_off we can stay in this configuration.
     //
+    let c_ex = executor.clone();
     executor
-        .spawn(gmgr.do_your_job(default_bandwidth_per_swarm))
+        .spawn(gmgr.do_your_job(c_ex, default_bandwidth_per_swarm))
         .detach();
     (req_sender, resp_receiver, my_name)
 }
