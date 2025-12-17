@@ -1,3 +1,4 @@
+use smol::channel::unbounded;
 // use async_std::channel as achannel;
 use smol::channel as achannel;
 // use async_std::channel::Receiver as AReceiver;
@@ -33,11 +34,6 @@ use crate::manager::ToGnomeManager;
 use manager::Manager;
 use networking::run_networking_tasks;
 use networking::NetworkSettings;
-use std::sync::mpsc::channel;
-use std::sync::mpsc::Receiver;
-// use a_swarm_consensus::NotificationBundle;
-// use a_swarm_consensus::Request;
-// use a_swarm_consensus::Response;
 
 pub mod prelude {
     pub use crate::crypto::sha_hash;
@@ -183,13 +179,16 @@ pub async fn init(
     } else {
         Some(filtered_neighbor_settings)
     };
-    if let Ok((swarm_id, (user_req, user_res))) = gmgr.join_a_swarm(
-        executor.clone(),
-        SwarmName::new(GnomeId::any(), "/".to_string()).unwrap(),
-        default_bandwidth_per_swarm,
-        filtered_neighbor_settings,
-        None,
-    ) {
+    if let Ok((swarm_id, (user_req, user_res))) = gmgr
+        .join_a_swarm(
+            executor.clone(),
+            SwarmName::new(GnomeId::any(), "/".to_string()).unwrap(),
+            default_bandwidth_per_swarm,
+            filtered_neighbor_settings,
+            None,
+        )
+        .await
+    {
         let _ = resp_sender
             .send(FromGnomeManager::MyName(my_name.clone()))
             .await;
@@ -279,11 +278,11 @@ pub fn create_manager_and_receiver(
     decrypter: Decrypter,
     (req_sender, req_receiver): (ASender<ToGnomeManager>, AReceiver<ToGnomeManager>),
     resp_sender: ASender<FromGnomeManager>,
-) -> (Manager, Receiver<Notification>) {
-    let (networking_sender, networking_receiver) = channel();
+) -> (Manager, AReceiver<Notification>) {
+    let (networking_sender, networking_receiver) = unbounded();
     // let network_settings = None;
     // let mgr = start(gnome_id, network_settings, networking_sender);
-    let (sender, receiver) = channel();
+    let (sender, receiver) = unbounded();
     executor
         .spawn(serve_gnome_requests(receiver, req_sender.clone()))
         .detach();
@@ -303,18 +302,18 @@ pub fn create_manager_and_receiver(
 }
 
 async fn serve_gnome_requests(
-    from_gnome: Receiver<GnomeToManager>,
+    from_gnome: AReceiver<GnomeToManager>,
     to_manager: ASender<ToGnomeManager>,
 ) {
-    let recv_timeout = Duration::from_millis(8);
-    loop {
-        if let Ok(request) = from_gnome.recv_timeout(recv_timeout) {
-            let _ = to_manager.send(ToGnomeManager::FromGnome(request)).await;
-        } else {
-            // sleep(recv_timeout).await
-            Timer::after(recv_timeout).await;
-        }
+    // let recv_timeout = Duration::from_millis(8);
+    // loop {
+    while let Ok(request) = from_gnome.recv().await {
+        let _ = to_manager.send(ToGnomeManager::FromGnome(request)).await;
+        // } else {
+        //     // sleep(recv_timeout).await
+        //     Timer::after(recv_timeout).await;
     }
+    // }
 }
 // async fn activate_gnome(
 //     // _gnome_id: GnomeId,

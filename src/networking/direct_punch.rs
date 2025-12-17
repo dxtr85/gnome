@@ -11,17 +11,15 @@ use crate::networking::{
     holepunch::{punch_it, start_communication},
     subscription::Subscription,
 };
-// use async_std::channel::Sender as ASender;
-use smol::channel::Sender as ASender;
+use smol::channel::{unbounded, Sender as ASender};
 // use crate::GnomeId;
 use crate::networking::{Nat, NetworkSettings, PortAllocationRule, Transport as GTransport};
 // use async_std::net::UdpSocket;
 use a_swarm_consensus::{GnomeId, SwarmName, ToGnome};
 use smol::net::UdpSocket;
-use smol::{Executor, Timer};
+use smol::{channel::Receiver as AReceiver, Executor, Timer};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,10 +27,10 @@ pub async fn direct_punching_service(
     executor: Arc<Executor<'_>>,
     to_gmgr: ASender<ToGnomeManager>,
     _server_port: u16,
-    subscription_sender: Sender<Subscription>,
+    subscription_sender: ASender<Subscription>,
     decrypter: Decrypter,
     // token_endpoints_sender: Sender<(Sender<Token>, Receiver<Token>)>,
-    swarm_endpoints_receiver: Receiver<(SwarmName, Sender<ToGnome>, Receiver<Vec<u8>>)>,
+    swarm_endpoints_receiver: AReceiver<(SwarmName, ASender<ToGnome>, AReceiver<Vec<u8>>)>,
     pub_key_pem: String,
 ) {
     eprintln!("Waiting for direct connect requests.");
@@ -65,10 +63,10 @@ pub async fn direct_punching_service(
     // Then we receive trough settings_result external ip and port
     // of joining party and use our predicted ip and port to connect to it.
 
-    let mut swarms: HashMap<SwarmName, (Sender<ToGnome>, Receiver<Vec<u8>>)> =
+    let mut swarms: HashMap<SwarmName, (ASender<ToGnome>, AReceiver<Vec<u8>>)> =
         HashMap::with_capacity(10);
-    let (send_other_network_settings, recv_other_network_settings) = channel();
-    let (send_my_network_settings, recv_my_network_settings) = channel();
+    let (send_other_network_settings, recv_other_network_settings) = unbounded();
+    let (send_my_network_settings, recv_my_network_settings) = unbounded();
     // TODO: maybe only run it when it makes sense?
     executor
         .spawn(socket_maintainer(
@@ -83,15 +81,14 @@ pub async fn direct_punching_service(
             recv_other_network_settings,
         ))
         .detach();
-    // println!("after sm spawn");
 
     let mut waiting_for_my_settings = false;
-    let mut send_to_gnome: Option<Sender<ToGnome>> = None;
+    let mut send_to_gnome: Option<ASender<ToGnome>> = None;
     let sleep_time = Duration::from_millis(16);
     let mut loop_counter: u8 = 0;
     loop {
         loop_counter = loop_counter.wrapping_add(1);
-        // print!("dps");
+        // eprintln!("dps swarms: {}", swarms.len());
         if let Ok((swarm_name, to_gnome_sender, net_set_recv)) = swarm_endpoints_receiver.try_recv()
         {
             // eprintln!("DPunch received channels for {}", swarm_name);
@@ -106,7 +103,9 @@ pub async fn direct_punching_service(
                     // eprintln!("Maybe should also send those to TCP?");
                     // // if other_settings.no_nat()
                     // ns_to_gmgr.push(other_settings.clone());
-                    let _ = send_other_network_settings.send((swarm_name.clone(), other_settings));
+                    let _ = send_other_network_settings
+                        .send((swarm_name.clone(), other_settings))
+                        .await;
                     // eprintln!("DPunch waiting for my settings: TRUE");
                     waiting_for_my_settings = true;
                     send_to_gnome = Some(to_gnome_sender.clone());
@@ -159,12 +158,12 @@ async fn socket_maintainer(
     _to_gmgr: ASender<ToGnomeManager>,
     pub_key_pem: String,
     // gnome_id: GnomeId,
-    subscription_sender: Sender<Subscription>,
+    subscription_sender: ASender<Subscription>,
     decrypter: Decrypter,
     // token_endpoints_sender: Sender<(Sender<Token>, Receiver<Token>)>,
-    my_network_settings_sender: Sender<NetworkSettings>,
+    my_network_settings_sender: ASender<NetworkSettings>,
     // other_network_settings_reciever: Receiver<(SwarmName, NetworkSettings)>,
-    other_network_settings_reciever: Receiver<(SwarmName, Vec<u8>)>,
+    other_network_settings_reciever: AReceiver<(SwarmName, Vec<u8>)>,
 ) {
     //TODO: Right now we only support communication over IPv4
     // since bind_addr is an IPv4 address.
@@ -232,7 +231,7 @@ async fn socket_maintainer(
                                     transport: GTransport::UDPoverIP6,
                                 };
                                 eprintln!("My IPv6 addr: {:?}", our_addr.ip());
-                                let _ = my_network_settings_sender.send(my_ipv6_settings);
+                                let _ = my_network_settings_sender.send(my_ipv6_settings).await;
                             } else {
                                 eprintln!(
                                     "Failed to receive back STUN response via IPv6: {:?}",
@@ -245,7 +244,7 @@ async fn socket_maintainer(
                                     port_allocation: (PortAllocationRule::FullCone, 0),
                                     transport: GTransport::UDPoverIP6,
                                 };
-                                let _ = my_network_settings_sender.send(my_ipv6_settings);
+                                let _ = my_network_settings_sender.send(my_ipv6_settings).await;
                             }
                             // let my_addr = socket.local_addr().unwrap();
                             // let my_ipv6_settings = NetworkSettings {
@@ -280,7 +279,7 @@ async fn socket_maintainer(
                                 port_allocation: (PortAllocationRule::FullCone, 0),
                                 transport: GTransport::UDPoverIP6,
                             };
-                            let _ = my_network_settings_sender.send(my_ipv6_settings);
+                            let _ = my_network_settings_sender.send(my_ipv6_settings).await;
                         }
                     } else if other_settings.transport == GTransport::TCPoverIP6 {
                         //TODO: run TCP client here
@@ -304,7 +303,7 @@ async fn socket_maintainer(
                                     transport: GTransport::UDPoverIP6,
                                 };
                                 eprintln!("My IPv6 addr: {:?}", our_addr.ip());
-                                let _ = my_network_settings_sender.send(my_ipv6_settings);
+                                let _ = my_network_settings_sender.send(my_ipv6_settings).await;
                             } else {
                                 eprintln!(
                                     "Failed to receive back STUN response via IPv6: {:?}",
@@ -317,7 +316,7 @@ async fn socket_maintainer(
                                     port_allocation: (PortAllocationRule::FullCone, 0),
                                     transport: GTransport::UDPoverIP6,
                                 };
-                                let _ = my_network_settings_sender.send(my_ipv6_settings);
+                                let _ = my_network_settings_sender.send(my_ipv6_settings).await;
                             }
                             // let my_addr = socket.local_addr().unwrap();
                             // let my_ipv6_settings = NetworkSettings {
@@ -353,7 +352,7 @@ async fn socket_maintainer(
                                 port_allocation: (PortAllocationRule::FullCone, 0),
                                 transport: GTransport::UDPoverIP6,
                             };
-                            let _ = my_network_settings_sender.send(my_ipv6_settings);
+                            let _ = my_network_settings_sender.send(my_ipv6_settings).await;
                         }
                         eprintln!("We should run an IPv6 TCP client for {:?}", other_settings);
                         let encr = Encrypter::create_from_data(&pub_key_pem).unwrap();
@@ -381,7 +380,7 @@ async fn socket_maintainer(
                         eprintln!("Unexpected transport: {:?}", other_settings.transport);
                     }
                 } else if other_settings.transport == GTransport::UDPoverIP4 {
-                    let _ = my_network_settings_sender.send(my_settings);
+                    let _ = my_network_settings_sender.send(my_settings).await;
                     let c_ex = executor.clone();
                     executor
                         .spawn(punch_and_communicate(
@@ -465,7 +464,7 @@ async fn punch_and_communicate(
     bind_addr: (IpAddr, u16),
     pub_key_pem: String,
     // to_gmgr: ASender<ToGnomeManager>,
-    sub_sender: Sender<Subscription>,
+    sub_sender: ASender<Subscription>,
     decrypter: Decrypter,
     // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,

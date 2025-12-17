@@ -5,7 +5,6 @@ use crate::data_conversion::bytes_to_cast_message;
 use crate::data_conversion::bytes_to_message;
 use crate::data_conversion::bytes_to_neighbor_request;
 use crate::data_conversion::bytes_to_neighbor_response;
-// use async_std::io::ReadExt;
 use a_swarm_consensus::CastID;
 use a_swarm_consensus::CastType;
 use a_swarm_consensus::NeighborRequest;
@@ -18,9 +17,11 @@ use futures::{
     pin_mut,
     select,
 };
+use smol::channel::unbounded;
+use smol::channel::Receiver as AReceiver;
+use smol::channel::Sender as ASender;
 use smol::io::AsyncReadExt as ReadExt;
 use std::collections::HashMap;
-use std::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::networking::subscription::Subscription;
 // use async_std::net::TcpStream;
@@ -30,28 +31,28 @@ pub async fn serve_socket(
     session_key: SessionKey,
     mut stream: TcpStream,
     send_recv_pairs: Vec<(
-        Sender<Message>,
-        Sender<CastMessage>,
-        Receiver<WrappedMessage>,
+        ASender<Message>,
+        ASender<CastMessage>,
+        AReceiver<WrappedMessage>,
     )>,
     // token_sender: Sender<Token>,
     // token_reciever: Receiver<Token>,
-    sub_sender: Sender<Subscription>,
-    shared_sender: Sender<(
+    sub_sender: ASender<Subscription>,
+    shared_sender: ASender<(
         SwarmName,
-        Sender<Message>,
-        Sender<CastMessage>,
-        Receiver<WrappedMessage>,
+        ASender<Message>,
+        ASender<CastMessage>,
+        AReceiver<WrappedMessage>,
     )>,
-    extend_receiver: Receiver<(
+    extend_receiver: AReceiver<(
         SwarmName,
-        Sender<Message>,
-        Sender<CastMessage>,
-        Receiver<WrappedMessage>,
+        ASender<Message>,
+        ASender<CastMessage>,
+        AReceiver<WrappedMessage>,
     )>,
 ) {
-    let mut senders: HashMap<u8, (Sender<Message>, Sender<CastMessage>)> = HashMap::new();
-    let mut receivers: HashMap<u8, Receiver<WrappedMessage>> = HashMap::new();
+    let mut senders: HashMap<u8, (ASender<Message>, ASender<CastMessage>)> = HashMap::new();
+    let mut receivers: HashMap<u8, AReceiver<WrappedMessage>> = HashMap::new();
     let mut out_of_order_recvd = HashMap::new();
     // let min_tokens_threshold: u64 = 1500;
     // let available_tokens: u64 = min_tokens_threshold;
@@ -118,11 +119,13 @@ pub async fn serve_socket(
             }
             if let Some((id, msg)) = out_of_order_recvd.remove(&new_id) {
                 if let Some((_snd, c_snd)) = senders.get(&new_id) {
-                    let _res = c_snd.send(CastMessage {
-                        c_type: CastType::Unicast,
-                        id,
-                        content: CastContent::Request(msg),
-                    });
+                    let _res = c_snd
+                        .send(CastMessage {
+                            c_type: CastType::Unicast,
+                            id,
+                            content: CastContent::Request(msg),
+                        })
+                        .await;
                     eprintln!("TCP Sending delayed request -> {:?}", _res);
                 }
             }
@@ -215,7 +218,7 @@ pub async fn serve_socket(
             }
             // TODO: should end serving this socket
             for (sender, _c_snd) in senders.values() {
-                let _send_result = sender.send(Message::bye());
+                let _send_result = sender.send(Message::bye()).await;
             }
             break;
             // } else {
@@ -296,7 +299,7 @@ pub async fn serve_socket(
                         // println!("received a regular message: {:?}", deciphered);
                         if let Ok(message) = bytes_to_message(deciph) {
                             // eprintln!("decode OK: {:?}", message);
-                            let _send_result = sender.send(message);
+                            let _send_result = sender.send(message).await;
                             if _send_result.is_err() {
                                 // TODO: if failed maybe we are no longer interested?
                                 // Maybe send back a bye if possible?
@@ -316,7 +319,7 @@ pub async fn serve_socket(
                                 let n_req = bytes_to_neighbor_request(deciph);
                                 let message = CastMessage::new_request(n_req);
                                 // eprintln!("Decr req: {:?}", message);
-                                let _send_result = cast_sender.send(message);
+                                let _send_result = cast_sender.send(message).await;
                                 if _send_result.is_err() {
                                     sender_to_drop = Some(swarm_id);
                                     eprintln!(
@@ -332,7 +335,7 @@ pub async fn serve_socket(
                                 let message = CastMessage::new_response(n_resp);
                                 // eprintln!("Decr resp: {:?}", message);
                                 // eprintln!("Socket sending {:?} up…", message.content);
-                                let _send_result = cast_sender.send(message);
+                                let _send_result = cast_sender.send(message).await;
                                 if _send_result.is_err() {
                                     sender_to_drop = Some(swarm_id);
                                     eprintln!(
@@ -344,7 +347,7 @@ pub async fn serve_socket(
                             _ => {
                                 if let Ok(message) = bytes_to_cast_message(&deciph) {
                                     // eprintln!("tcp Decr other: {:?}", message);
-                                    let _send_result = cast_sender.send(message);
+                                    let _send_result = cast_sender.send(message).await;
                                     if _send_result.is_err() {
                                         sender_to_drop = Some(swarm_id);
                                         // TODO: if failed maybe we are no longer interested?
@@ -359,7 +362,7 @@ pub async fn serve_socket(
                         //     println!("Failed to decode incoming stream");
                     } else if let Ok(message) = bytes_to_cast_message(&deciph) {
                         // eprintln!("tcp Decr other2: {:?}", message);
-                        let _send_result = cast_sender.send(message);
+                        let _send_result = cast_sender.send(message).await;
                         if _send_result.is_err() {
                             sender_to_drop = Some(swarm_id);
                             // TODO: if failed maybe we are no longer interested?
@@ -393,16 +396,18 @@ pub async fn serve_socket(
                                 remote_gnome_id, swarm_id, swarm_name
                             );
                             new_channel_mappings.insert(swarm_id, swarm_name.clone());
-                            let (s1, r1) = channel();
-                            let (s2, r2) = channel();
-                            let (s3, r3) = channel();
+                            let (s1, r1) = unbounded();
+                            let (s2, r2) = unbounded();
+                            let (s3, r3) = unbounded();
                             if let Some((id, msg)) = out_of_order_recvd.remove(&swarm_id) {
                                 // for (id, msg) in msgs.into_iter() {
-                                let _ = s2.send(CastMessage {
-                                    c_type: CastType::Unicast,
-                                    id,
-                                    content: CastContent::Request(msg),
-                                });
+                                let _ = s2
+                                    .send(CastMessage {
+                                        c_type: CastType::Unicast,
+                                        id,
+                                        content: CastContent::Request(msg),
+                                    })
+                                    .await;
                                 // }
                             }
                             let neighbor = Neighbor::from_id_channel_time(
@@ -415,7 +420,7 @@ pub async fn serve_socket(
                                 SwarmTime(7),
                                 vec![],
                             );
-                            let _ = shared_sender.send((swarm_name.clone(), s1, s2, r3));
+                            let _ = shared_sender.send((swarm_name.clone(), s1, s2, r3)).await;
 
                             // TODO: we need to pass this neighbor up
                             // eprintln!(
@@ -423,7 +428,8 @@ pub async fn serve_socket(
                             //     neighbor.id, swarm_name
                             // );
                             let _ = sub_sender
-                                .send(Subscription::IncludeNeighbor(swarm_name, neighbor));
+                                .send(Subscription::IncludeNeighbor(swarm_name, neighbor))
+                                .await;
                         }
                         other => {
                             eprintln!(

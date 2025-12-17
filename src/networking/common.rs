@@ -8,6 +8,9 @@ use crate::networking::subscription::Subscription;
 // use async_std::net::{IpAddr, Ipv4Addr, UdpSocket};
 // use async_std::task;
 // use async_std::task::{sleep, yield_now};
+use smol::channel::unbounded;
+use smol::channel::Receiver as AReceiver;
+use smol::channel::Sender as ASender;
 use smol::future::yield_now;
 use smol::net::{IpAddr, Ipv4Addr, UdpSocket};
 use smol::Timer;
@@ -26,7 +29,6 @@ use futures::{
 };
 use std::cmp::min;
 use std::net::SocketAddr;
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
 
 use super::subscription::Requestor;
@@ -34,11 +36,11 @@ use super::subscription::Requestor;
 pub async fn collect_subscribed_swarm_names(
     names: &mut Vec<SwarmName>,
     requestor: Requestor,
-    sender: Sender<Subscription>,
-    receiver: Receiver<Subscription>,
-) -> Receiver<Subscription> {
+    sender: ASender<Subscription>,
+    receiver: AReceiver<Subscription>,
+) -> AReceiver<Subscription> {
     // eprintln!("Collecting swarm names...");
-    let _ = sender.send(Subscription::ProvideList(requestor));
+    let _ = sender.send(Subscription::ProvideList(requestor)).await;
     let sleep_time = Duration::from_millis(128);
     loop {
         if let Ok(subs_msg) = receiver.try_recv() {
@@ -230,21 +232,21 @@ pub async fn receive_remote_swarm_names(
 // connected through. A Gnome should notify a Manager or User about a new Neighbor
 // that has been connected.
 //
-pub fn create_a_neighbor_for_each_swarm(
+pub async fn create_a_neighbor_for_each_swarm(
     common_names: Vec<SwarmName>,
     remote_names: Vec<SwarmName>,
-    sender: Sender<Subscription>,
+    sender: ASender<Subscription>,
     remote_gnome_id: GnomeId,
     ch_pairs: &mut Vec<(
-        Sender<Message>,
-        Sender<CastMessage>,
-        Receiver<WrappedMessage>,
+        ASender<Message>,
+        ASender<CastMessage>,
+        AReceiver<WrappedMessage>,
     )>,
-    shared_sender: Sender<(
+    shared_sender: ASender<(
         SwarmName,
-        Sender<Message>,
-        Sender<CastMessage>,
-        Receiver<WrappedMessage>,
+        ASender<Message>,
+        ASender<CastMessage>,
+        AReceiver<WrappedMessage>,
     )>,
     // encrypter: Encrypter,
     _pub_key_pem: String,
@@ -255,9 +257,9 @@ pub fn create_a_neighbor_for_each_swarm(
     }
     // println!("komon names: {:?}", common_names);
     for name in common_names {
-        let (s1, r1) = channel();
-        let (s2, r2) = channel();
-        let (s3, r3) = channel();
+        let (s1, r1) = unbounded();
+        let (s2, r2) = unbounded();
+        let (s3, r3) = unbounded();
         let neighbor = Neighbor::from_id_channel_time(
             remote_gnome_id,
             r1,
@@ -270,7 +272,9 @@ pub fn create_a_neighbor_for_each_swarm(
             // pub_key_pem.clone(),
         );
         eprintln!("Request include {} to {}", neighbor.id, name);
-        let _ = sender.send(Subscription::IncludeNeighbor(name, neighbor));
+        let _ = sender
+            .send(Subscription::IncludeNeighbor(name, neighbor))
+            .await;
         ch_pairs.push((s1, s2, r3));
     }
 }
@@ -470,7 +474,7 @@ async fn receive_response(socket: &UdpSocket) -> StunMessage {
     response
 }
 
-pub async fn time_out(mut time: Duration, sender: Option<Sender<()>>) {
+pub async fn time_out(mut time: Duration, sender: Option<ASender<()>>) {
     let time_step = Duration::from_millis(100);
     while time > Duration::ZERO {
         // print!(".");
@@ -480,7 +484,7 @@ pub async fn time_out(mut time: Duration, sender: Option<Sender<()>>) {
     }
     // println!("timed out");
     if let Some(sender) = sender {
-        let _ = sender.send(());
+        let _ = sender.send(()).await;
     }
 }
 
@@ -715,7 +719,7 @@ pub async fn discover_network_settings(socket: &mut UdpSocket) -> NetworkSetting
 
 //TODO: drop receiver on error
 pub async fn read_bytes_from_local_stream(
-    receivers: &mut HashMap<u8, Receiver<WrappedMessage>>,
+    receivers: &mut HashMap<u8, AReceiver<WrappedMessage>>,
 ) -> Result<Vec<u8>, String> {
     // println!("read_bytes_from_local_stream");
     let sleep_time = Duration::from_micros(100);
@@ -774,7 +778,7 @@ pub async fn read_bytes_from_local_stream(
             } else {
                 let err = next_option.err().unwrap();
                 match err {
-                    std::sync::mpsc::TryRecvError::Disconnected => {
+                    smol::channel::TryRecvError::Closed => {
                         to_drop.push(*id);
                     }
                     _other => {

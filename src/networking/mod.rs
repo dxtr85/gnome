@@ -26,13 +26,14 @@ use crate::crypto::Decrypter;
 // use async_std::net::TcpListener;
 // use async_std::net::UdpSocket;
 use a_swarm_consensus::{GnomeId, SwarmName, ToGnome};
+use smol::channel::unbounded;
+use smol::channel::Receiver as AReceiver;
 use smol::channel::Sender;
 use smol::net::TcpListener;
 use smol::net::UdpSocket;
 use smol::Executor;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::mpsc::{channel, Receiver, Sender as SSender};
 use std::sync::Arc;
 use subscription::Requestor;
 // use swarm_consensus::{GnomeToManager, Notification, NotificationBundle};
@@ -44,10 +45,10 @@ pub enum Notification {
 }
 pub struct NotificationBundle {
     pub swarm_name: SwarmName,
-    pub request_sender: SSender<ToGnome>,
+    pub request_sender: Sender<ToGnome>,
     // pub token_sender: Sender<u64>,
     // pub network_settings_receiver: Receiver<NetworkSettings>,
-    pub network_settings_receiver: Receiver<Vec<u8>>,
+    pub network_settings_receiver: AReceiver<Vec<u8>>,
 }
 // #[derive(Debug)]
 // enum ConnError {
@@ -70,7 +71,7 @@ pub async fn run_networking_tasks(
     server_port: u16,
     // buffer_size_bytes: u64,
     // uplink_bandwith_bytes_sec: u64,
-    notification_receiver: Receiver<Notification>,
+    notification_receiver: AReceiver<Notification>,
     decrypter: Decrypter,
     pub_key_pem: String,
 ) {
@@ -82,15 +83,16 @@ pub async fn run_networking_tasks(
     let ipv6_bind_result = UdpSocket::bind(ipv6_server_addr).await;
     let tcp_bind_result = TcpListener::bind(server_addr).await;
     let ipv6_tcp_bind_result = TcpListener::bind(ipv6_server_addr).await;
-    let (sub_send_one, mut sub_recv_one) = channel();
-    let (sub_send_one_bis, sub_recv_one_bis) = channel();
-    let (sub_send_one_cis, sub_recv_one_cis) = channel();
-    let (sub_send_one_dis, sub_recv_one_dis) = channel();
-    let (sub_send_two, sub_recv_two) = channel();
+    let (sub_send_one, mut sub_recv_one) = unbounded();
+    let (sub_send_one_bis, sub_recv_one_bis) = unbounded();
+    let (sub_send_one_cis, sub_recv_one_cis) = unbounded();
+    let (sub_send_one_dis, sub_recv_one_dis) = unbounded();
+    let (sub_send_two, sub_recv_two) = unbounded();
     // let (token_dispenser_send, token_dispenser_recv) = channel();
-    let (holepunch_sender, _holepunch_receiver) = channel();
+    let (holepunch_sender, _holepunch_receiver) = unbounded();
     // let (token_pipes_sender, token_pipes_receiver) = channel();
-    let (send_pair, recv_pair) = channel();
+    let (send_pair, recv_pair) = unbounded();
+    // channel();
     // eprintln!("spawn token_dispenser");
     // executor.spawn(token_dispenser(
     //     buffer_size_bytes,
@@ -117,6 +119,7 @@ pub async fn run_networking_tasks(
     // if sub_sends.is_empty() {
     //     sub_sends.insert(Requestor::Udp, sub_send_one);
     // }
+    eprintln!("before spawn subscriber");
     executor
         .spawn(subscriber(
             to_gmgr.clone(),
@@ -173,17 +176,21 @@ pub async fn run_networking_tasks(
             ))
             .detach();
         eprintln!("Run TCP server with swarm names AFTER");
-        let _ = sub_send_two.send(subscription::Subscription::TransportAvailable(
-            Requestor::Tcp,
-        ));
+        let _ = sub_send_two
+            .send(subscription::Subscription::TransportAvailable(
+                Requestor::Tcp,
+            ))
+            .await;
     } else {
         eprintln!(
             "Failed to bind socket: {:?}",
             tcp_bind_result.err().unwrap()
         );
-        let _ = sub_send_two.send(subscription::Subscription::TransportNotAvailable(
-            Requestor::Tcp,
-        ));
+        let _ = sub_send_two
+            .send(subscription::Subscription::TransportNotAvailable(
+                Requestor::Tcp,
+            ))
+            .await;
     }
     if let Ok(socket) = bind_result {
         eprintln!("HAVE bind result OK");
@@ -198,19 +205,23 @@ pub async fn run_networking_tasks(
                 pub_key_pem.clone(),
             ))
             .detach();
-        let _ = sub_send_two.send(subscription::Subscription::TransportAvailable(
-            Requestor::Udp,
-        ));
+        let _ = sub_send_two
+            .send(subscription::Subscription::TransportAvailable(
+                Requestor::Udp,
+            ))
+            .await;
     } else {
         eprintln!("Failed to bind socket: {:?}", bind_result.err().unwrap());
-        let _ = sub_send_two.send(subscription::Subscription::TransportNotAvailable(
-            Requestor::Udp,
-        ));
+        let _ = sub_send_two
+            .send(subscription::Subscription::TransportNotAvailable(
+                Requestor::Udp,
+            ))
+            .await;
     };
-    // eprintln!("one");
+    eprintln!("one1");
     // IPv6
     if let Ok(listener) = ipv6_tcp_bind_result {
-        // eprintln!("one in");
+        eprintln!("one1 in");
         // let mut my_names = vec![];
         // sub_recv_one =
         //     collect_subscribed_swarm_names(&mut my_names, sub_send_two.clone(), sub_recv_one).await;
@@ -228,17 +239,21 @@ pub async fn run_networking_tasks(
             ))
             .detach();
         eprintln!("Run TCP server with swarm names:2AFTER");
-        let _ = sub_send_two.send(subscription::Subscription::TransportAvailable(
-            Requestor::Tcpv6,
-        ));
+        let _ = sub_send_two
+            .send(subscription::Subscription::TransportAvailable(
+                Requestor::Tcpv6,
+            ))
+            .await;
     } else {
         eprintln!(
             "Failed to bind IPv6 TCP socket: {:?}",
             ipv6_tcp_bind_result.err().unwrap()
         );
-        let _ = sub_send_two.send(subscription::Subscription::TransportNotAvailable(
-            Requestor::Tcpv6,
-        ));
+        let _ = sub_send_two
+            .send(subscription::Subscription::TransportNotAvailable(
+                Requestor::Tcpv6,
+            ))
+            .await;
     }
     // eprintln!("two");
     if let Ok(socket) = ipv6_bind_result {
@@ -254,17 +269,21 @@ pub async fn run_networking_tasks(
                 pub_key_pem.clone(),
             ))
             .detach();
-        let _ = sub_send_two.send(subscription::Subscription::TransportAvailable(
-            Requestor::Udpv6,
-        ));
+        let _ = sub_send_two
+            .send(subscription::Subscription::TransportAvailable(
+                Requestor::Udpv6,
+            ))
+            .await;
     } else {
         eprintln!(
             "Failed to bind IPv6 UDP socket: {:?}",
             ipv6_bind_result.err().unwrap()
         );
-        let _ = sub_send_two.send(subscription::Subscription::TransportNotAvailable(
-            Requestor::Udpv6,
-        ));
+        let _ = sub_send_two
+            .send(subscription::Subscription::TransportNotAvailable(
+                Requestor::Udpv6,
+            ))
+            .await;
     };
     //TODO: We need to organize how and which networking services get started.
     // 1. We always need to run basic services like token_dispenser and subscriber.
@@ -293,6 +312,7 @@ pub async fn run_networking_tasks(
     // Both of those services need a sophisticated procedure for connection establishment.
     // eprintln!("spwaning dps");
     let c_ex = executor.clone();
+    eprintln!("About to call direct_punching_service");
     executor
         .spawn(direct_punching_service(
             c_ex,

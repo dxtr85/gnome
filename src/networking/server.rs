@@ -14,18 +14,19 @@ use crate::networking::subscription::Subscription;
 // use async_std::task::spawn;
 use a_swarm_consensus::GnomeId;
 use a_swarm_consensus::SwarmName;
+use smol::channel::Sender as ASender;
+use smol::channel::{unbounded, Receiver as AReceiver};
 use smol::net::UdpSocket;
 use smol::Executor;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
 pub async fn run_server(
     executor: Arc<Executor<'_>>,
     mut socket: UdpSocket,
-    sub_sender: Sender<Subscription>,
-    mut sub_receiver: Receiver<Subscription>,
+    sub_sender: ASender<Subscription>,
+    mut sub_receiver: AReceiver<Subscription>,
     // token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     pub_key_pem: String,
 ) {
@@ -44,13 +45,15 @@ pub async fn run_server(
     eprintln!("My GnomeId: {}", gnome_id);
     let my_network_settings = discover_network_settings(&mut socket).await;
     eprintln!("Distribute from server");
-    let _ = sub_sender.send(Subscription::Distribute(
-        my_network_settings.pub_ip,
-        my_network_settings.pub_port,
-        my_network_settings.nat_type,
-        my_network_settings.port_allocation,
-        Transport::Udp,
-    ));
+    let _ = sub_sender
+        .send(Subscription::Distribute(
+            my_network_settings.pub_ip,
+            my_network_settings.pub_port,
+            my_network_settings.nat_type,
+            my_network_settings.port_allocation,
+            Transport::Udp,
+        ))
+        .await;
     // match my_network_settings.pub_ip {
     //     // let octets =
     //     IpAddr::V4(ip) => {
@@ -305,7 +308,7 @@ async fn prepare_and_serve(
     my_id: GnomeId,
     remote_gnome_id: GnomeId,
     session_key: SessionKey,
-    sub_sender: Sender<Subscription>,
+    sub_sender: ASender<Subscription>,
     swarm_names: Vec<SwarmName>,
     // token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     // encrypter: Encrypter,
@@ -329,7 +332,7 @@ async fn prepare_and_serve(
         &mut remote_names,
     );
 
-    let (shared_sender, swarm_extend_receiver) = channel();
+    let (shared_sender, swarm_extend_receiver) = unbounded();
     let mut ch_pairs = vec![];
     create_a_neighbor_for_each_swarm(
         common_names,
@@ -340,7 +343,8 @@ async fn prepare_and_serve(
         shared_sender.clone(),
         // encrypter,
         pub_key_pem,
-    );
+    )
+    .await;
 
     // let (token_send, token_recv) = channel();
     // let (token_send_two, token_recv_two) = channel();

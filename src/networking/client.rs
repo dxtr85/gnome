@@ -22,20 +22,21 @@ use futures::{
     pin_mut,
     select,
 };
+use smol::channel::unbounded;
+use smol::channel::Sender as ASender;
 use smol::net::UdpSocket;
 use smol::Executor;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
-use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
 pub async fn run_client(
     executor: Arc<Executor<'_>>,
     swarm_names: Vec<SwarmName>,
-    sender: Sender<Subscription>,
+    sender: ASender<Subscription>,
     decrypter: Decrypter,
     // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     pub_key_pem: String,
@@ -99,7 +100,7 @@ pub async fn run_client(
     if try_udp {
         eprintln!("Trying to communicate over UDP with {:?}", send_addr);
         let timeout_sec = Duration::from_secs(1);
-        let (t_send, timeout) = channel();
+        let (t_send, timeout) = unbounded::<()>();
         executor.spawn(time_out(timeout_sec, Some(t_send))).detach();
         while timeout.try_recv().is_err() && !success {
             if swarm_names.is_empty() {
@@ -178,13 +179,15 @@ pub async fn run_client(
         }
         if let Some(settings) = own_nsettings {
             eprintln!("Distribute from client");
-            let _ = sender.send(Subscription::Distribute(
-                settings.pub_ip,
-                settings.pub_port,
-                settings.nat_type,
-                settings.port_allocation,
-                Transport::Udp,
-            ));
+            let _ = sender
+                .send(Subscription::Distribute(
+                    settings.pub_ip,
+                    settings.pub_port,
+                    settings.nat_type,
+                    settings.port_allocation,
+                    Transport::Udp,
+                ))
+                .await;
         }
     } else {
         eprintln!(" TCP ADDR: {:?} {:?}", tcp_addr, swarm_names);
@@ -225,7 +228,7 @@ async fn establish_secure_connection(
     executor: Arc<Executor<'_>>,
     my_id: GnomeId,
     socket: &UdpSocket,
-    sender: Sender<Subscription>,
+    sender: ASender<Subscription>,
     decrypter: Decrypter,
     // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,
@@ -412,7 +415,7 @@ pub async fn prepare_and_serve(
     // remote_gnome_id: GnomeId,
     session_key: SessionKey,
     swarm_names: Vec<SwarmName>,
-    sender: Sender<Subscription>,
+    sender: ASender<Subscription>,
     // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     // encrypter: Encrypter,
     pub_key_pem: String,
@@ -446,7 +449,7 @@ pub async fn prepare_and_serve(
         return;
     }
     // eprintln!("Common swarm names: {:?}", common_names);
-    let (shared_sender, swarm_extend_receiver) = channel();
+    let (shared_sender, swarm_extend_receiver) = unbounded();
 
     let mut ch_pairs = vec![];
     create_a_neighbor_for_each_swarm(
@@ -457,7 +460,8 @@ pub async fn prepare_and_serve(
         &mut ch_pairs,
         shared_sender.clone(),
         pub_key_pem,
-    );
+    )
+    .await;
 
     // spawn a task to serve socket
     // let (token_send, token_recv) = channel();

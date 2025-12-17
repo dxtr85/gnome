@@ -9,6 +9,7 @@ use crate::networking::common::{
 use crate::networking::status::Transport;
 use crate::networking::subscription::Subscription;
 use crate::networking::{Nat, NetworkSettings, PortAllocationRule, Transport as GTransport};
+use smol::channel::{unbounded, Sender as ASender};
 // use async_std::net::UdpSocket;
 // use async_std::task::{sleep, spawn};
 use a_swarm_consensus::{GnomeId, SwarmName};
@@ -17,12 +18,11 @@ use futures::{
     pin_mut,
     select,
 };
+use smol::channel::Receiver as AReceiver;
 use smol::net::UdpSocket;
 use smol::{spawn, Timer};
 use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, SocketAddr};
-use std::sync::mpsc::{channel, TryRecvError};
-use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
 // let puncher = "tudbut.de:4277";
@@ -50,10 +50,10 @@ use std::time::Duration;
 // or some other mean to receive a neighbor's socket address.
 pub async fn holepunch(
     puncher: SocketAddr,
-    sub_sender: Sender<Subscription>,
+    sub_sender: ASender<Subscription>,
     decrypter: Decrypter,
-    pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
-    receiver: Receiver<SwarmName>,
+    pipes_sender: ASender<(ASender<Token>, AReceiver<Token>)>,
+    receiver: AReceiver<SwarmName>,
     pub_key_pem: String,
 ) {
     let mut magic_ports = MagicPorts::new();
@@ -70,7 +70,7 @@ pub async fn holepunch(
         if recv_result.is_err() {
             let err = recv_result.err().unwrap();
             match err {
-                TryRecvError::Disconnected => break,
+                smol::channel::TryRecvError::Closed => break,
                 _ => {
                     // sleep(sleep_duration).await;
                     Timer::after(sleep_duration).await;
@@ -121,9 +121,9 @@ async fn holepunch_probe_ok(puncher: SocketAddr) -> bool {
 async fn holepunch_task(
     // host_ip: IpAddr,
     puncher: SocketAddr,
-    sub_sender: Sender<Subscription>,
+    sub_sender: ASender<Subscription>,
     decrypter: Decrypter,
-    _pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
+    _pipes_sender: ASender<(ASender<Token>, AReceiver<Token>)>,
     pub_key_pem: String,
     swarm_name: SwarmName,
     mut bind_port: u16,
@@ -574,7 +574,7 @@ async fn try_communicate(socket: &UdpSocket, remote_addr: SocketAddr) -> Result<
 async fn probe_socket(
     socket: UdpSocket,
     remote_addr: (IpAddr, u16),
-    sender: Sender<(UdpSocket, Option<SocketAddr>)>,
+    sender: ASender<(UdpSocket, Option<SocketAddr>)>,
 ) {
     // println!("running probe socket");
     let sleep_time = Duration::from_millis(100);
@@ -639,9 +639,11 @@ async fn probe_socket(
     //     };
     // }
     if socket_found {
-        let _ = sender.send((socket, Some(SocketAddr::new(remote_addr.0, remote_addr.1))));
+        let _ = sender
+            .send((socket, Some(SocketAddr::new(remote_addr.0, remote_addr.1))))
+            .await;
     } else {
-        let _ = sender.send((socket, None));
+        let _ = sender.send((socket, None)).await;
         // drop(socket);
     }
 }
@@ -681,7 +683,7 @@ pub async fn punch_it(
         "Punching: {:?}:{:?}",
         other_settings.pub_ip, other_settings.pub_port
     );
-    let (sender, reciever) = channel();
+    let (sender, reciever) = unbounded();
     spawn(probe_socket(socket, remote_adr, sender.clone())).detach();
     let mut dedicated_socket: Option<UdpSocket> = None;
     let mut responsive_socket_result;
@@ -760,7 +762,7 @@ pub async fn cluster_punch_it(
     );
     let mut next_remote_port: HashMap<u16, u16> = HashMap::new();
     let mut his_current = his_port_min;
-    let (send, recv) = channel();
+    let (send, recv) = unbounded();
     for i in 0..my_count {
         if let Ok(a_socket) = UdpSocket::bind((my_ip, my_port_min + i)).await {
             spawn(probe_socket(a_socket, (his_ip, his_current), send.clone())).detach();
@@ -779,7 +781,7 @@ pub async fn cluster_punch_it(
     // we repeat until timeout if given
     let sleep_duration = Duration::from_millis(50);
     let mut dedicated_socket = None;
-    let (t_send, timeout) = channel();
+    let (t_send, timeout) = unbounded();
     spawn(time_out(timeout_sec, Some(t_send))).detach();
     while timeout.try_recv().is_err() {
         let recv_result = recv.try_recv();
@@ -820,7 +822,7 @@ pub async fn start_communication(
     pub_key_pem: String,
     decrypter: Decrypter,
     // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
-    sub_sender: Sender<Subscription>,
+    sub_sender: ASender<Subscription>,
 ) {
     // TODO: above is just one of possible procedures used for holepunching
     // below we need to wrap it into an async fn and call it when
@@ -994,13 +996,15 @@ pub async fn start_communication(
         my_pub_ip, my_pub_port, my_nat
     );
     eprintln!("Distribute from holepunch");
-    let _ = sub_sender.send(Subscription::Distribute(
-        my_pub_ip,
-        my_pub_port,
-        my_nat,
-        (PortAllocationRule::Random, 0),
-        Transport::Udp,
-    ));
+    let _ = sub_sender
+        .send(Subscription::Distribute(
+            my_pub_ip,
+            my_pub_port,
+            my_nat,
+            (PortAllocationRule::Random, 0),
+            Transport::Udp,
+        ))
+        .await;
     // println!("My external addr: {}", my_ext_addr_res.unwrap());
     // }
     // let swarm_names = vec![swarm_name];

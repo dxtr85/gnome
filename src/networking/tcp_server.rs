@@ -3,6 +3,7 @@ use super::tcp_common::serve_socket;
 use crate::crypto::Encrypter;
 use crate::crypto::{generate_symmetric_key, SessionKey};
 use crate::networking::common::collect_subscribed_swarm_names;
+use smol::channel::{unbounded, Sender as ASender};
 // use crate::networking::common::collect_subscribed_swarm_names;
 use crate::networking::common::create_a_neighbor_for_each_swarm;
 use crate::networking::common::distil_common_names;
@@ -13,6 +14,7 @@ use crate::networking::tcp_common::send_subscribed_swarm_names;
 // use async_std::stream::StreamExt;
 // use async_std::task::spawn;
 use futures::AsyncWriteExt;
+use smol::channel::Receiver as AReceiver;
 use smol::io::AsyncReadExt as ReadExt;
 use smol::net::{TcpListener, TcpStream};
 use smol::stream::StreamExt;
@@ -21,7 +23,6 @@ use std::net::IpAddr;
 // use std::net::SocketAddr;
 use a_swarm_consensus::GnomeId;
 use a_swarm_consensus::SwarmName;
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
@@ -29,8 +30,8 @@ use std::time::Duration;
 pub async fn run_tcp_server(
     executor: Arc<Executor<'_>>,
     listener: TcpListener,
-    sub_sender: Sender<Subscription>,
-    mut sub_receiver: Receiver<Subscription>,
+    sub_sender: ASender<Subscription>,
+    mut sub_receiver: AReceiver<Subscription>,
     // token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     pub_key_pem: String,
     // swarm_names: Vec<SwarmName>,
@@ -76,7 +77,7 @@ async fn serve_dedicated_connection(
     executor: Arc<Executor<'_>>,
     stream: TcpStream,
     pub_key_pem: String,
-    sub_sender: Sender<Subscription>,
+    sub_sender: ASender<Subscription>,
     // mut sub_receiver: Receiver<Subscription>,
     // token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,
@@ -263,7 +264,7 @@ async fn prepare_and_serve(
     my_id: GnomeId,
     remote_gnome_id: GnomeId,
     session_key: SessionKey,
-    sub_sender: Sender<Subscription>,
+    sub_sender: ASender<Subscription>,
     swarm_names: Vec<SwarmName>,
     // token_pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     // encrypter: Encrypter,
@@ -285,7 +286,7 @@ async fn prepare_and_serve(
     );
 
     eprintln!("TCPS Common names: {:?}", common_names);
-    let (shared_sender, swarm_extend_receiver) = channel();
+    let (shared_sender, swarm_extend_receiver) = unbounded();
     let mut ch_pairs = vec![];
     create_a_neighbor_for_each_swarm(
         common_names,
@@ -296,7 +297,8 @@ async fn prepare_and_serve(
         shared_sender.clone(),
         // encrypter,
         pub_key_pem,
-    );
+    )
+    .await;
 
     // let (token_send, token_recv) = channel();
     // let (token_send_two, token_recv_two) = channel();

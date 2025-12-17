@@ -1,5 +1,7 @@
 use super::common::swarm_names_from_bytes;
 use super::tcp_common::serve_socket;
+use smol::channel::unbounded;
+use smol::channel::Sender as ASender;
 // use super::Token;
 use crate::crypto::Decrypter;
 use crate::crypto::Encrypter;
@@ -34,7 +36,6 @@ use smol::Timer;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
-use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -42,7 +43,7 @@ pub async fn run_tcp_client(
     executor: Arc<Executor<'_>>,
     my_id: GnomeId,
     swarm_names: Vec<SwarmName>,
-    sender: Sender<Subscription>,
+    sender: ASender<Subscription>,
     decrypter: Decrypter,
     // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     pub_key_pem: String,
@@ -87,7 +88,7 @@ pub async fn run_tcp_client(
     }
 
     let timeout_sec = Duration::from_secs(5);
-    let (t_send, _timeout) = channel();
+    let (t_send, _timeout) = unbounded();
     executor.spawn(time_out(timeout_sec, Some(t_send))).detach();
     // while timeout.try_recv().is_err() {
     if swarm_names.is_empty() {
@@ -136,7 +137,7 @@ async fn establish_secure_connection(
     executor: Arc<Executor<'_>>,
     my_id: GnomeId,
     mut stream: TcpStream,
-    sender: Sender<Subscription>,
+    sender: ASender<Subscription>,
     decrypter: Decrypter,
     // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     swarm_names: Vec<SwarmName>,
@@ -286,13 +287,15 @@ async fn establish_secure_connection(
                     }
                     if let Some(settings) = own_nsettings {
                         eprintln!("Distribute from tcp_client");
-                        let _ = sender.send(Subscription::Distribute(
-                            settings.pub_ip,
-                            settings.pub_port,
-                            settings.nat_type,
-                            settings.port_allocation,
-                            Transport::Tcp,
-                        ));
+                        let _ = sender
+                            .send(Subscription::Distribute(
+                                settings.pub_ip,
+                                settings.pub_port,
+                                settings.nat_type,
+                                settings.port_allocation,
+                                Transport::Tcp,
+                            ))
+                            .await;
                     }
                 }
             } else {
@@ -332,7 +335,7 @@ pub async fn prepare_and_serve(
     // remote_gnome_id: GnomeId,
     session_key: SessionKey,
     swarm_names: Vec<SwarmName>,
-    sender: Sender<Subscription>,
+    sender: ASender<Subscription>,
     // pipes_sender: Sender<(Sender<Token>, Receiver<Token>)>,
     // encrypter: Encrypter,
     pub_key_pem: String,
@@ -369,7 +372,7 @@ pub async fn prepare_and_serve(
         return;
     }
     // eprintln!("TCP Common swarm names: {:?}", common_names);
-    let (shared_sender, swarm_extend_receiver) = channel();
+    let (shared_sender, swarm_extend_receiver) = unbounded();
 
     let mut ch_pairs = vec![];
     create_a_neighbor_for_each_swarm(
@@ -380,7 +383,8 @@ pub async fn prepare_and_serve(
         &mut ch_pairs,
         shared_sender.clone(),
         pub_key_pem,
-    );
+    )
+    .await;
 
     // spawn a task to serve socket
     // let (token_send, token_recv) = channel();
