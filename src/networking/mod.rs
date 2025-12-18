@@ -65,8 +65,9 @@ pub struct NotificationBundle {
 // }
 // impl Error for ConnError {}
 
-pub async fn run_networking_tasks(
-    executor: Arc<Executor<'_>>,
+pub async fn run_networking_tasks<'a>(
+    executor: Arc<Executor<'a>>,
+    io_executor: Arc<Executor<'a>>,
     to_gmgr: Sender<ToGnomeManager>,
     server_port: u16,
     // buffer_size_bytes: u64,
@@ -145,9 +146,11 @@ pub async fn run_networking_tasks(
     .await;
     eprintln!("received swarm names len: {}", swarm_names.len());
     let c_ex = executor.clone();
-    executor
+    let c_io = io_executor.clone();
+    io_executor
         .spawn(run_client(
             c_ex,
+            c_io,
             swarm_names,
             sub_send_two.clone(),
             decrypter.clone(),
@@ -164,9 +167,11 @@ pub async fn run_networking_tasks(
         //     collect_subscribed_swarm_names(&mut my_names, sub_send_two.clone(), sub_recv_one).await;
         eprintln!("Run TCP server with swarm names: ");
         let c_ex = executor.clone();
+        let c_io = io_executor.clone();
         executor
             .spawn(run_tcp_server(
                 c_ex,
+                c_io,
                 listener,
                 sub_send_two.clone(),
                 sub_recv_one_bis,
@@ -195,9 +200,11 @@ pub async fn run_networking_tasks(
     if let Ok(socket) = bind_result {
         eprintln!("HAVE bind result OK");
         let c_ex = executor.clone();
-        executor
+        let c_io = io_executor.clone();
+        io_executor
             .spawn(run_server(
                 c_ex,
+                c_io,
                 socket,
                 sub_send_two.clone(),
                 sub_recv_one,
@@ -227,9 +234,11 @@ pub async fn run_networking_tasks(
         //     collect_subscribed_swarm_names(&mut my_names, sub_send_two.clone(), sub_recv_one).await;
         eprintln!("Run TCP server with swarm names:2");
         let c_ex = executor.clone();
+        let c_io = io_executor.clone();
         executor
             .spawn(run_tcp_server(
                 c_ex,
+                c_io,
                 listener,
                 sub_send_two.clone(),
                 sub_recv_one_cis,
@@ -259,9 +268,11 @@ pub async fn run_networking_tasks(
     if let Ok(socket) = ipv6_bind_result {
         eprintln!("HEVE bind resuls6: OK");
         let c_ex = executor.clone();
-        let _r = executor
+        let c_io = io_executor.clone();
+        let _r = io_executor
             .spawn(run_server(
                 c_ex,
+                c_io,
                 socket,
                 sub_send_two.clone(),
                 sub_recv_one_dis,
@@ -312,10 +323,13 @@ pub async fn run_networking_tasks(
     // Both of those services need a sophisticated procedure for connection establishment.
     // eprintln!("spwaning dps");
     let c_ex = executor.clone();
+    let c_io = io_executor.clone();
     eprintln!("About to call direct_punching_service");
+    // Service can run on regular executor, but inside we need to use io_executor
     executor
         .spawn(direct_punching_service(
             c_ex,
+            c_io,
             to_gmgr.clone(),
             server_port,
             sub_send_two.clone(),

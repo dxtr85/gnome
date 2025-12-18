@@ -22,8 +22,9 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-pub async fn run_server(
-    executor: Arc<Executor<'_>>,
+pub async fn run_server<'a>(
+    executor: Arc<Executor<'a>>,
+    io_executor: Arc<Executor<'a>>,
     mut socket: UdpSocket,
     sub_sender: ASender<Subscription>,
     mut sub_receiver: AReceiver<Subscription>,
@@ -123,7 +124,7 @@ pub async fn run_server(
         .await;
 
         // swarm_names.sort();
-        executor
+        io_executor
             .spawn(prepare_and_serve(
                 dedicated_socket,
                 gnome_id,

@@ -23,8 +23,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::Duration;
 
-pub async fn direct_punching_service(
-    executor: Arc<Executor<'_>>,
+pub async fn direct_punching_service<'a>(
+    executor: Arc<Executor<'a>>,
+    io_executor: Arc<Executor<'a>>,
     to_gmgr: ASender<ToGnomeManager>,
     _server_port: u16,
     subscription_sender: ASender<Subscription>,
@@ -68,9 +69,11 @@ pub async fn direct_punching_service(
     let (send_other_network_settings, recv_other_network_settings) = unbounded();
     let (send_my_network_settings, recv_my_network_settings) = unbounded();
     // TODO: maybe only run it when it makes sense?
-    executor
+    let c_ex = executor.clone();
+    io_executor
         .spawn(socket_maintainer(
-            executor.clone(),
+            c_ex,
+            io_executor.clone(),
             to_gmgr.clone(),
             pub_key_pem.clone(),
             // gnome_id,
@@ -153,8 +156,9 @@ pub async fn direct_punching_service(
 /// This function runs in background awaiting for any Neighbor's NetworkSettings
 /// Once it receives a NetworkSettings struct, it tries to open a communication
 /// channel with that Neighbor and spawns a new socket for any new incoming NetworkSettings
-async fn socket_maintainer(
-    executor: Arc<Executor<'_>>,
+async fn socket_maintainer<'a>(
+    executor: Arc<Executor<'a>>,
+    io_executor: Arc<Executor<'a>>,
     _to_gmgr: ASender<ToGnomeManager>,
     pub_key_pem: String,
     // gnome_id: GnomeId,
@@ -256,9 +260,11 @@ async fn socket_maintainer(
                             // };
                             // let _ = my_network_settings_sender.send(my_ipv6_settings);
                             let c_ex = executor.clone();
-                            executor
+                            let c_io = io_executor.clone();
+                            io_executor
                                 .spawn(punch_and_communicate(
                                     c_ex,
+                                    c_io,
                                     socket,
                                     bind_addr,
                                     pub_key_pem.clone(),
@@ -328,10 +334,12 @@ async fn socket_maintainer(
                             // };
                             // let _ = my_network_settings_sender.send(my_ipv6_settings);
                             let c_ex = executor.clone();
+                            let c_io = io_executor.clone();
 
-                            executor
+                            io_executor
                                 .spawn(punch_and_communicate(
                                     c_ex,
+                                    c_io,
                                     socket,
                                     bind_addr,
                                     pub_key_pem.clone(),
@@ -364,8 +372,10 @@ async fn socket_maintainer(
                             other_settings.pub_port //+ i
                         );
                         let c_ex = executor.clone();
+                        let c_io = io_executor.clone();
                         run_tcp_client(
                             c_ex,
+                            c_io,
                             my_id,
                             swarm_names.clone(),
                             subscription_sender.clone(),
@@ -382,9 +392,11 @@ async fn socket_maintainer(
                 } else if other_settings.transport == GTransport::UDPoverIP4 {
                     let _ = my_network_settings_sender.send(my_settings).await;
                     let c_ex = executor.clone();
-                    executor
+                    let c_io = io_executor.clone();
+                    io_executor
                         .spawn(punch_and_communicate(
                             c_ex,
+                            c_io,
                             socket,
                             bind_addr,
                             pub_key_pem.clone(),
@@ -410,8 +422,10 @@ async fn socket_maintainer(
                         other_settings.pub_port //+ i
                     );
                     let c_ex = executor.clone();
+                    let c_io = io_executor.clone();
                     run_tcp_client(
                         c_ex,
+                        c_io,
                         my_id,
                         swarm_names.clone(),
                         subscription_sender.clone(),
@@ -458,8 +472,9 @@ async fn update_my_pub_addr(
     my_settings
 }
 
-async fn punch_and_communicate(
-    executor: Arc<Executor<'_>>,
+async fn punch_and_communicate<'a>(
+    executor: Arc<Executor<'a>>,
+    io_executor: Arc<Executor<'a>>,
     socket: UdpSocket,
     bind_addr: (IpAddr, u16),
     pub_key_pem: String,
@@ -474,6 +489,7 @@ async fn punch_and_communicate(
         // eprintln!("DP Case 0 - there is no NAT for {:?}", other_settings);
         run_client(
             executor.clone(),
+            io_executor.clone(),
             swarm_names.clone(),
             sub_sender,
             decrypter,

@@ -27,8 +27,9 @@ use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
 
-pub async fn run_tcp_server(
-    executor: Arc<Executor<'_>>,
+pub async fn run_tcp_server<'a>(
+    _executor: Arc<Executor<'a>>,
+    io_executor: Arc<Executor<'a>>,
     listener: TcpListener,
     sub_sender: ASender<Subscription>,
     mut sub_receiver: AReceiver<Subscription>,
@@ -58,10 +59,10 @@ pub async fn run_tcp_server(
             )
             .await;
             // eprintln!("TCP server swarm_names: {:?}", swarm_names);
-            let c_ex = executor.clone();
-            executor
+            let c_io = io_executor.clone();
+            io_executor
                 .spawn(serve_dedicated_connection(
-                    c_ex,
+                    c_io,
                     stream,
                     pub_key_pem.clone(),
                     sub_sender.clone(),

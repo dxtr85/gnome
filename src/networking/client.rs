@@ -33,8 +33,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub async fn run_client(
-    executor: Arc<Executor<'_>>,
+pub async fn run_client<'a>(
+    executor: Arc<Executor<'a>>,
+    io_executor: Arc<Executor<'a>>,
     swarm_names: Vec<SwarmName>,
     sender: ASender<Subscription>,
     decrypter: Decrypter,
@@ -120,7 +121,7 @@ pub async fn run_client(
             // Only when STUN timeout we should assume UDP is blocked
             // and only use TCP
             (success, my_pub_addr) = establish_secure_connection(
-                executor.clone(),
+                io_executor.clone(),
                 my_id,
                 &socket,
                 sender.clone(),
@@ -195,9 +196,11 @@ pub async fn run_client(
     }
     if let Some(addr) = tcp_addr {
         let c_ex = executor.clone();
+        let c_io = io_executor.clone();
         eprintln!("Trying to communicate over TCP…");
         run_tcp_client(
             c_ex,
+            c_io,
             my_id,
             swarm_names,
             sender,

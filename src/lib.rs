@@ -62,8 +62,9 @@ pub mod prelude {
     pub use a_swarm_consensus::ToGnome;
 }
 
-pub async fn init(
-    executor: Arc<Executor<'_>>,
+pub async fn init<'a>(
+    executor: Arc<Executor<'a>>,
+    io_executor: Arc<Executor<'a>>,
     work_dir: PathBuf,
     neighbor_settings: Option<Vec<(GnomeId, NetworkSettings)>>,
     default_bandwidth_per_swarm: u64,
@@ -213,9 +214,11 @@ pub async fn init(
     //     }
     // };
     let c_ex = executor.clone();
-    executor
+    let c_io = io_executor.clone();
+    io_executor
         .spawn(run_networking_tasks(
             c_ex,
+            c_io,
             gmgr.get_sender(),
             // server_ip,
             // broadcast_ip,

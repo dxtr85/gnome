@@ -39,8 +39,9 @@ use std::net::Ipv6Addr;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub async fn run_tcp_client(
-    executor: Arc<Executor<'_>>,
+pub async fn run_tcp_client<'a>(
+    executor: Arc<Executor<'a>>,
+    io_executor: Arc<Executor<'a>>,
     my_id: GnomeId,
     swarm_names: Vec<SwarmName>,
     sender: ASender<Subscription>,
