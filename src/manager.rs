@@ -1480,25 +1480,31 @@ impl Manager {
             } else {
                 vec![]
             };
-            let (sender, receiver) = Swarm::join(
-                executor,
-                name.clone(),
-                // app_sync_hash,
-                swarm_id,
-                self.gnome_id,
-                self.pub_key_der.clone(),
-                self.priv_key_pem.clone(),
-                neighbors,
-                mgr_sender,
-                recv,
-                // band_recv,
-                net_settings_send,
-                // self.network_settings,
-                assigned_bandwidth,
-                verify,
-                sign,
-                sha_hash,
-            );
+            let (s, r) = smol::channel::bounded(1);
+            executor
+                .spawn(
+                    Swarm::join(
+                        s,
+                        name.clone(),
+                        // app_sync_hash,
+                        swarm_id,
+                        self.gnome_id,
+                        self.pub_key_der.clone(),
+                        self.priv_key_pem.clone(),
+                        neighbors,
+                        mgr_sender,
+                        recv,
+                        // band_recv,
+                        net_settings_send,
+                        // self.network_settings,
+                        assigned_bandwidth,
+                        verify,
+                        sign,
+                        sha_hash,
+                    ), // .await
+                )
+                .detach();
+            let (sender, receiver) = r.recv().await.unwrap();
             // println!("swarm '{}' created ", name);
             // let sender = swarm.sender.clone();
             // let receiver = swarm.receiver.take();
