@@ -70,6 +70,7 @@ pub async fn run_networking_tasks<'a>(
     io_executor: Arc<Executor<'a>>,
     to_gmgr: Sender<ToGnomeManager>,
     server_port: u16,
+    server_port_ipv6: u16,
     // buffer_size_bytes: u64,
     // uplink_bandwith_bytes_sec: u64,
     notification_receiver: AReceiver<Notification>,
@@ -79,7 +80,7 @@ pub async fn run_networking_tasks<'a>(
     eprintln!("In run_networking_tasks");
     let server_addr: SocketAddr = SocketAddr::new("0.0.0.0".parse().unwrap(), server_port);
     let ipv6_server_addr: SocketAddr =
-        SocketAddr::new("0:0:0:0:0:0:0:0".parse().unwrap(), server_port + 1);
+        SocketAddr::new("0:0:0:0:0:0:0:0".parse().unwrap(), server_port_ipv6);
     let bind_result = UdpSocket::bind(server_addr).await;
     let ipv6_bind_result = UdpSocket::bind(ipv6_server_addr).await;
     let tcp_bind_result = TcpListener::bind(server_addr).await;

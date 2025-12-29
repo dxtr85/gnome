@@ -68,6 +68,8 @@ pub async fn init<'a>(
     work_dir: PathBuf,
     neighbor_settings: Option<Vec<(GnomeId, NetworkSettings)>>,
     default_bandwidth_per_swarm: u64,
+    port: Option<u16>,
+    port_ipv6: Option<u16>,
 ) -> (
     ASender<ToGnomeManager>,
     AReceiver<FromGnomeManager>,
@@ -204,7 +206,16 @@ pub async fn init<'a>(
         eprintln!("Joined `any /` swarm");
     }
 
-    let server_port: u16 = my_name.founder.get_port();
+    let server_port: u16 = if let Some(port) = port {
+        port
+    } else {
+        my_name.founder.get_port()
+    };
+    let server_port_ipv6: u16 = if let Some(port) = port_ipv6 {
+        port
+    } else {
+        my_name.founder.get_port() + 1
+    };
     //     {
     //     let modulo = (my_name.founder.0 % (u16::MAX as u64)) as u16;
     //     if modulo >= 1024 {
@@ -223,6 +234,7 @@ pub async fn init<'a>(
             // server_ip,
             // broadcast_ip,
             server_port,
+            server_port_ipv6,
             // nic_buffer_size,
             // upload_bytes_per_sec,
             networking_receiver,

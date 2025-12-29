@@ -32,8 +32,8 @@ pub async fn run_server<'a>(
     pub_key_pem: String,
 ) {
     eprintln!("--------------------------------------");
-    eprintln!("- - - - - - - - SERVER - - - - - - - -");
-    eprintln!("- Listens on: {:?}   -", socket.local_addr().unwrap());
+    eprintln!("- - - - - - UDP SERVER - - - - - - - -");
+    eprintln!("- UListens on: {:?}  -", socket.local_addr().unwrap());
     eprintln!("--------------------------------------");
     // println!("My Pubkey PEM:\n {:?}", pub_key_pem);
     let loc_encr = Encrypter::create_from_data(&pub_key_pem).unwrap();

@@ -485,7 +485,7 @@ async fn punch_and_communicate<'a>(
     swarm_names: Vec<SwarmName>,
     (my_settings, other_settings): (NetworkSettings, NetworkSettings),
 ) {
-    if other_settings.no_nat() {
+    if other_settings.no_nat() || other_settings.nat_unknown() {
         // eprintln!("DP Case 0 - there is no NAT for {:?}", other_settings);
         run_client(
             executor.clone(),
